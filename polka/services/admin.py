@@ -104,9 +104,9 @@ async def export_zip(session: AsyncSession, run: Run) -> bytes:
     rets = list(await session.scalars(select(Retelling).where(Retelling.enrollment_id.in_(ids)).order_by(Retelling.id)))
     enr_by_id = {e.id: e for e in enrs}
     write("retellings.csv",
-          ["retelling_id", "user_id", "user_day", "source", "via", "length", "verdict", "verified", "confidence",
+          ["retelling_id", "user_id", "user_day", "source", "via", "verdict", "verified", "confidence",
            "attempt_no", "clarify_count", "provider", "overridden", "created_at"],
-          [[r.id, enr_by_id[r.enrollment_id].user_id, r.user_day, r.source, r.via, len(r.raw_text or ""), r.verdict,
+          [[r.id, enr_by_id[r.enrollment_id].user_id, r.user_day, r.source, r.via, r.verdict,
             r.verified, r.confidence, r.attempt_no, r.clarify_count, r.provider, r.overridden, r.created_at]
            for r in rets])
     drs = list(await session.scalars(select(DayResult).where(DayResult.enrollment_id.in_(ids)).order_by(DayResult.user_day)))

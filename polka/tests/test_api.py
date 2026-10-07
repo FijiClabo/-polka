@@ -140,26 +140,14 @@ async def test_privacy_rules(client):
     body = json.dumps(r.json(), ensure_ascii=False)
     assert "уехал из города" not in body
     assert "retelling" not in body.lower()
-    # конспект чужой книги недоступен
-    async with session_scope() as s:
-        from db.models import Enrollment
-
-        a_book = (await s.get(Enrollment, (await s.get(User, ids["A"])).id)).book_id
-    r = await client.get(f"/api/shelf/{a_book}", headers=H(tc))
-    assert r.status_code == 404
-    r = await client.get(f"/api/shelf/{a_book}", headers=H(tb))
-    assert r.status_code == 404
     # не друзья — карточка не отдаётся
     r = await client.get(f"/api/friends/{ids['C']}", headers=H(tb))
     assert r.status_code == 404
 
-    # напарник: та же книга → видит пересказ A за день 1, но не за день 2 (сам сдал только день 1)
+    # напарник видит только прогресс — тексты пересказов не хранятся и не отдаются никому
     r = await client.get("/api/pair", headers=H(tb))
-    assert r.status_code == 200
-    feed = r.json()["feed"]
-    assert r.json()["same_book"] is True
-    assert feed[0]["locked"] is False and "уехал" in feed[0]["text"]
-    assert feed[1]["locked"] is True and feed[1]["text"] is None
+    assert r.status_code == 200 and "feed" not in r.json()
+    assert "уехал" not in json.dumps(r.json(), ensure_ascii=False)
 
 
 async def test_retell_via_api(client):
@@ -201,22 +189,41 @@ async def test_paper_book_and_plan_options(client):
     assert r.status_code == 200 and r.json()["awaiting_payment"] is True
 
 
-class _InvoiceBot:
-    def __init__(self):
-        self.links: list[dict] = []
+class _FakeYooKassa:
+    """Подменяет API ЮKassa: платёж создаётся «на бумаге», статус меняем вручную."""
 
-    async def create_invoice_link(self, **kw):
-        self.links.append(kw)
-        return "https://t.me/$invoice-test"
+    def __init__(self, monkeypatch):
+        from services import payments
+
+        self.payments: dict[str, dict] = {}
+
+        async def create_payment(p, return_url):
+            pid = f"0000{len(self.payments) + 1:04d}-aaaa-bbbb"
+            p.provider_charge_id = pid
+            self.payments[pid] = {"id": pid, "status": "pending",
+                                  "amount": {"value": f"{p.amount / 100:.2f}", "currency": "RUB"}}
+            return f"https://yoomoney.ru/checkout/{pid}"
+
+        async def fetch_payment(pid):
+            return self.payments.get(pid)
+
+        monkeypatch.setattr(payments, "create_payment", create_payment)
+        monkeypatch.setattr(payments, "fetch_payment", fetch_payment)
 
 
-async def test_billing_api_paywall_promo_invoice(client):
-    from api.routes import set_bot
+async def test_billing_api_pay_button(client, monkeypatch):
     from db.models import PromoCode
+    from settings import get_settings
 
+    monkeypatch.setenv("YOOKASSA_SHOP_ID", "1")
+    monkeypatch.setenv("YOOKASSA_SECRET_KEY", "x")
+    get_settings.cache_clear()
+    yk = _FakeYooKassa(monkeypatch)
     set_now(clock.real_now().date(), 10)
     h = H(888, "Покупатель")
     await client.get("/api/me", headers=h)
+    r = await client.post("/api/billing/pay", json={"product": "run"}, headers=h)
+    assert r.status_code == 403  # без согласия на обработку данных — нельзя
     await client.post("/api/consent", headers=h)
     r = await client.post("/api/book/paper", json={"title": "Идиот", "author": "Достоевский", "pages": 640}, headers=h)
     assert r.status_code == 200
@@ -226,8 +233,8 @@ async def test_billing_api_paywall_promo_invoice(client):
     assert (await client.get("/api/today", headers=h)).json()["state"] == "awaiting_payment"
 
     b = (await client.get("/api/billing", headers=h)).json()
-    assert b["needs_access"] is True and b["plan_days"] == days and b["book"]["title"] == "Идиот"
-    assert b["methods"]["stars"] is True and b["prices"]["run"]["stars"] > 0
+    assert b["enabled"] is True and b["needs_access"] is True and b["plan_days"] == days
+    assert b["prices"]["run"]["rub"] == get_settings().price_run_rub and "stars" not in b["prices"]["run"]
 
     r = await client.post("/api/billing/promo", json={"code": "nope"}, headers=h)
     assert r.status_code == 404
@@ -236,22 +243,22 @@ async def test_billing_api_paywall_promo_invoice(client):
     b = (await client.post("/api/billing/promo", json={"code": "read30"}, headers=h)).json()
     assert b["promo"] == "READ30" and b["prices"]["run"]["discount"] == 30
 
-    fake = _InvoiceBot()
-    set_bot(fake)
-    try:
-        r = await client.post("/api/billing/invoice", json={"product": "run", "method": "stars"}, headers=h)
-        assert r.status_code == 200 and r.json()["url"].startswith("https://t.me/")
-        assert fake.links[-1]["currency"] == "XTR" and fake.links[-1]["prices"][0].amount == b["prices"]["run"]["stars"]
-        r = await client.post("/api/billing/invoice", json={"product": "run", "method": "card"}, headers=h)
-        assert r.status_code == 400  # ЮKassa не подключена
-        r = await client.post("/api/billing/invoice", json={"product": "boat", "method": "stars"}, headers=h)
-        assert r.status_code == 422
-    finally:
-        set_bot(None)
+    r = await client.post("/api/billing/pay", json={"product": "run"}, headers=h)
+    assert r.status_code == 200 and r.json()["url"].startswith("https://yoomoney.ru/")
+    order = r.json()["order"]
+    assert (await client.get(f"/api/billing/order/{order}", headers=h)).json()["status"] == "pending"
+    assert (await client.get(f"/api/billing/order/{order}", headers=H(889, "Чужой"))).status_code == 404
+    pid = next(iter(yk.payments))
+    yk.payments[pid]["status"] = "succeeded"
+    st = (await client.get(f"/api/billing/order/{order}", headers=h)).json()
+    assert st["status"] == "paid" and st["needs_access"] is False
+    assert (await client.get("/api/today", headers=h)).json()["state"] in ("to_read", "not_started")
+    assert (await client.post("/api/billing/pay", json={"product": "boat"}, headers=h)).status_code == 422
 
     # чужой не видит ни покупок, ни промокода
     other = (await client.get("/api/billing", headers=H(889, "Другой"))).json()
     assert other["promo"] is None and other["purchases"] == []
+    get_settings.cache_clear()
 
 
 async def test_public_pages(client):

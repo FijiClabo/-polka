@@ -141,13 +141,8 @@ async def check_stt(s) -> None:
 
 
 async def check_payments(s) -> None:
-    if s.payments_stars:
-        say(OK, "Оплата звёздами в Telegram включена")
-    if s.payments_rub_in_bot:
-        say(WARN, "PAYMENTS_RUB_IN_BOT=true: рубли прямо в боте нарушают правила Telegram для цифровых услуг",
-            "Бота могут скрыть или удалить. Рубли — через сайт (YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY)")
-    if not s.site_checkout:
-        say(WARN, "Оплата рублями на сайте не подключена",
+    if not s.payments_enabled:
+        say(WARN, "Оплата не подключена — вместо кнопки «Оплатить» бот покажет текст PAYMENT_INFO",
             "Договор с ЮKassa → YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY; уведомления на https://домен/pay/yookassa")
     else:
         async with httpx.AsyncClient(timeout=15) as c:
@@ -157,22 +152,16 @@ async def check_payments(s) -> None:
                     me = r.json()
                     test = " (ТЕСТОВЫЙ магазин)" if me.get("test") else ""
                     say(OK, f"ЮKassa: магазин {me.get('account_id')}{test}, статус {me.get('status')}")
-                    if s.fiscal_receipts and not (me.get("fiscalization") or {}).get("enabled", me.get("fiscalization_enabled")):
-                        say(WARN, "В ЮKassa не включены чеки, а FISCAL_RECEIPTS=true",
-                            "Подключи «Чеки от ЮKassa» или поставь FISCAL_RECEIPTS=false (самозанятым — чек в «Мой налог»)")
                 else:
                     say(BAD, f"ЮKassa отвечает {r.status_code}", "Проверь shopId и секретный ключ")
             except httpx.HTTPError as e:
                 say(BAD, f"Нет связи с api.yookassa.ru: {e.__class__.__name__}", "Проверь сеть сервера")
         if not s.public_url.startswith("https://"):
-            say(BAD, "Для оплаты на сайте нужен PUBLIC_URL с https://", "ЮKassa возвращает покупателя на /pay/done")
+            say(BAD, "Для оплаты нужен PUBLIC_URL с https://", "После оплаты ЮKassa возвращает человека на /pay/done")
     missing = [k for k, v in (("SELLER_NAME", s.seller_name), ("SELLER_INN", s.seller_inn), ("SELLER_EMAIL", s.seller_email)) if not v]
     if missing:
-        say(BAD if s.site_checkout or s.payments_stars else WARN, f"Не заполнены реквизиты продавца: {', '.join(missing)}",
+        say(BAD if s.payments_enabled else WARN, f"Не заполнены реквизиты продавца: {', '.join(missing)}",
             "Они нужны в оферте, политике данных и подвале сайта")
-    if s.site_checkout and not s.smtp_enabled:
-        say(WARN, "Почта не настроена — код активации покупатель увидит только на странице после оплаты",
-            "Заполни SMTP_HOST, SMTP_FROM (и логин/пароль), чтобы код дублировался на e-mail")
 
 
 async def main() -> None:

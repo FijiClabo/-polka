@@ -37,8 +37,7 @@ ADMIN_HELP = """<b>Команды ведущего</b>
 /promo_new КОД 20 [лимит] [чей] — промокод со скидкой (100 — бесплатно)
 /promos — промокоды: сколько пришло, оплатило, выручка
 /sales — продажи, воронка, источники
-/refund_ok ID [сумма] — одобрить заявку на возврат (деньги уйдут автоматически)
-/refund_done ID — отметить ручной возврат по платежу
+/refund_done ID — отметить, что деньги по платежу вернули в кабинете ЮKassa (доступ закроется)
 /refund @user — возврат в групповом забеге
 /pair_set @a @b — назначить пару
 /pairs_auto — разбить половину оплативших без пары на пары
@@ -297,15 +296,10 @@ async def cmd_sales(message: Message, bot: Bot) -> None:
 
     def line(title: str, x: dict) -> str:
         prod = ", ".join(f"{k}: {v}" for k, v in x["by_product"].items()) or "—"
-        return f"{title}: {x['count']} оплат · {x['rub']:.0f} ₽ + {x['stars']} ⭐ ({prod})"
+        return f"{title}: {x['count']} оплат · {x['rub']:.0f} ₽ ({prod})"
 
-    try:
-        bal = await bot.get_my_star_balance()
-        balance = f"Баланс звёзд у бота: {bal.amount} ⭐ (держи запас под возвраты)"
-    except Exception:
-        balance = "Баланс звёзд: недоступен"
     text = ["<b>Продажи</b>", line("Сегодня", day), line("7 дней", week), line("Всего", total),
-            f"Возвратов: {total['refunds']} · кодов с сайта ждут активации: {total['not_activated']}", balance,
+            f"Возвратов: {total['refunds']}",
             "", "<b>Воронка</b>"]
     text += [f"{t}: {n}" for t, n in funnel]
     text += ["", "<b>Источники</b>"] + [f"{texts.e(src or 'без метки')}: {n}" for src, n in sources]
@@ -328,27 +322,8 @@ async def cmd_refund_done(message: Message, command: CommandObject, bot: Bot) ->
         await message.answer("Платёж не найден.")
         return
     if tg:
-        await bot.send_message(tg, texts.REFUND_OK)
+        await bot.send_message(tg, "Оплата отменена, доступ по ней закрыт. Вопросы — /paysupport.")
     await message.answer(f"Платёж #{arg} отмечен как возвращённый, доступ закрыт.")
-
-
-@router.message(Command("refund_ok"))
-async def cmd_refund_ok(message: Message, command: CommandObject, bot: Bot) -> None:
-    """Одобрить заявку на возврат: /refund_ok ID [сумма в рублях] — деньги уйдут через провайдера автоматически."""
-    if not await _guard(message):
-        return
-    parts = (command.args or "").split()
-    if not parts or not parts[0].isdigit() or (len(parts) > 1 and not parts[1].isdigit()):
-        await message.answer("Формат: /refund_ok ID [сумма в ₽]. Без суммы — полный возврат. Звёзды — только целиком.")
-        return
-    pid, amount = int(parts[0]), (int(parts[1]) if len(parts) > 1 else None)
-    async with session_scope() as s:
-        res = await billing.approve_refund(s, pid, bot, amount)
-        p = await s.get(Purchase, pid)
-        tg = (await s.get(User, p.user_id)).tg_id if p and p.user_id and res == "ok" else None
-    if tg:
-        await bot.send_message(tg, texts.REFUND_OK)
-    await message.answer(f"Платёж #{pid}: возврат оформлен, доступ закрыт." if res == "ok" else texts.e(res))
 
 
 @router.message(Command("refund"))
@@ -436,10 +411,9 @@ async def cmd_user(message: Message, command: CommandObject) -> None:
             select(Retelling, Segment.day_number).join(Segment, Segment.id == Retelling.segment_id, isouter=True)
             .where(Retelling.enrollment_id.in_([e.id for e in enrs] or [-1])).order_by(Retelling.id.desc()).limit(10)
         )
-        lines.append("\nПоследние пересказы:")
+        lines.append("\nПоследние пересказы (тексты не храним):")
         for r, dn in rows.all():
-            lines.append(f"#{r.id} · день {dn} · {r.verdict}{' (без сверки)' if not r.verified else ''} · "
-                         f"{texts.e((r.raw_text or '')[:80])}")
+            lines.append(f"#{r.id} · день {dn} · {r.verdict}{' (без сверки)' if not r.verified else ''}")
     await message.answer("\n".join(lines))
 
 

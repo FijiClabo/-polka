@@ -1,25 +1,20 @@
-"""Оплата в боте: тарифы, счета (ЮKassa и Telegram Stars), промокоды, гарантия возврата.
-
-Telegram требует от ботов с оплатой команды /terms и /paysupport — они здесь.
-"""
+"""Оплата в боте: тарифы и кнопка «Оплатить» (страница ЮKassa), промокоды, условия."""
 
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
 
 from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandObject
-from aiogram.fsm.context import FSMContext
-from aiogram.types import BotSubscriptionUpdated, CallbackQuery, LabeledPrice, Message, PreCheckoutQuery
+from aiogram.types import CallbackQuery, Message
 
 import texts
-from bot.common import Flow, load_user
-from bot.ui import flush, kb
+from bot.common import load_user
+from bot.ui import kb
 from db.models import Book, User
 from db.session import session_scope
-from services import billing
-from services.common import Outbox, OutMsg, log_event
+from services import billing, payments
+from services.common import log_event
 from services.progress import load_view
 from services.runs import current_enrollment, ensure_enrollment
 from settings import get_settings
@@ -42,14 +37,14 @@ async def send_paywall(bot: Bot, chat_id: int, user_id: int) -> None:
         prices = await billing.prices_for(ses, user)
         await log_event(ses, "paywall_shown", user.id, via="bot")
         plan_days = enr.plan_days if enr else None
-        guarantee = await billing.guarantee_available(ses, user)
-    if not s.payments_enabled and not prices["run"].free:
-        await bot.send_message(chat_id, texts.PAY_DISABLED + "\n\n" + texts.e(s.payment_info))
+        need_email = payments.needs_email(user)
+    free = [p for p in prices.values() if p.free and p.promo]
+    if not s.payments_enabled and not free:
+        await bot.send_message(chat_id, texts.paywall(book.title if book else None, plan_days, prices) + "\n\n"
+                               + texts.e(s.payment_info))
         return
-    text = texts.paywall(book.title if book else None, plan_days, prices, card=s.payments_yookassa, stars=s.payments_stars,
-                         guarantee_days=s.refund_days, guarantee=guarantee)
-    await bot.send_message(chat_id, text, reply_markup=kb(texts.paywall_buttons(prices, card=s.payments_yookassa,
-                                                                                stars=s.payments_stars)))
+    await bot.send_message(chat_id, texts.paywall(book.title if book else None, plan_days, prices),
+                           reply_markup=kb(texts.paywall_buttons(prices, in_chat=not need_email)))
 
 
 @router.message(Command("buy", "tariffs", "pay"))
@@ -60,139 +55,47 @@ async def cmd_buy(message: Message, bot: Bot) -> None:
     await send_paywall(bot, message.chat.id, uid)
 
 
-async def send_invoice(bot: Bot, chat_id: int, inv: billing.Invoice) -> None:
-    prices = [LabeledPrice(label=inv.title[:32], amount=inv.amount)]
-    if inv.subscription_period:
-        # подписку на Stars Telegram выставляет только ссылкой
-        link = await bot.create_invoice_link(
-            title=inv.title[:32], description=inv.description[:255], payload=inv.payload, currency=inv.currency,
-            prices=prices, provider_token=inv.provider_token or None, subscription_period=inv.subscription_period,
-        )
-        await bot.send_message(chat_id, "Оформить абонемент на месяц со звёздами:",
-                               reply_markup=kb([[{"text": f"Оплатить {inv.amount} ⭐", "url": link}]]))
-        return
-    await bot.send_invoice(
-        chat_id=chat_id, title=inv.title[:32], description=inv.description[:255], payload=inv.payload,
-        currency=inv.currency, prices=prices, provider_token=inv.provider_token or None,
-        need_email=inv.need_email or None, send_email_to_provider=inv.send_email_to_provider or None,
-        provider_data=inv.provider_data, start_parameter="buy",
-    )
-
-
 @router.callback_query(F.data.startswith("pay:"))
 async def cb_pay(call: CallbackQuery, bot: Bot) -> None:
+    """pay:<тариф> — ссылка на оплату в ЮKassa; pay:free:<тариф> — промокод на 100%."""
     from bot.handlers_start import consent_gate
 
-    _, product, method = call.data.split(":", 2)
+    await call.answer()
     if not await consent_gate(call.message, call.from_user):
-        await call.answer()
         return
-    outbox = Outbox()
-    if product == "free":
+    parts = call.data.split(":")
+    if len(parts) == 3 and parts[1] == "free":
         async with session_scope() as s:
             user, _ = await load_user(s, call.from_user)
-            p = await billing.apply_free_promo(s, user, method)
+            p = await billing.apply_free_promo(s, user, parts[2])
             uid = user.id
-        await call.answer()
         if p is None:
             await call.message.answer(texts.PROMO_BAD)
             return
         await after_payment_message(bot, call.message.chat.id, uid, p.product, bool(getattr(p, "activated_now", None)))
         return
-    async with session_scope() as s:
-        user, _ = await load_user(s, call.from_user)
-        free = None
-        try:
-            inv = await billing.build_invoice(s, user, product, method)
-        except ValueError as e:
-            inv = None
-            if str(e) == "free":  # промокод на 100% — сразу активируем, без счёта
-                free = await billing.apply_free_promo(s, user, product)
-        uid = user.id
-        await log_event(s, "invoice_opened", user.id, product=product, method=method, via="bot")
-    await call.answer()
-    if free is not None:
-        await after_payment_message(bot, call.message.chat.id, uid, free.product, bool(getattr(free, "activated_now", None)))
-        return
-    if inv is None:
-        await call.message.answer(texts.PAY_DISABLED)
-        return
+    product = parts[1] if len(parts) > 1 else "run"
     try:
-        await send_invoice(bot, call.message.chat.id, inv)
-    except Exception as e:
-        log.exception("invoice failed")
-        await call.message.answer(f"Не получилось выставить счёт: {texts.e(str(e)[:200])}. Попробуй позже или напиши /paysupport.")
-    await flush(bot, outbox)
-
-
-@router.pre_checkout_query()
-async def pre_checkout(query: PreCheckoutQuery, bot: Bot) -> None:
-    async with session_scope() as s:
-        err = await billing.check_pre_checkout(s, query.from_user.id, query.invoice_payload, query.currency,
-                                               query.total_amount)
-    if err:
-        await bot.answer_pre_checkout_query(query.id, ok=False, error_message=err)
-    else:
-        await bot.answer_pre_checkout_query(query.id, ok=True)
-
-
-@router.message(F.successful_payment)
-async def successful_payment(message: Message, bot: Bot) -> None:
-    sp = message.successful_payment
-    parsed = billing.parse_payload(sp.invoice_payload)
-    outbox = Outbox()
-    async with session_scope() as s:
-        user, _ = await load_user(s, message.from_user)
-        if parsed is None:
-            log.error("payment with unknown payload %s", sp.invoice_payload)
-            product, promo = "run", None
-        else:
-            product, _uid, promo = parsed
-        exp = None
-        if sp.subscription_expiration_date:
-            exp = datetime.fromtimestamp(sp.subscription_expiration_date, tz=UTC)
-        renewal = bool(sp.is_recurring) and not sp.is_first_recurring
-        if parsed is None or not await billing.payment_amount_ok(s, user, product, sp.currency, sp.total_amount, promo,
-                                                                  renewal):
-            log.error("payment check failed: payload=%s amount=%s %s user=%s", sp.invoice_payload, sp.total_amount,
-                      sp.currency, user.id)
-            for admin in get_settings().admin_ids:
-                outbox.add(OutMsg(admin, f"⚠️ Платёж не прошёл проверку суммы: user {user.id}, {sp.total_amount} {sp.currency}, "
-                                         f"payload {texts.e(sp.invoice_payload)}, charge {sp.telegram_payment_charge_id}. "
-                                         f"Проверь и при необходимости выдай доступ /grant.", kind="admin"))
-            await message.answer("Оплата получена, но сумма не совпала с тарифом — администратор проверит и откроет доступ. "
-                                 "Вопросы: /paysupport")
-            uid = None
-        else:
-            uid = user.id
-    if uid is None:
-        await flush(bot, outbox)
+        async with session_scope() as s:
+            user, _ = await load_user(s, call.from_user)
+            url, _order = await payments.start_payment(s, user, product)
+            price = (await billing.prices_for(s, user))[product]
+            await log_event(s, "payment_link", user.id, product=product, via="bot")
+    except payments.PaymentError as e:
+        await call.message.answer(texts.e(str(e)), reply_markup=kb([[{"text": "Оплатить в приложении", "webapp": "pay"}]]))
         return
-    async with session_scope() as s:
-        user, _ = await load_user(s, message.from_user)
-        p = await billing.record_payment(
-            s, user, product=product, provider="stars" if sp.currency == "XTR" else "yookassa", currency=sp.currency,
-            amount=sp.total_amount, telegram_charge_id=sp.telegram_payment_charge_id,
-            provider_charge_id=sp.provider_payment_charge_id or None, promo=promo,
-            is_recurring=bool(sp.is_recurring), renewal=renewal, subscription_expiration=exp,
-            email=sp.order_info.email if sp.order_info else None, outbox=outbox,
-        )
-    if sp.is_recurring and not sp.is_first_recurring:
-        await message.answer(texts.pay_ok_subscription(exp, True) if exp else "Абонемент продлён ✅")
-    else:
-        await after_payment_message(bot, message.chat.id, uid, product, bool(getattr(p, "activated_now", None)))
-    await flush(bot, outbox)
+    await call.message.answer(texts.pay_link(product), reply_markup=kb([[{"text": f"Оплатить {texts.rub(price.rub)}", "url": url}]]))
 
 
 async def after_payment_message(bot: Bot, chat_id: int, user_id: int, product: str, activated: bool = False) -> None:
-    """Что сказать после оплаты (звёзды, код, промокод, ручная выдача). activated — забег стартовал этой оплатой."""
+    """Что сказать после оплаты (ЮKassa, промокод, ручная выдача). activated — забег стартовал этой оплатой."""
     async with session_scope() as s:
         user = await s.get(User, user_id)
         enr = await current_enrollment(s, user.id)
         view = await load_view(s, user, enr)
-        until, recurring = user.subscription_until, user.subscription_recurring
+        until = user.subscription_until
     if product in ("month", "year") and until:
-        await bot.send_message(chat_id, texts.pay_ok_subscription(until, recurring))
+        await bot.send_message(chat_id, texts.pay_ok_subscription(until))
     book_buttons = kb([
         [{"text": "📖 У меня бумажная книга", "callback": "book:paper"}],
         [{"text": "Добавить книгу в приложении", "webapp": "book"}],
@@ -200,11 +103,10 @@ async def after_payment_message(bot: Bot, chat_id: int, user_id: int, product: s
     if activated and view.state in ("to_read", "clarify"):
         from bot.handlers_day import today_kb, today_text
 
-        await bot.send_message(chat_id, texts.pay_ok_started_today() if product == "run" else "Забег стартует сегодня 🔥")
+        await bot.send_message(chat_id, texts.pay_ok_started_today())
         await bot.send_message(chat_id, today_text(view), reply_markup=today_kb(view))
     elif activated and view.state == "not_started":
-        await bot.send_message(chat_id, texts.pay_ok_started(view.starts_on) if product == "run"
-                               else f"Забег открыт, старт — {texts.d(view.starts_on)}.")
+        await bot.send_message(chat_id, texts.pay_ok_started(view.starts_on))
     elif view.state in ("to_read", "clarify", "checking", "done_today", "not_started", "waiting_start"):
         # идёт другой забег (например, спринт) — покупка подождёт следующей книги
         if product == "run":
@@ -236,103 +138,7 @@ async def cb_next_run(call: CallbackQuery, bot: Bot) -> None:
     await send_book_prompt(bot, call.message.chat.id)
 
 
-# --------------------------------------------------------------------------- события Telegram о звёздах
-
-
-@router.message(F.refunded_payment)
-async def refunded_payment(message: Message, bot: Bot) -> None:
-    """Звёзды вернулись (возврат ботом или решение Telegram по спору) — доступ по этому платежу закрывается."""
-    rp = message.refunded_payment
-    async with session_scope() as s:
-        p = await billing.on_star_refunded(s, rp.telegram_payment_charge_id)
-    if p is not None:
-        await message.answer("Возврат звёзд прошёл — доступ по этой оплате закрыт.")
-
-
-@router.subscription()
-async def subscription_update(update: BotSubscriptionUpdated, bot: Bot) -> None:
-    async with session_scope() as s:
-        from services.users import get_user_by_tg
-
-        user = await get_user_by_tg(s, update.user.id)
-        if user is None:
-            return
-        await billing.on_subscription_state(s, user, update.state)
-        tg_id = user.tg_id
-    if update.state == "failed":
-        await bot.send_message(tg_id, "Не получилось продлить абонемент: на счету не хватило звёзд. Пополни звёзды — "
-                                      "или оформи абонемент заново: /buy")
-
-
-@router.message(Command("cancel_sub", "unsubscribe"))
-async def cmd_cancel_sub(message: Message, bot: Bot) -> None:
-    async with session_scope() as s:
-        user, _ = await load_user(s, message.from_user)
-        res = await billing.cancel_subscription(s, user, bot)
-        until = user.subscription_until
-    await message.answer(texts.sub_cancel_result(res, until))
-
-
-# --------------------------------------------------------------------------- коды активации (оплата на сайте)
-
-
-async def redeem_and_reply(bot: Bot, chat_id: int, tg_user, code: str) -> bool:
-    outbox = Outbox()
-    async with session_scope() as s:
-        user, _ = await load_user(s, tg_user)
-        status, p = await billing.redeem_code(s, user, code, outbox)
-        uid = user.id
-    if status != "ok" or p is None:
-        await bot.send_message(chat_id, texts.CODE_RESULT.get(status, texts.CODE_RESULT["not_found"]))
-        return False
-    await bot.send_message(chat_id, texts.code_ok(p.product))
-    await after_payment_message(bot, chat_id, uid, p.product, bool(getattr(p, "activated_now", None)))
-    await flush(bot, outbox)
-    return True
-
-
-@router.message(Command("code"))
-async def cmd_code(message: Message, command: CommandObject, state: FSMContext, bot: Bot) -> None:
-    if command.args:
-        await redeem_and_reply(bot, message.chat.id, message.from_user, command.args)
-        return
-    await state.set_state(Flow.code)
-    await message.answer(texts.ASK_CODE)
-
-
-@router.callback_query(F.data == "code:enter")
-async def cb_code(call: CallbackQuery, state: FSMContext) -> None:
-    await call.answer()
-    await state.set_state(Flow.code)
-    await call.message.answer(texts.ASK_CODE)
-
-
-@router.message(Flow.code, F.text)
-async def msg_code(message: Message, state: FSMContext, bot: Bot) -> None:
-    """Одна попытка ввода кода — потом бот снова принимает пересказы как обычно."""
-    text = message.text.strip()
-    await state.clear()
-    if text.startswith("/"):
-        return
-    if len(text) > 24 or len(text.split()) > 2:
-        # это не код, а пересказ — не теряем его
-        from bot.handlers_day import _retell
-
-        await _retell(message, bot, message.text, source="text")
-        return
-    if not await redeem_and_reply(bot, message.chat.id, message.from_user, text):
-        await message.answer(texts.CODE_RETRY)
-
-
-@router.message(Flow.code, F.voice | F.audio | F.video_note)
-async def msg_code_voice(message: Message, state: FSMContext, bot: Bot) -> None:
-    await state.clear()
-    from bot.handlers_day import handle_voice
-
-    await handle_voice(message, bot, state)
-
-
-# --------------------------------------------------------------------------- промокоды
+# --------------------------------------------------------------------------- промокоды и условия
 
 
 @router.message(Command("promo"))
@@ -354,43 +160,6 @@ async def cmd_promo(message: Message, command: CommandObject, bot: Bot) -> None:
         discount, uid = promo.discount_percent, user.id
     await message.answer(texts.promo_applied(code, discount))
     await send_paywall(bot, message.chat.id, uid)
-
-
-# --------------------------------------------------------------------------- гарантия и условия
-
-
-@router.message(Command("money_back", "refund_me"))
-async def cmd_money_back(message: Message) -> None:
-    async with session_scope() as s:
-        user, _ = await load_user(s, message.from_user)
-        chk = await billing.refund_check(s, user)
-    if chk.partial:
-        await message.answer(texts.e(chk.reason), reply_markup=kb([[
-            {"text": "Подать заявку", "callback": "mb:yes"}, {"text": "Не надо", "callback": "mb:no"},
-        ]]))
-        return
-    if not chk.eligible:
-        await message.answer(texts.e(chk.reason))
-        return
-    await message.answer(texts.REFUND_CONFIRM, reply_markup=kb([[
-        {"text": "Да, вернуть", "callback": "mb:yes"}, {"text": "Нет, остаюсь", "callback": "mb:no"},
-    ]]))
-
-
-@router.callback_query(F.data.startswith("mb:"))
-async def cb_money_back(call: CallbackQuery, bot: Bot) -> None:
-    await call.answer()
-    await call.message.edit_reply_markup(reply_markup=None)
-    if call.data == "mb:no":
-        await call.message.answer("Отлично, читаем дальше 🔥")
-        return
-    outbox = Outbox()
-    async with session_scope() as s:
-        user, _ = await load_user(s, call.from_user)
-        res = await billing.request_refund(s, user, bot, outbox)
-    replies = {"ok": texts.REFUND_OK, "requested": texts.REFUND_REQUESTED, "requested_partial": texts.REFUND_REQUESTED_PARTIAL}
-    await call.message.answer(replies.get(res) or texts.e(res))
-    await flush(bot, outbox)
 
 
 @router.message(Command("terms"))

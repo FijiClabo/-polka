@@ -1,8 +1,7 @@
 """Друзья, толчки, пары и что о ком можно показывать.
 
-Другу видно: имя, аватар, текущая книга, стрик, статус дня, ачивки, полка.
-Пересказы и конспекты друзьям не отдаются никогда. Напарнику — только при той же книге
-и только за ту часть, которую смотрящий уже сдал сам.
+Другу и напарнику видно: имя, аватар, текущая книга, стрик, статус дня, ачивки, полка.
+Тексты пересказов не хранятся и никому не показываются.
 """
 
 from __future__ import annotations
@@ -25,11 +24,10 @@ from db.models import (
     Pair,
     Retelling,
     Run,
-    Segment,
     User,
 )
 from services.common import Outbox, OutMsg, allow_social, log_event, random_code, today_for
-from services.progress import accepted_by_day, load_view
+from services.progress import load_view
 from services.runs import (
     OPEN_STATUSES,
     current_enrollment,
@@ -309,50 +307,3 @@ async def ensure_pair_code(session: AsyncSession, enr: Enrollment) -> str:
         enr.pair_code = random_code(10)
         await session.flush()
     return enr.pair_code
-
-
-# --------------------------------------------------------------------------- пересказы напарника
-
-
-async def partner_feed(session: AsyncSession, viewer: User, viewer_enr: Enrollment) -> dict:
-    """Лента пересказов напарника с отметкой locked. Текст закрытых не отдаётся."""
-    pair, partner, p_enr = await get_pair_for(session, viewer_enr)
-    if not pair or not partner or not p_enr:
-        return {"same_book": False, "items": []}
-    my_book = await session.get(Book, viewer_enr.book_id) if viewer_enr.book_id else None
-    p_book = await session.get(Book, p_enr.book_id) if p_enr.book_id else None
-    same = bool(
-        my_book and p_book and rules.same_book(
-            my_book.title_norm, my_book.author_norm, my_book.file_hash,
-            p_book.title_norm, p_book.author_norm, p_book.file_hash,
-        )
-    )
-    if not same:
-        return {"same_book": False, "items": []}
-    my_acc = await accepted_by_day(session, viewer_enr)
-    my_progress = 0.0
-    if my_acc:
-        seg = await session.scalar(select(Segment).where(Segment.book_id == my_book.id, Segment.day_number == max(my_acc)))
-        my_progress = seg.pos_to if seg else 0.0
-    rows = await session.execute(
-        select(Retelling, Segment)
-        .join(Segment, Segment.id == Retelling.segment_id)
-        .where(Retelling.enrollment_id == p_enr.id, Retelling.verdict == "accepted", Segment.book_id == p_book.id)
-        .order_by(Segment.day_number)
-    )
-    items = []
-    seen = set()
-    for r, s in rows.all():
-        if s.day_number in seen:
-            continue
-        seen.add(s.day_number)
-        visible = rules.can_view_partner_retelling(True, s.pos_to, my_progress)
-        items.append({
-            "day_number": s.day_number,
-            "title": s.title,
-            "pos_to": s.pos_to,
-            "locked": not visible,
-            "text": r.raw_text if visible else None,
-            "source": r.source,
-        })
-    return {"same_book": True, "items": items}

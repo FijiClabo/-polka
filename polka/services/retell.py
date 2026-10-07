@@ -10,7 +10,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import texts
@@ -205,10 +205,12 @@ async def apply_verdict(
     r.verified = v.verified
     r.provider = v.provider
     r.decided_at = now()
-    if v.note_for_summary:
-        r.note_for_summary = v.note_for_summary
-    ai_text = v.reply + (f"\n{v.question}" if v.question else "")
-    session.add(DialogTurn(retelling_id=r.id, role="ai", text=ai_text))
+    if v.verdict == "clarify":
+        # уточнение: текст и диалог нужны до окончательного ответа
+        ai_text = v.reply + (f"\n{v.question}" if v.question else "")
+        session.add(DialogTurn(retelling_id=r.id, role="ai", text=ai_text))
+    else:
+        await forget_texts(session, r)
     if v.fallback:
         await log_event(session, "ai_error", user.id, enr.run_id, retelling_id=r.id)
     await log_event(session, "verdict", user.id, enr.run_id, type=v.verdict, verified=v.verified,
@@ -233,6 +235,18 @@ async def apply_verdict(
     base.can_submit_more = info.get("can_submit_more", False)
     base.next_title = info.get("next_title")
     return base
+
+
+async def forget_texts(session: AsyncSession, r: Retelling) -> None:
+    """Пересказы не храним: после окончательного вердикта текст, ответ ИИ и диалог удаляются.
+
+    Остаётся только факт сдачи — день, результат, время — для стрика и прогресса.
+    """
+    r.raw_text = ""
+    r.ai_reply = None
+    r.ai_question = None
+    r.note_for_summary = None
+    await session.execute(delete(DialogTurn).where(DialogTurn.retelling_id == r.id))
 
 
 async def _outcome_from(session: AsyncSession, r: Retelling, enr: Enrollment, user: User, base: RetellOutcome) -> RetellOutcome:
@@ -353,7 +367,7 @@ async def override(session: AsyncSession, retelling_id: int, outbox: Outbox | No
     r.verdict = "accepted"
     r.overridden = True
     r.decided_at = now()
-    r.ai_reply = (r.ai_reply or "") + " [засчитано ведущим]"
+    await forget_texts(session, r)
     await log_event(session, "override", user.id, enr.run_id, retelling_id=r.id)
     await on_accepted(session, enr, user, r, outbox)
     await recompute_streak(session, enr)

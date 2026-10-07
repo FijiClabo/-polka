@@ -12,7 +12,7 @@ from services.common import Outbox
 from services.progress import close_pending_days, load_view
 from services.retell import override
 from services.runs import current_enrollment
-from services.social import add_friend_by_code, auto_pairs, join_pair_by_code, nudge, partner_feed
+from services.social import add_friend_by_code, auto_pairs, join_pair_by_code, nudge
 from tests.helpers import (
     RETELL_BAD,
     RETELL_GENERAL,
@@ -353,7 +353,10 @@ async def test_pair_invite_and_auto_pairs(world):
         assert len(pairs) == 1  # 6 без пары → половина (3) → округление до чётного (2) → 1 пара
 
 
-async def test_partner_feed_same_book_locked(tmp_path):
+async def test_retelling_text_not_stored(tmp_path):
+    """Пересказ нужен только для проверки: после вердикта текст, ответ ИИ и диалог стираются."""
+    from db.models import DialogTurn, Retelling
+
     await setup_db(tmp_path)
     install_fake_llm()
     set_now(START - timedelta(days=1))
@@ -361,24 +364,15 @@ async def test_partner_feed_same_book_locked(tmp_path):
         run = Run(title="Т", kind="main", start_date=START, status="open", grace_days=3)
         s.add(run)
         await s.flush()
-        a, ea = await make_participant(s, run, 5001, "А", title="Мастер и Маргарита", author="Булгаков")
-        b, eb = await make_participant(s, run, 5002, "Б", title="мастер и маргарита!", author="булгаков")
-        from services.social import make_pair
-
-        await make_pair(s, run, ea, eb)
-        ids = (a.id, b.id, ea.id, eb.id)
-    for i in range(3):
-        set_now(START + timedelta(days=i), 10)
-        await submit(ids[0])
-    set_now(START + timedelta(days=2), 12)
-    await submit(ids[1])
+        a, ea = await make_participant(s, run, 5001, "А")
+        uid = a.id
+    set_now(START, 10)
+    await submit(uid)  # засчитано
+    await submit(uid, "Герой что-то сделал, общее описание без подробностей, ОБЩЕЕ впечатление от главы и всё.")
     async with session_scope() as s:
-        b = await s.get(User, ids[1])
-        eb = await current_enrollment(s, b.id)
-        feed = await partner_feed(s, b, eb)
-    assert feed["same_book"]
-    assert [i["locked"] for i in feed["items"]] == [False, True, True]
-    assert feed["items"][1]["text"] is None
+        rets = list(await s.scalars(select(Retelling).order_by(Retelling.id)))
+        assert rets[0].verdict == "accepted" and rets[0].raw_text == "" and rets[0].ai_reply is None
+        assert not list(await s.scalars(select(DialogTurn).where(DialogTurn.retelling_id == rets[0].id)))
 
 
 async def test_view_states(world):

@@ -106,9 +106,6 @@ async def cb_delete(call: CallbackQuery, state: FSMContext) -> None:
     async with session_scope() as s:
         u = await get_user_by_tg(s, call.from_user.id)
         if u:
-            from services.billing import cancel_subscription
-
-            await cancel_subscription(s, u, call.bot)  # автопродление звёзд не должно пережить удаление
             await delete_user_data(s, u)
     await state.clear()
     await call.message.answer(texts.DELETED)

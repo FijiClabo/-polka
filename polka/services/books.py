@@ -208,7 +208,7 @@ async def update_book_meta(session: AsyncSession, book: Book, *, title=None, aut
 
 
 async def delete_book_text(session: AsyncSession, book: Book) -> None:
-    """Удаление книги: главы и тексты отрезков. Пересказы и конспект остаются, книга — запись на полке."""
+    """Удаление книги: главы и тексты отрезков. Книга остаётся записью на полке."""
     await session.execute(delete(Chapter).where(Chapter.book_id == book.id))
     await session.execute(update(Segment).where(Segment.book_id == book.id).values(text=None, summary=None))
     remove_file(book.file_path)

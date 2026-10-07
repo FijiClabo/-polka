@@ -62,31 +62,19 @@ class Settings(BaseSettings):
     max_book_mb: int = 20
 
     # --- Оплата ---------------------------------------------------------------
-    # Правило Telegram: цифровые услуги внутри бота и мини-приложения продаются только за звёзды.
-    # Рубли (карта, СБП, SberPay) — на своём сайте через API ЮKassa; после оплаты человек получает
-    # одноразовый код и активирует его в боте. Абонемент: забеги без доплат + вторая заморозка в неделю.
+    # Кнопка «Оплатить» в боте и мини-приложении ведёт на страницу оплаты ЮKassa (карта, СБП и др.).
+    # Пока ключей нет — вместо кнопки показывается текст PAYMENT_INFO (оплата вручную, доступ — /grant).
     price_run_rub: int = 990
     price_month_rub: int = 299
     price_year_rub: int = 1990
-    price_run_stars: int = 650
-    price_month_stars: int = 200
-    price_year_stars: int = 1300
-    payments_stars: bool = True  # оплата звёздами Telegram (работает без договоров)
-    yookassa_shop_id: str = ""  # ЮKassa → Интеграция → shopId: оплата на сайте, вебхуки, возвраты
+    yookassa_shop_id: str = ""  # ЮKassa → Интеграция → shopId
     yookassa_secret_key: str = ""  # ЮKassa → Интеграция → Ключи API
-    fiscal_receipts: bool = True  # передавать в ЮKassa данные для чека (54-ФЗ, «Чеки от ЮKassa»)
+    fiscal_receipts: bool = False  # чеки 54-ФЗ через «Чеки от ЮKassa» (тогда спросим e-mail покупателя)
     receipt_vat_code: int = 1  # 1 — без НДС (УСН, самозанятые)
     receipt_payment_mode: str = "full_payment"  # или full_prepayment — решает бухгалтер
-    # Аварийный флаг: оплата рублями прямо в боте через платёжный токен @BotFather. Для цифровых услуг
-    # это нарушает правила Telegram (бота могут скрыть или удалить) — по умолчанию выключено.
-    payments_rub_in_bot: bool = False
-    yookassa_provider_token: str = ""
-    code_valid_days: int = 365  # срок жизни кода активации из заказа на сайте
-    refund_days: int = 3  # гарантия: возврат без вопросов в первые N дней (один раз)
     sub_freezes_per_week: int = 2
     offer_version: str = "2026-10-07"  # версия оферты и документов — пишется в платёж и журнал согласий
-    # Ручная оплата (перевод) — запасной путь, доступ выдаёт ведущий командой /grant
-    payment_info: str = "Можно оплатить переводом — напиши в поддержку, доступ откроют вручную."
+    payment_info: str = "Оплата скоро появится. Пока можно оплатить переводом — напиши в поддержку, доступ откроют вручную."
     sprint_for_everyone: bool = True  # бесплатный 7-дневный спринт для всех новичков, не только по ссылке друга
 
     # --- Продавец (для оферты, чеков и страницы оплаты) -----------------------
@@ -98,13 +86,6 @@ class Settings(BaseSettings):
     seller_phone: str = ""
     legal_docs_date: date = date(2026, 10, 7)  # дата редакции оферты и политики
     bot_username: str = ""  # подставляется сам при запуске бота; нужен, только если страницы отдаются без бота
-
-    # --- Почта (необязательно): код активации покупателю с сайта -------------
-    smtp_host: str = ""
-    smtp_port: int = 465
-    smtp_user: str = ""
-    smtp_password: str = ""
-    smtp_from: str = ""  # «Дочитка <hello@example.ru>»
 
     # --- Прочее --------------------------------------------------------------
     telegram_api_base: str = ""  # свой адрес Bot API (прокси к api.telegram.org), если сервер в РФ
@@ -139,22 +120,9 @@ class Settings(BaseSettings):
         return len(self.webhook_secret) >= 16 and self.webhook_secret not in weak
 
     @property
-    def payments_yookassa(self) -> bool:
-        """Рубли прямо в боте — только при явном аварийном флаге."""
-        return bool(self.yookassa_provider_token) and self.payments_rub_in_bot
-
-    @property
-    def site_checkout(self) -> bool:
-        """Оплата рублями на сайте через API ЮKassa."""
-        return bool(self.yookassa_shop_id and self.yookassa_secret_key)
-
-    @property
     def payments_enabled(self) -> bool:
-        return self.payments_stars or self.payments_yookassa
-
-    @property
-    def smtp_enabled(self) -> bool:
-        return bool(self.smtp_host and self.smtp_from)
+        """Оплата через ЮKassa подключена."""
+        return bool(self.yookassa_shop_id and self.yookassa_secret_key)
 
     @property
     def llm_order(self) -> list[str]:

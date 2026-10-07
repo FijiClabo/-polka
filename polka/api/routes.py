@@ -30,7 +30,8 @@ from books.plan import PlanError, segment_minutes
 from books.types import PARSE_ERRORS, SUBHEADING_MARK
 from core.days import local_now, plan_day_number
 from db.models import Book, DayResult, Enrollment, Purchase, Retelling, Segment, User
-from services import billing
+from db.session import session_scope
+from services import billing, payments
 from services.books import (
     add_paper_book,
     confirm_plan,
@@ -47,7 +48,7 @@ from services.flow import submit_retelling
 from services.progress import DayView, accepted_by_day, effective_freezes, load_view
 from services.retell import RetellOutcome
 from services.runs import current_enrollment, ensure_enrollment, sprint_block, sprint_used, start_sprint
-from services.shelf import achievements_of, conspect, shelf
+from services.shelf import achievements_of, shelf
 from services.social import (
     are_friends,
     ensure_pair_code,
@@ -55,7 +56,6 @@ from services.social import (
     get_pair_for,
     nudge,
     nudged_today,
-    partner_feed,
     public_status,
 )
 from services.users import valid_timezone
@@ -371,10 +371,9 @@ async def get_run_day(n: int, user: User = Depends(current_user), s: AsyncSessio
     return {
         "n": n, "date": d.isoformat(), "state": dr.result if dr else None,
         "segment": seg_brief(seg, book),
-        "retelling": {
-            "text": shown.raw_text, "verdict": shown.verdict, "reply": shown.ai_reply, "question": shown.ai_question,
-            "verified": shown.verified, "source": shown.source,
-        } if shown else None,
+        # текст пересказа не хранится — только результат
+        "retelling": {"verdict": shown.verdict, "verified": shown.verified, "source": shown.source,
+                      "question": shown.ai_question if shown.verdict == "clarify" else None} if shown else None,
     }
 
 
@@ -392,15 +391,13 @@ async def get_pair(user: User = Depends(current_user), s: AsyncSession = Depends
 
             link = deep_link(f"p_{await ensure_pair_code(s, enr)}")
         return {"has_pair": False, "invite_link": link, "invite_text": texts.pair_invite_text(user.display_name)}
-    feed = await partner_feed(s, user, enr)
     st = await public_status(s, partner)
     nudged = partner.id in await nudged_today(s, user)
     return {
         "has_pair": True, "partner": {**user_brief(partner), "today": st.today, "done_at": st.done_at,
                                       "book_title": st.book_title, "book_author": st.book_author,
                                       "plan_day": st.plan_day, "plan_days": st.plan_days, "streak": st.streak},
-        "pair_streak": pair.streak, "best_pair_streak": pair.best_streak, "same_book": feed["same_book"],
-        "feed": feed["items"], "can_nudge": st.today in ("reading", "burned") and not nudged, "nudged": nudged,
+        "pair_streak": pair.streak, "best_pair_streak": pair.best_streak, "can_nudge": st.today in ("reading", "burned") and not nudged, "nudged": nudged,
     }
 
 
@@ -508,35 +505,30 @@ async def post_new_run(user: User = Depends(current_user), s: AsyncSession = Dep
 
 
 def _price_json(p) -> dict:
-    return {"rub": p.rub, "stars": p.stars, "list_rub": p.list_rub, "list_stars": p.list_stars, "promo": p.promo,
-            "discount": p.discount, "free": p.free}
+    return {"rub": p.rub, "list_rub": p.list_rub, "promo": p.promo, "discount": p.discount, "free": p.free}
 
 
 async def _billing_state(s: AsyncSession, user: User) -> dict:
     st = get_settings()
     prices = await billing.prices_for(s, user)
-    chk = await billing.refund_check(s, user)
     base = st.public_url if st.public_url.startswith("http") else ""
     enr = await current_enrollment(s, user.id)
     book = await s.get(Book, enr.book_id) if enr and enr.book_id else None
     purchases = list(await s.scalars(
-        select(Purchase).where(Purchase.user_id == user.id).order_by(Purchase.id.desc()).limit(10)
+        select(Purchase).where(Purchase.user_id == user.id, Purchase.status.in_(("paid", "refunded")))
+        .order_by(Purchase.id.desc()).limit(10)
     ))
     return {
         "enabled": st.payments_enabled,
-        "methods": {"card": st.payments_yookassa, "stars": st.payments_stars},
+        "needs_email": payments.needs_email(user),
         "prices": {k: _price_json(v) for k, v in prices.items()},
         "promo": user.promo_code,
         "subscription": {
             "active": billing.subscription_active(user),
             "until": user.subscription_until.isoformat() if user.subscription_until else None,
-            "kind": user.subscription_kind, "recurring": user.subscription_recurring,
+            "kind": user.subscription_kind,
         },
         "credits": user.run_credits,
-        "refund": {"eligible": chk.eligible, "partial": chk.partial, "reason": chk.reason if not chk.eligible else "",
-                   "until": chk.until.isoformat() if chk.until else None},
-        "guarantee_days": st.refund_days,
-        "guarantee_available": await billing.guarantee_available(s, user),
         "freezes_sub": st.sub_freezes_per_week,
         "offer_url": f"{base}/offer" if base else None,
         "privacy_url": f"{base}/privacy" if base else None,
@@ -560,30 +552,51 @@ async def get_billing(user: User = Depends(current_user), s: AsyncSession = Depe
     return await _billing_state(s, user)
 
 
-class InvoiceBody(BaseModel):
+class PayBody(BaseModel):
     product: str = Field(pattern=r"^(run|month|year)$")
-    method: str = Field(pattern=r"^(card|stars)$")
+    email: str | None = Field(default=None, max_length=128)
 
 
-@router.post("/billing/invoice")
-async def post_invoice(body: InvoiceBody, user: User = Depends(need_consent), s: AsyncSession = Depends(get_session)):
-    """Ссылка на оплату для Telegram.WebApp.openInvoice."""
-    from aiogram.types import LabeledPrice
-
+@router.post("/billing/pay")
+async def post_pay(body: PayBody, user: User = Depends(need_consent), s: AsyncSession = Depends(get_session)):
+    """Кнопка «Оплатить»: заказ и платёж в ЮKassa → ссылка на страницу оплаты."""
     try:
-        inv = await billing.build_invoice(s, user, body.product, body.method)
-    except ValueError as e:
-        raise HTTPException(400, "Этот способ оплаты сейчас недоступен") from e
-    if _bot is None:
-        raise HTTPException(503, "Оплата временно недоступна")
-    await log_event(s, "invoice_opened", user.id, product=body.product, method=body.method, via="webapp")
-    link = await _bot.create_invoice_link(
-        title=inv.title[:32], description=inv.description[:255], payload=inv.payload, currency=inv.currency,
-        prices=[LabeledPrice(label=inv.title[:32], amount=inv.amount)], provider_token=inv.provider_token or None,
-        subscription_period=inv.subscription_period, need_email=inv.need_email or None,
-        send_email_to_provider=inv.send_email_to_provider or None, provider_data=inv.provider_data,
-    )
-    return {"url": link}
+        url, order = await payments.start_payment(s, user, body.product, body.email)
+    except payments.PaymentError as e:
+        raise HTTPException(400, str(e)) from e
+    await log_event(s, "payment_link", user.id, product=body.product, via="webapp")
+    return {"url": url, "order": order}
+
+
+@router.get("/billing/order/{order_id}")
+async def get_order(order_id: str, user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    """Статус заказа после возврата из ЮKassa (если уведомление ещё не пришло — спросим сами)."""
+    out = Outbox()
+    p, just_paid = await payments.refresh_order(s, order_id, out)
+    if p is None or p.user_id != user.id:
+        raise HTTPException(404, "Заказ не найден")
+    status = p.status
+    await s.commit()
+    await _flush(out)
+    if just_paid:
+        await _after_paid_message(p)
+    return {"status": status, **(await _billing_state(s, user))}
+
+
+async def _after_paid_message(p) -> None:
+    """Сообщение в чат после оплаты: что дальше (старт сегодня, выбор срока и т. п.)."""
+    if _bot is None or p.user_id is None:
+        return
+    from bot.handlers_pay import after_payment_message
+
+    async with session_scope() as s2:
+        u = await s2.get(User, p.user_id)
+        tg_id = u.tg_id if u else None
+    if tg_id:
+        try:
+            await after_payment_message(_bot, tg_id, p.user_id, p.product, bool(getattr(p, "activated_now", None)))
+        except Exception:
+            log.exception("after payment message failed")
 
 
 class PromoBody(BaseModel):
@@ -612,42 +625,6 @@ async def post_free(body: FreeBody, user: User = Depends(need_consent), s: Async
     if p is None:
         raise HTTPException(400, "Промокод не даёт бесплатный доступ")
     return await _billing_state(s, user)
-
-
-class CodeBody(BaseModel):
-    code: str = Field(min_length=4, max_length=40)
-
-
-@router.post("/billing/redeem")
-async def post_redeem(body: CodeBody, user: User = Depends(need_consent), s: AsyncSession = Depends(get_session)):
-    """Код активации из заказа на сайте."""
-    out = Outbox()
-    status, p = await billing.redeem_code(s, user, body.code, out)
-    if status not in ("ok", "already"):
-        raise HTTPException(404 if status == "not_found" else 409, texts.CODE_RESULT[status])
-    await s.commit()
-    await _flush(out)
-    return {"result": status, "product": p.product if p else None, **(await _billing_state(s, user))}
-
-
-@router.post("/billing/cancel")
-async def post_cancel_sub(user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
-    """Отключить автопродление звёздного абонемента; доступ остаётся до конца срока."""
-    res = await billing.cancel_subscription(s, user, _bot)
-    if res == "error":
-        raise HTTPException(502, texts.sub_cancel_result(res, user.subscription_until))
-    return {"result": res, "message": texts.sub_cancel_result(res, user.subscription_until)}
-
-
-@router.post("/billing/refund")
-async def post_refund(user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
-    out = Outbox()
-    res = await billing.request_refund(s, user, _bot, out)
-    await s.commit()
-    await _flush(out)
-    if res not in ("ok", "requested", "requested_partial"):
-        raise HTTPException(400, res)
-    return {"result": res}
 
 
 @router.post("/book/upload")
@@ -819,7 +796,7 @@ async def get_friends_invite(user: User = Depends(current_user), s: AsyncSession
 
 @router.get("/friends/{user_id}")
 async def get_friend(user_id: int, user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
-    """Карточка друга: книга, стрик, ачивки, полка. Пересказы и конспекты — никогда."""
+    """Карточка друга: книга, стрик, ачивки, полка дочитанных книг."""
     if not await are_friends(s, user.id, user_id):
         raise HTTPException(404, "Не найдено")
     f = await s.get(User, user_id)
@@ -844,7 +821,7 @@ async def post_friend_nudge(user_id: int, user: User = Depends(current_user), s:
     return {"result": res}
 
 
-# --------------------------------------------------------------------------- ачивки, полка, конспект
+# --------------------------------------------------------------------------- ачивки и полка
 
 
 @router.get("/achievements")
@@ -856,14 +833,6 @@ async def get_achievements(user: User = Depends(current_user), s: AsyncSession =
 async def get_shelf(user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
     enr = await current_enrollment(s, user.id)
     return await shelf(s, user, enr)
-
-
-@router.get("/shelf/{book_id}")
-async def get_shelf_book(book_id: int, user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
-    data = await conspect(s, user, book_id)
-    if data is None:
-        raise HTTPException(404, "Не найдено")
-    return data
 
 
 @router.get("/finish")

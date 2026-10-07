@@ -34,7 +34,6 @@ router = Router(name="start")
 async def cmd_start(message: Message, command: CommandObject, state: FSMContext, bot: Bot) -> None:
     await state.clear()
     payload = (command.args or "").strip()
-    act_code = None
     outbox = Outbox()
     async with session_scope() as s:
         user, created = await load_user(s, message.from_user)
@@ -61,8 +60,6 @@ async def cmd_start(message: Message, command: CommandObject, state: FSMContext,
                     user.source = f"promo:{normalize_code(payload[6:])}"
             elif not user.source:
                 user.source = payload[4:36]
-        elif payload.startswith("act_"):
-            act_code = payload[4:]
         elif payload == "group":
             # групповой забег ведущего — только по его ссылке
             status, _enr = await join_cohort(s, user)
@@ -81,13 +78,6 @@ async def cmd_start(message: Message, command: CommandObject, state: FSMContext,
         uid = user.id
         await state.update_data(inviter_name=inviter_name)
     await flush(bot, outbox)
-    if act_code:
-        # оплата на сайте → ссылка t.me/<бот>?start=act_<код>
-        from bot.handlers_pay import redeem_and_reply
-
-        await redeem_and_reply(bot, message.chat.id, message.from_user, act_code)
-        if onboarded:
-            return
     if onboarded:
         await send_status(bot, message.chat.id, uid)
         return

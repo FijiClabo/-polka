@@ -3,88 +3,76 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Спасибо за оплату — {{PROJECT}}</title>
+<title>Оплата — {{PROJECT}}</title>
 <meta name="robots" content="noindex">
-<meta name="theme-color" content="#0e0e10">
-<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#F3EEE6">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;600&family=Unbounded:wght@700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Onest:wght@400;500&display=swap">
 <style>
-:root{--bg:#0e0e10;--card:#1a1a1d;--card-2:#232327;--text:#f4f1ec;--muted:#8f8b85;--muted-2:#b0aba3;
-  --fire:linear-gradient(135deg,#ffb547 0%,#ff6b3d 100%);--fire-1:#ffb547;--green:#6ee7a7;--ink:#1b0f08;--line:rgba(244,241,236,.08);color-scheme:dark}
+:root{--bg:#F3EEE6;--paper:#FBF8F3;--ink:#2A2623;--muted:#786F67;--line:rgba(42,38,35,.12);--coral:#C9644F;--sage:#7E9C7A;--blue:#4F6F9F;--mustard:#E2B84F;color-scheme:light}
 *,*::before,*::after{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font:400 16px/1.55 "Onest",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased}
-a{color:inherit}
-.wrap{max-width:520px;margin:0 auto;padding:0 16px 48px}
-.hdr{display:flex;align-items:center;height:64px}
-.logo{font:700 18px/1 "Unbounded",system-ui,sans-serif;text-decoration:none}
-.card{background:var(--card);border-radius:28px;padding:28px 20px;text-align:center;margin-top:16px}
-.ill{font-size:52px;line-height:1}
-h1{font:700 clamp(24px,7vw,30px)/1.15 "Unbounded",system-ui,sans-serif;margin:16px 0 8px}
-p{color:var(--muted-2);margin:0 0 12px}
-.code{font:700 clamp(26px,8vw,34px)/1 "Unbounded",ui-monospace,monospace;letter-spacing:.12em;background:var(--card-2);border:1px dashed rgba(255,181,71,.5);border-radius:18px;padding:18px 12px;margin:18px 0 10px;color:var(--fire-1);user-select:all;word-break:break-all}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:56px;padding:0 24px;border-radius:999px;border:0;font:600 17px/1 "Onest",system-ui,sans-serif;cursor:pointer;text-decoration:none;width:100%;margin-top:10px}
-.btn-fire{background:var(--fire);color:var(--ink);box-shadow:0 14px 34px -14px rgba(255,107,61,.75)}
-.btn-ghost{background:var(--card-2);color:var(--text);border:1px solid rgba(244,241,236,.12)}
-.small{font-size:14px;color:var(--muted)}
-.spin{width:44px;height:44px;border-radius:50%;border:4px solid var(--card-2);border-top-color:var(--fire-1);margin:0 auto;animation:s 1s linear infinite}
-@keyframes s{to{transform:rotate(360deg)}}
-@media (prefers-reduced-motion:reduce){.spin{animation-duration:3s}}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font:400 16px/1.6 "Onest",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased;display:flex;flex-direction:column}
+.wrap{width:100%;max-width:440px;margin:0 auto;padding:28px 20px 40px;flex:1;display:flex;flex-direction:column}
+.logo{font:600 22px/1 "Cormorant Garamond",Georgia,serif;text-decoration:none;color:var(--ink)}
+.card{margin:auto 0;text-align:center;padding:12px 0}
+svg.ill{width:150px;height:auto;margin:0 auto 18px;display:block}
+h1{font:500 clamp(32px,9vw,40px)/1.1 "Cormorant Garamond",Georgia,serif;margin:0 0 12px;letter-spacing:-.01em}
+p{color:var(--muted);margin:0 0 10px}
+.btn{display:flex;align-items:center;justify-content:center;width:100%;min-height:54px;margin-top:26px;border-radius:14px;background:var(--ink);color:var(--paper);font:500 17px/1 "Onest",system-ui,sans-serif;text-decoration:none}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line);margin-top:10px}
+.dots{display:flex;gap:8px;justify-content:center;margin:6px 0 18px}
+.dots i{width:8px;height:8px;border-radius:50%;background:var(--muted);opacity:.35;animation:b 1.2s infinite ease-in-out}
+.dots i:nth-child(2){animation-delay:.15s}.dots i:nth-child(3){animation-delay:.3s}
+@keyframes b{0%,100%{opacity:.25}50%{opacity:.9}}
+@media (prefers-reduced-motion:reduce){.dots i{animation:none}}
 .hidden{display:none}
-ol{text-align:left;color:var(--muted-2);padding-left:22px;margin:16px 0 0}
-ol li{margin:6px 0}
-code{background:var(--card-2);padding:2px 6px;border-radius:6px;color:var(--text)}
+.foot{font-size:13px;color:var(--muted);text-align:center;margin-top:28px}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <header class="hdr"><a class="logo" href="/">{{PROJECT}}</a></header>
+  <a class="logo" href="/">{{PROJECT}}</a>
 
   <div class="card" id="wait">
-    <div class="spin" aria-hidden="true"></div>
+    <svg class="ill" viewBox="0 0 160 120" fill="none" aria-hidden="true">
+      <path d="M20 96h120" stroke="#2A2623" stroke-opacity=".25"/>
+      <rect x="34" y="40" width="18" height="56" rx="2" stroke="#4F6F9F" stroke-width="1.5"/>
+      <rect x="54" y="30" width="16" height="66" rx="2" stroke="#C9644F" stroke-width="1.5"/>
+      <rect x="72" y="46" width="20" height="50" rx="2" stroke="#2A2623" stroke-opacity=".7" stroke-width="1.5"/>
+      <rect x="95" y="36" width="14" height="60" rx="2" transform="rotate(8 102 66)" stroke="#E2B84F" stroke-width="1.5"/>
+    </svg>
     <h1>Проверяем оплату</h1>
-    <p>Обычно это несколько секунд. Не закрывайте страницу.</p>
+    <div class="dots" aria-hidden="true"><i></i><i></i><i></i></div>
+    <p>Обычно это несколько секунд.</p>
   </div>
 
   <div class="card hidden" id="paid">
-    <div class="ill" aria-hidden="true">🎉</div>
+    <svg class="ill" viewBox="0 0 160 120" fill="none" aria-hidden="true">
+      <path d="M80 34c-14-9-34-10-52-6v58c18-4 38-3 52 6 14-9 34-10 52-6V28c-18-4-38-3-52 6Z" stroke="#2A2623" stroke-opacity=".75" stroke-width="1.5"/>
+      <path d="M80 34v58" stroke="#2A2623" stroke-opacity=".75" stroke-width="1.5"/>
+      <path d="M40 46c10-2 20-1 30 3M40 58c10-2 20-1 30 3M90 49c10-4 20-5 30-3M90 61c10-4 20-5 30-3" stroke="#4F6F9F" stroke-width="1.2" stroke-linecap="round"/>
+      <path d="M108 20l4 8 8 1-6 6 2 8-8-4-8 4 2-8-6-6 8-1z" fill="#E2B84F" fill-opacity=".85"/>
+    </svg>
     <h1>Оплата прошла</h1>
-    <p id="what"></p>
-    <div class="code" id="code"></div>
-    <button class="btn btn-ghost" type="button" id="copy">Скопировать код</button>
-    <a class="btn btn-fire" id="tg" href="{{BOT_URL}}" rel="noopener">Активировать в Telegram</a>
-    <ol>
-      <li>Нажмите «Активировать в Telegram» — бот откроется и сам примет код.</li>
-      <li>Или откройте бота и отправьте <code>/code</code> и код.</li>
-      <li>Добавьте книгу и выберите срок — забег стартует сразу.</li>
-    </ol>
-    <p class="small" style="margin-top:16px">Сохраните код: он действует {{CODE_DAYS}} дней и активируется один раз. Чек придёт на почту от ЮKassa.</p>
-  </div>
-
-  <div class="card hidden" id="used">
-    <div class="ill" aria-hidden="true">✅</div>
-    <h1>Код уже активирован</h1>
-    <p>Доступ открыт — продолжайте в Telegram.</p>
-    <a class="btn btn-fire" href="{{BOT_URL}}" rel="noopener">Открыть бота</a>
+    <p>Спасибо! Доступ уже открыт — возвращайся в Telegram, бот написал, что дальше.</p>
+    <a class="btn" href="{{BOT_LINK}}" rel="noopener">Вернуться в Telegram</a>
   </div>
 
   <div class="card hidden" id="fail">
-    <div class="ill" aria-hidden="true">😕</div>
     <h1 id="failTitle">Оплата не прошла</h1>
-    <p id="failText">Деньги не списаны. Попробуйте ещё раз или выберите другой способ.</p>
-    <a class="btn btn-fire" href="/buy">Попробовать снова</a>
-    <p class="small" style="margin-top:12px">Вопросы по оплате: {{SUPPORT}}</p>
+    <p id="failText">Деньги не списаны. Можно попробовать ещё раз из бота.</p>
+    <a class="btn" href="{{BOT_LINK}}" rel="noopener">Вернуться в Telegram</a>
+    <p class="foot">Вопросы по оплате: {{SUPPORT}}</p>
   </div>
 </div>
 
 <script>
 (function () {
   var order = new URLSearchParams(location.search).get("order") || "";
-  var names = { run: "Забег на одну книгу", month: "Абонемент на месяц", year: "Абонемент на год" };
   var tries = 0;
   function show(id) {
-    ["wait", "paid", "used", "fail"].forEach(function (x) { document.getElementById(x).classList.toggle("hidden", x !== id); });
+    ["wait", "paid", "fail"].forEach(function (x) { document.getElementById(x).classList.toggle("hidden", x !== id); });
   }
   function fail(title, text) {
     document.getElementById("failTitle").textContent = title;
@@ -92,33 +80,15 @@ code{background:var(--card-2);padding:2px 6px;border-radius:6px;color:var(--text
     show("fail");
   }
   function poll() {
-    if (!/^[0-9a-f]{32}$/.test(order)) { fail("Заказ не найден", "Проверьте ссылку из письма или напишите в поддержку."); return; }
-    fetch("/pay/status?order=" + order).then(function (r) {
-      if (r.status === 404) { fail("Заказ не найден", "Проверьте ссылку из письма или напишите в поддержку."); return null; }
-      return r.json();
-    }).then(function (d) {
-      if (!d) return;
-      if ((d.status === "paid" || d.status === "refund_requested") && d.code) {
-        if (d.activated) { show("used"); return; }
-        document.getElementById("what").textContent = (names[d.product] || "Доступ") + " — ваш код активации:";
-        document.getElementById("code").textContent = d.code;
-        if (d.link) document.getElementById("tg").href = d.link;
-        show("paid");
-        return;
-      }
-      if (d.status === "canceled") { fail("Оплата не прошла", "Деньги не списаны. Попробуйте ещё раз или выберите другой способ."); return; }
-      if (d.status === "refunded") { fail("Платёж возвращён", "Деньги вернутся тем же способом, которым вы платили."); return; }
-      if (++tries < 60) setTimeout(poll, tries < 10 ? 2000 : 5000);
-      else fail("Ждём подтверждения банка", "Иногда это занимает до часа. Обновите страницу позже — код появится здесь.");
-    }).catch(function () { if (++tries < 60) setTimeout(poll, 4000); });
+    if (!/^[0-9a-f]{32}$/.test(order)) { fail("Заказ не найден", "Вернись в бот — статус оплаты виден там."); return; }
+    fetch("/pay/status?order=" + order).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+      if (!d) { fail("Заказ не найден", "Вернись в бот — статус оплаты виден там."); return; }
+      if (d.status === "paid") { show("paid"); return; }
+      if (d.status === "canceled") { fail("Оплата не прошла", "Деньги не списаны. Можно попробовать ещё раз из бота."); return; }
+      if (++tries < 40) setTimeout(poll, tries < 10 ? 2000 : 5000);
+      else fail("Ждём подтверждения банка", "Иногда это занимает до часа. Как только платёж пройдёт, бот напишет сам.");
+    }).catch(function () { if (++tries < 40) setTimeout(poll, 4000); });
   }
-  document.getElementById("copy").addEventListener("click", function () {
-    var code = document.getElementById("code").textContent;
-    var btn = this;
-    (navigator.clipboard ? navigator.clipboard.writeText(code) : Promise.reject()).then(function () {
-      btn.textContent = "Скопировано ✓";
-    }).catch(function () { btn.textContent = "Выделите код и скопируйте"; });
-  });
   poll();
 })();
 </script>

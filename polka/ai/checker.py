@@ -1,4 +1,4 @@
-"""Проверка пересказа, краткие содержания отрезков, вступление к конспекту."""
+"""Проверка пересказа и краткие содержания отрезков."""
 
 from __future__ import annotations
 
@@ -116,22 +116,3 @@ async def summarize_segment(title: str, author: str, segment_title: str, text: s
     if not summary:
         return None
     return summary, prompt
-
-
-async def conspect_intro(title: str, author: str, notes: list[str]) -> str | None:
-    chain = get_llm()
-    notes = [n for n in notes if n]
-    if not chain.available or len(notes) < 3:
-        return None
-    import json
-
-    try:
-        res = await chain.complete(
-            prompts.CONSPECT_SYSTEM, "", prompts.conspect_prompt(title, author, notes),
-            schema=prompts.CONSPECT_SCHEMA, cheap=True, max_tokens=1200,
-        )
-        raw = res.text
-        obj = json.loads(raw[raw.find("{") : raw.rfind("}") + 1])
-        return str(obj.get("intro", "")).strip()[:2000] or None
-    except (LLMUnavailable, ValueError):
-        return None

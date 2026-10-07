@@ -297,7 +297,7 @@ def card_finish(*, name: str, book_title: str, plan_days: int, start: date | Non
     y = _stat_boxes(img, base + 70, w, stats)
     if story:
         d = ImageDraw.Draw(img)
-        lines = _wrap(d, "Конспект собран из моих пересказов", F_TITLE(56), w - 200, 2)
+        lines = _wrap(d, "Пятнадцать минут в день — и книга дочитана", F_TITLE(56), w - 200, 2)
         _center_lines(d, y + 90, lines, F_TITLE(56), (205, 200, 192), w, 10)
     _footer(img, f"{name} · {get_settings().project_name}")
     return _png(img)

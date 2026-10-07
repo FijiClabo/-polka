@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,9 +22,16 @@ async def has_consent(session: AsyncSession, user: User) -> bool:
 async def give_consent(session: AsyncSession, user: User, channel: str) -> None:
     if await has_consent(session, user):
         return
-    from services.site_orders import doc_sha256
-
     s = get_settings()
     session.add(Consent(user_id=user.id, doc_type="pd", doc_version=s.offer_version,
                         doc_sha256=doc_sha256("consent.html"), channel=channel))
     await log_event(session, "consent_pd", user.id, channel=channel)
+
+
+WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+
+
+def doc_sha256(name: str) -> str | None:
+    """Хеш текста документа на момент согласия — чтобы потом доказать, с какой редакцией человек согласился."""
+    f = WEB_DIR / name
+    return hashlib.sha256(f.read_bytes()).hexdigest() if f.is_file() else None

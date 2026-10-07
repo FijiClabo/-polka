@@ -50,7 +50,7 @@ def welcome() -> list[str]:
     return [
         f"Привет! Я — {P()}. Помогаю дочитывать книги, которые обычно остаются на середине.\n\n"
         "Как это устроено: ты берёшь свою книгу и вступаешь в <b>забег</b> — план на 21–60 дней, "
-        "по 15 минут чтения в день. В конце книга встаёт на полку вместе с конспектом.",
+        "по 15 минут чтения в день. В конце книга встаёт на твою полку.",
         "Каждый день читаешь свой отрезок — в приложении, в любой читалке или на бумаге — "
         "и за 30–60 секунд <b>пересказываешь</b> его мне голосом или текстом.\n\n"
         "Я не экзаменатор: просто убеждаюсь, что отрезок прочитан. Если что-то неясно — задам один вопрос.",
@@ -307,8 +307,8 @@ def state_message(state: str, *, next_title: str | None = None, start: date | No
         "waiting_start": status_in_list(start),
         "not_started": f"План стартует {d(start)}. Пересказы — с первого дня.",
         "finished": "Книга дочитана 🎉 Она уже на полке.",
-        "expired": "Срок забега вышел. Пересказы и конспект сохранились — дочитать можно в следующем забеге.",
-        "refunded": "Участие отменено, деньги возвращены. Будем рады видеть снова.",
+        "expired": "Срок забега вышел. Дочитать можно в следующем забеге — с этой же книгой или с другой.",
+        "refunded": "Участие отменено. Будем рады видеть снова.",
         "done_today": (f"На сегодня хватит — завтра следующий: «{e(next_title)}»." if next_title
                        else "На сегодня хватит — завтра следующий отрезок."),
     }.get(state, "Загляни в приложение — там всё видно.")
@@ -327,7 +327,7 @@ def achievements_message(codes: list[str]) -> str:
 def finished(title: str, days: int, streak: int, retells: int, partner: str | None) -> str:
     who = f" Вместе с {e(partner)}." if partner else ""
     return (f"🏁 <b>Дочитано!</b>\n«{e(title)}» за {days_word(days)}. Лучший стрик — {streak}, "
-            f"пересказов — {retells}.{who}\n\nКнига встала на полку, конспект собран из твоих пересказов.")
+            f"пересказов — {retells}.{who}\n\nКнига встала на твою полку.")
 
 
 # --------------------------------------------------------------------------- прочее
@@ -358,10 +358,10 @@ DELETE_CONFIRM = "Удалить профиль, книги и все перес
 def delete_confirm(sub_until=None, credits: int = 0) -> str:
     lost = []
     if sub_until:
-        lost.append(f"абонемент до {sub_until.day} {MONTHS[sub_until.month - 1]} (автопродление отключим)")
+        lost.append(f"абонемент до {sub_until.day} {MONTHS[sub_until.month - 1]}")
     if credits:
         lost.append(f"оплаченные забеги: {credits}")
-    tail = ("\n\nВместе с профилем сгорят " + " и ".join(lost) + ". Если хочешь вернуть деньги — сначала /money_back.") if lost else ""
+    tail = ("\n\nВместе с профилем сгорят " + " и ".join(lost) + ".") if lost else ""
     return DELETE_CONFIRM + tail
 DELETED = "Готово, всё удалено. Если захочешь вернуться — просто нажми /start."
 UNKNOWN_SHORT = "Чтобы сдать отрезок, перескажи его подробнее (длиннее 50 знаков) или пришли голосовое. Всё остальное — в приложении."
@@ -381,74 +381,45 @@ def rub(n: float) -> str:
     return f"{n:,.0f}".replace(",", "\u00a0") + "\u00a0₽"
 
 
-def _price(rub_or_stars: int, list_value: int, unit: str) -> str:
-    fmt = (lambda v: f"{v}\u00a0⭐") if unit == "stars" else rub
-    return f"<s>{fmt(list_value)}</s> {fmt(rub_or_stars)}" if rub_or_stars < list_value else fmt(rub_or_stars)
+def _price(price) -> str:
+    return f"<s>{rub(price.list_rub)}</s> {rub(price.rub)}" if price.rub < price.list_rub else rub(price.rub)
 
 
-def paywall(book_title: str | None, plan_days: int | None, prices: dict, *, card: bool, stars: bool,
-            guarantee_days: int, guarantee: bool = True) -> str:
+def paywall(book_title: str | None, plan_days: int | None, prices: dict) -> str:
     run, m, y = prices["run"], prices["month"], prices["year"]
-    unit = "rub" if card else "stars"
-    val = (lambda p: p.rub) if card else (lambda p: p.stars)
-    lst = (lambda p: p.list_rub) if card else (lambda p: p.list_stars)
-    head = (f"План готов: «{e(book_title)}» за {days_word(plan_days)}. Осталось открыть доступ — и первый отрезок "
-            f"придёт сразу (или завтра утром, если уже вечер).") if book_title and plan_days else \
+    head = (f"План готов: «{e(book_title)}» за {days_word(plan_days)}. Осталось открыть доступ — первый отрезок "
+            f"придёт сразу, а если уже вечер — завтра утром.") if book_title and plan_days else \
         "Чтобы начать забег, открой доступ:"
-    lines = [head, ""]
-    lines.append(f"📖 <b>Забег — {_price(val(run), lst(run), unit)}</b>. Одна книга до финиша: план, проверка пересказов, "
-                 "напарник, конспект.")
-    lines.append(f"🔁 <b>Абонемент — {_price(val(m), lst(m), unit)}/мес или {_price(val(y), lst(y), unit)}/год</b>. "
-                 "Книга за книгой без доплат и вторая заморозка в неделю.")
+    lines = [head, "",
+             f"📖 <b>Одна книга — {_price(run)}</b>\nЗабег до финиша: план, проверка пересказов, напарник.",
+             f"📚 <b>Абонемент — {_price(m)} в месяц или {_price(y)} в год</b>\nКнига за книгой без доплат "
+             "и вторая заморозка в неделю."]
     if run.promo and run.discount:
-        lines.append(f"🎟 Промокод {e(run.promo)}: −{run.discount}%")
-    lines.append("")
-    if guarantee:
-        lines.append(f"Гарантия: не зашло — вернём всё в первые {days_word(guarantee_days)}, без вопросов (один раз, "
-                     "/money_back).")
-    if stars and not card:
-        lines.append("Оплата — звёздами Telegram ⭐, купить их можно прямо в окне оплаты.")
-    lines.append("Есть код активации (например, подарочный) — нажми «У меня есть код».")
+        lines += ["", f"🎟 Промокод {e(run.promo)}: −{run.discount}%"]
     return "\n".join(lines)
 
 
-def paywall_buttons(prices: dict, *, card: bool, stars: bool) -> list[list[dict]]:
-    rows = []
+def paywall_buttons(prices: dict, *, in_chat: bool = True) -> list[list[dict]]:
+    """in_chat — ссылка на оплату прямо в чате; иначе (нужен e-mail для чека) — экран оплаты в приложении."""
     run, m, y = prices["run"], prices["month"], prices["year"]
-    if run.free:
-        return [[{"text": "🎟 Активировать по промокоду", "callback": "pay:free:run"}]]
-    if stars:
-        rows.append([{"text": f"⭐ Забег — {run.stars} звёзд", "callback": "pay:run:stars"}])
-        sub = []
-        for pr, label in ((m, "Месяц"), (y, "Год")):
-            if pr.free and pr.promo:
-                rows.insert(0, [{"text": f"🎟 {label} по промокоду — бесплатно", "callback": f"pay:free:{pr.product}"}])
-            else:
-                sub.append({"text": f"{label} — {pr.stars} ⭐", "callback": f"pay:{pr.product}:stars"})
-        if sub:
-            rows.append(sub)
-    if card:  # аварийный режим: рубли в боте
-        rows.append([{"text": f"Забег — {rub(run.rub)}", "callback": "pay:run:card"}])
-        rows.append([{"text": f"Месяц — {rub(m.rub)}", "callback": "pay:month:card"},
-                     {"text": f"Год — {rub(y.rub)}", "callback": "pay:year:card"}])
-    rows.append([{"text": "🔑 У меня есть код", "callback": "code:enter"}])
+    rows = []
+    for pr, label in ((run, "Одна книга"), (m, "Месяц"), (y, "Год")):
+        if pr.free and pr.promo:
+            rows.append([{"text": f"🎟 {label} по промокоду — бесплатно", "callback": f"pay:free:{pr.product}"}])
+    if in_chat:
+        rows.append([{"text": f"Оплатить книгу — {rub(run.rub)}", "callback": "pay:run"}])
+        rows.append([{"text": f"Месяц — {rub(m.rub)}", "callback": "pay:month"},
+                     {"text": f"Год — {rub(y.rub)}", "callback": "pay:year"}])
+    else:
+        rows.append([{"text": "Оплатить", "webapp": "pay"}])
     rows.append([{"text": "Тарифы в приложении", "webapp": "pay"}])
     return rows
 
 
-ASK_CODE = "Пришли код активации — 10 букв и цифр."
-CODE_RETRY = "Попробовать ещё раз: <code>/code КОД</code>"
-CODE_RESULT = {
-    "not_found": "Такого кода нет. Проверь буквы — например, путают O и 0 — или напиши в /paysupport.",
-    "used": "Этот код уже активирован другим аккаунтом. Если это ошибка — напиши в /paysupport.",
-    "already": "Этот код уже активирован на тебе — всё в порядке ✅",
-    "expired": "Срок действия кода истёк. Напиши в /paysupport — разберёмся.",
-}
-
-
-def code_ok(product: str) -> str:
+def pay_link(product: str) -> str:
     what = {"run": "забег на одну книгу", "month": "абонемент на месяц", "year": "абонемент на год"}[product]
-    return f"Код активирован: {what} ✅"
+    return (f"Оплата: {what}. Откроется защищённая страница ЮKassa — картой или через СБП. "
+            "После оплаты возвращайся сюда: доступ откроется сам.")
 
 
 def consent_text(consent_url: str | None, privacy_url: str | None) -> str:
@@ -459,51 +430,38 @@ def consent_text(consent_url: str | None, privacy_url: str | None) -> str:
         links.append(f'<a href="{privacy_url}">политика конфиденциальности</a>')
     docs = (" Документы: " + " и ".join(links) + ".") if links else ""
     return ("Последний шаг перед стартом — согласие на обработку данных.\n\n"
-            "Что храним: имя и id в Telegram, часовой пояс, книги и пересказы — чтобы строить план, проверять "
-            "пересказы и напоминать о чтении. Голосовые не храним: распознаём и сразу удаляем. Пересказы видишь только ты."
+            "Что храним: имя и id в Telegram, часовой пояс, книги и прогресс — чтобы строить план и напоминать о чтении. "
+            "Пересказы и голосовые не храним: они нужны только для проверки и сразу удаляются. "
+            "Напарник видит лишь твой прогресс."
             f"{docs}\n\nОтозвать согласие и удалить всё — командой /delete_me.")
 
 
-CONSENT_BTN = "✅ Даю согласие"
-
-
-def sub_cancel_result(res: str, until) -> str:
-    if res == "ok":
-        when = f" до {until.day} {MONTHS[until.month - 1]}" if until else ""
-        return f"Автопродление отключено. Абонемент действует{when} — списаний больше не будет."
-    if res == "not_recurring":
-        return "Автопродления нет — списаний не будет."
-    return "Не получилось отключить автоматически. Отключи в Telegram: Настройки → Звёзды → Подписки — или напиши в /paysupport."
-
-
-PAY_DISABLED = "Онлайн-оплата ещё не подключена. Напиши в поддержку (/paysupport) — доступ откроют вручную."
+CONSENT_BTN = "Даю согласие"
 
 
 def pay_ok_started(start: date | None) -> str:
     when = "сегодня" if start is None else d(start)
-    return f"Оплата прошла, спасибо! 🔥 Забег открыт, старт — {when}. Первый отрезок пришлю утром в день старта."
+    return f"Оплата прошла, спасибо! Забег открыт, старт — {when}. Первый отрезок придёт утром в день старта."
 
 
 def pay_ok_started_today() -> str:
-    return "Оплата прошла, спасибо! 🔥 Забег стартует сегодня — первый отрезок уже ждёт."
+    return "Оплата прошла, спасибо! Забег начинается сегодня — первый отрезок уже ждёт."
 
 
 PAY_OK_NEXT = "Оплата прошла, спасибо! Забег на счету — он откроется сам, когда начнёшь следующую книгу."
-PAY_OK_PLAN = "Оплата прошла, спасибо! Осталось выбрать срок для книги — и забег стартует."
-PAY_OK_CREDIT = ("Оплата прошла, спасибо! Забег на счету — осталось добавить книгу и выбрать срок, "
-                 "и он стартует сам.")
+PAY_OK_PLAN = "Оплата прошла, спасибо! Осталось выбрать срок для книги — и забег начнётся."
+PAY_OK_CREDIT = "Оплата прошла, спасибо! Забег на счету — осталось добавить книгу и выбрать срок, и он начнётся сам."
 
 
-def pay_ok_subscription(until, recurring: bool) -> str:
-    tail = " Продлевается автоматически, отменить можно в любой момент в настройках Telegram." if recurring else ""
-    return (f"Абонемент активен до {until.day} {MONTHS[until.month - 1]} {until.year}. "
-            f"Книга за книгой без доплат и вторая заморозка в неделю.{tail}")
+def pay_ok_subscription(until) -> str:
+    return (f"Абонемент действует до {until.day} {MONTHS[until.month - 1]} {until.year}. "
+            "Книга за книгой без доплат и вторая заморозка в неделю.")
 
 
 def promo_applied(code: str, discount: int) -> str:
     if discount >= 100:
         return f"Промокод {e(code)} принят: доступ бесплатно 🎉"
-    return f"Промокод {e(code)} принят: скидка {discount}% ✓"
+    return f"Промокод {e(code)} принят: скидка {discount}%."
 
 
 PROMO_BAD = "Такого промокода нет или он закончился."
@@ -512,14 +470,10 @@ PROMO_BAD = "Такого промокода нет или он закончил
 def terms_text(offer_url: str | None, privacy_url: str | None, consent_url: str | None = None) -> str:
     s = get_settings()
     parts = ["<b>Условия</b>",
-             "Услуга — сервис чтения «забег»: план для твоей книги на 21–60 дней, ежедневная проверка пересказов ИИ, "
-             "напарник и конспект. Абонемент — забеги без доплат на месяц или год.",
-             (f"Цены: забег — {s.price_run_stars} ⭐ ({rub(s.price_run_rub)}), месяц — {s.price_month_stars} ⭐ "
-              f"({rub(s.price_month_rub)}), год — {s.price_year_stars} ⭐ ({rub(s.price_year_rub)}).") if s.payments_yookassa
-             else (f"Цены: забег — {s.price_run_stars} ⭐, месяц — {s.price_month_stars} ⭐ (продлевается сам), "
-                   f"год — {s.price_year_stars} ⭐."),
-             f"Возврат: в первые {days_word(s.refund_days)} после оплаты — без вопросов, один раз (/money_back). Позже — "
-             "за неиспользованную часть по заявке, ответ в течение 10 дней. Автопродление отключается командой /cancel_sub."]
+             "Сервис чтения: план для твоей книги на 21–60 дней, ежедневная проверка пересказов, напарник и полка. "
+             "Абонемент — забеги без доплат на месяц или год, без автопродления.",
+             f"Цены: забег — {rub(s.price_run_rub)}, месяц — {rub(s.price_month_rub)}, год — {rub(s.price_year_rub)}. "
+             "Оплата — кнопкой в боте, через ЮKassa."]
     if offer_url:
         parts.append(f"Оферта (ред. {e(s.offer_version)}): {offer_url}")
     if privacy_url:
@@ -536,24 +490,13 @@ def terms_text(offer_url: str | None, privacy_url: str | None, consent_url: str 
 def paysupport_text() -> str:
     s = get_settings()
     contact = s.support_contact or s.seller_email or "в поддержку через /help"
-    return (f"Вопросы по оплате — {e(contact)}, отвечаем в течение 48 часов.\n"
-            f"Возврат в первые {days_word(s.refund_days)} после оплаты, один раз — командой /money_back, звёзды "
-            "возвращаются сразу. Позже — заявка на возврат за неиспользованную часть, ответ в течение 10 дней.\n"
-            "Отключить автопродление абонемента — /cancel_sub. Активировать код — /code.")
+    return f"Вопросы по оплате — {e(contact)}. Отвечаем в течение двух дней."
 
 
-REFUND_CONFIRM = "Вернуть деньги за последнюю оплату? Доступ к забегу закроется."
-REFUND_OK = "Готово: деньги возвращены. Жаль расставаться — возвращайся, когда захочешь."
-REFUND_REQUESTED = "Запрос на возврат принят — автоматически вернуть не получилось, администратор сделает это вручную и напишет сюда."
-REFUND_REQUESTED_PARTIAL = ("Заявка принята. Рассмотрим её в течение 10 дней и вернём деньги за неиспользованную часть — "
-                            "ответ придёт сюда.")
-
-
-def paywall_nudge(book_title: str | None, guarantee_days: int, guarantee: bool = True) -> str:
+def paywall_nudge(book_title: str | None) -> str:
     book = f"«{e(book_title)}» " if book_title else ""
-    tail = f" Если не зайдёт, вернём деньги в первые {days_word(guarantee_days)} — без вопросов." if guarantee else ""
     return (f"План для {book}готов и ждёт старта 📖\n\n"
-            f"15 минут чтения и минута пересказа в день — и через месяц книга дочитана.{tail}")
+            "15 минут чтения и минута пересказа в день — и через месяц книга дочитана.")
 
 
 def sub_expiring(until) -> str:
@@ -563,10 +506,10 @@ def sub_expiring(until) -> str:
 
 def after_finish(kind: str, has_sub: bool, credits: int = 0) -> str:
     if has_sub:
-        return "Что дальше? Абонемент активен — следующая книга без доплат. Выбирай 📚"
+        return "Что дальше? Абонемент действует — следующая книга без доплат. Выбирай 📚"
     if credits:
         return "Что дальше? Следующий забег уже оплачен — выбирай книгу 📚"
     if kind == "sprint":
-        return ("Спринт пройден — значит, привычка работает 🔥 Дальше — забег на целую книгу: свой план на 21–60 дней, "
-                "напарник и конспект.")
+        return ("Спринт пройден — значит, привычка работает. Дальше — забег на целую книгу: свой план на 21–60 дней "
+                "и напарник.")
     return "Что дальше? Следующая книга — в любой день. С абонементом — книга за книгой без доплат."

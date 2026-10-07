@@ -189,7 +189,7 @@ class DemoProvider:
         return LLMResult(json.dumps({
             "verdict": "accepted", "confidence": 0.9,
             "reply": "Засчитываю — видно, что отрезок прочитан. (Это демо-режим без настоящего ИИ.)",
-            "question": "Какой момент показался самым неожиданным?", "note_for_summary": "Демо-заметка к конспекту.",
+            "question": "Какой момент показался самым неожиданным?", "note_for_summary": "",
         }, ensure_ascii=False), self.name, self.model)
 
 

@@ -20,12 +20,11 @@ from books.plan import segment_minutes
 from bot.ui import flush
 from core import clock
 from core.days import clock_minutes_in_user_day, minutes_since_day_start, plan_day_number
-from db.models import Book, DayResult, Enrollment, Run, Segment, User
+from db.models import Book, DayResult, Enrollment, Retelling, Run, Segment, User
 from db.session import session_scope
 from services.common import Outbox, OutMsg, allow_initiative, allow_once, log_event, today_for
 from services.flow import process_pending_queue
 from services.progress import close_pending_days, load_view
-from services.shelf import conspect
 from services.social import get_pair_for, public_status
 from settings import get_settings
 
@@ -45,7 +44,7 @@ async def tick(bot: Bot) -> None:
     await process_pending_queue(outbox)
     await flush(bot, outbox)
     await _summaries(limit=5)
-    await _conspects()
+    await _forget_stale_texts()
 
 
 async def _stuck_books() -> None:
@@ -138,10 +137,9 @@ async def _morning_evening(s, enr: Enrollment, user: User, outbox: Outbox) -> No
 
 async def _sales(outbox: Outbox) -> None:
     """Напоминания, которые помогают продажам: каждое уходит человеку один раз и не раньше утра."""
-    from services.billing import guarantee_available, subscription_active
+    from services.billing import subscription_active
     from services.runs import sprint_used
 
-    s_ = get_settings()
     now = clock.now()
     try:
         async with session_scope() as s:
@@ -163,8 +161,7 @@ async def _sales(outbox: Outbox) -> None:
                 buttons = [[{"text": "Открыть забег", "webapp": "pay"}]]
                 if not await sprint_used(s, user.id):
                     buttons.append([{"text": "Сначала спринт на 7 дней — бесплатно", "callback": "sprint:start"}])
-                guarantee = await guarantee_available(s, user)
-                outbox.add(OutMsg(user.tg_id, texts.paywall_nudge(book.title if book else None, s_.refund_days, guarantee),
+                outbox.add(OutMsg(user.tg_id, texts.paywall_nudge(book.title if book else None),
                                   buttons=buttons, kind="paywall"))
                 await log_event(s, "paywall_nudge", user.id, enr.run_id)
 
@@ -172,7 +169,7 @@ async def _sales(outbox: Outbox) -> None:
             users = list(await s.scalars(
                 select(User).where(
                     User.subscription_until.is_not(None), User.subscription_until > now,
-                    User.subscription_until < now + timedelta(days=7), User.subscription_recurring.is_(False),
+                    User.subscription_until < now + timedelta(days=7),
                     User.bot_blocked.is_(False),
                 )
             ))
@@ -192,7 +189,7 @@ async def _sales(outbox: Outbox) -> None:
     except Exception:
         log.exception("sales job failed")
     try:
-        from services.site_orders import expire_stale_orders
+        from services.payments import expire_stale_orders
 
         async with session_scope() as s:
             await expire_stale_orders(s)
@@ -229,20 +226,17 @@ async def _summaries(limit: int) -> None:
                 seg.summary, seg.retell_prompt = res[0], (res[1] or None)
 
 
-async def _conspects() -> None:
+async def _forget_stale_texts() -> None:
+    """Пересказ, на уточнение которого так и не ответили, не храним дольше двух дней."""
+    from services.retell import forget_texts
+
     async with session_scope() as s:
-        enrs = list(await s.scalars(
-            select(Enrollment).where(Enrollment.status == "finished", Enrollment.conspect_intro.is_(None),
-                                     Enrollment.book_id.is_not(None)).limit(2)
+        stale = list(await s.scalars(
+            select(Retelling).where(Retelling.verdict == "clarify", Retelling.raw_text != "",
+                                    Retelling.created_at < clock.now() - timedelta(days=2)).limit(200)
         ))
-        for e in enrs:
-            user = await s.get(User, e.user_id)
-            try:
-                await conspect(s, user, e.book_id, generate_intro=True)
-            except Exception:
-                log.exception("conspect failed")
-            if e.conspect_intro is None:
-                e.conspect_intro = ""  # не пытаемся бесконечно
+        for r in stale:
+            await forget_texts(s, r)
 
 
 async def run_scheduler(bot: Bot, stop: asyncio.Event) -> None:

@@ -145,7 +145,7 @@ async def test_full_flow(env):
     await press(bot, dp, U, "plan:21")
     assert any("План готов" in t for t in session.texts())
     assert "Осталось открыть доступ" in session.texts()[-1]  # пейвол
-    assert "pay:run:stars" in session.last_markup_callbacks()
+    assert "Оплата скоро появится" in session.texts()[-1]  # ЮKassa не подключена — текст вместо кнопки
 
     # плохой файл
     await send_doc(bot, dp, session, U, "scan.epub", sample_set()["07_scanned_images.epub"])
@@ -215,10 +215,31 @@ async def test_paper_book_flow(env):
     assert any("План готов" in t for t in session.texts())
 
 
-async def test_self_serve_paid_flow(env):
-    """Без ведущего: книга → план → пейвол → счёт в Stars → оплата → день 1 → возврат по гарантии."""
-    from aiogram.methods import AnswerPreCheckoutQuery, RefundStarPayment, SendInvoice
-    from aiogram.types import PreCheckoutQuery, SuccessfulPayment
+async def test_self_serve_paid_flow(env, monkeypatch):
+    """Без ведущего: книга → план → кнопка «Оплатить» (ЮKassa) → подтверждение оплаты → день 1."""
+    from sqlalchemy import func, select
+
+    from db.models import Purchase
+    from db.session import session_scope
+    from services import payments
+    from settings import get_settings
+
+    monkeypatch.setenv("YOOKASSA_SHOP_ID", "1")
+    monkeypatch.setenv("YOOKASSA_SECRET_KEY", "x")
+    get_settings.cache_clear()
+    fake: dict[str, dict] = {}
+
+    async def create_payment(p, return_url):
+        pid = f"{len(fake) + 1:08d}-aaaa"
+        p.provider_charge_id = pid
+        fake[pid] = {"id": pid, "status": "pending", "amount": {"value": f"{p.amount / 100:.2f}", "currency": "RUB"}}
+        return f"https://yoomoney.ru/checkout/{pid}"
+
+    async def fetch_payment(pid):
+        return fake.get(pid)
+
+    monkeypatch.setattr(payments, "create_payment", create_payment)
+    monkeypatch.setattr(payments, "fetch_payment", fetch_payment)
 
     bot, dp, session = env
     day = datetime.now().date()
@@ -233,39 +254,26 @@ async def test_self_serve_paid_flow(env):
     await send_doc(bot, dp, session, U, "book.epub", sample_set()["01_clean_with_toc.epub"])
     await press(bot, dp, U, "plan:21")
     assert "Осталось открыть доступ" in session.texts()[-1]
+    assert "pay:run" in session.last_markup_callbacks()
+    assert "звёзд" not in session.texts()[-1]
 
-    await press(bot, dp, U, "pay:run:stars")
-    inv = next(m for m in reversed(session.sent) if isinstance(m, SendInvoice))
-    assert inv.currency == "XTR" and inv.prices[0].amount > 0
+    await press(bot, dp, U, "pay:run")
+    last = next(m for m in reversed(session.sent) if isinstance(m, SendMessage))
+    url = last.reply_markup.inline_keyboard[0][0].url
+    assert url.startswith("https://yoomoney.ru/") and "ЮKassa" in last.text
 
-    q = PreCheckoutQuery(id="pc1", from_user=tg_user(U), currency="XTR", total_amount=inv.prices[0].amount,
-                         invoice_payload=inv.payload)
-    await dp.feed_update(bot, Update(update_id=next(_ids), pre_checkout_query=q))
-    ans = next(m for m in reversed(session.sent) if isinstance(m, AnswerPreCheckoutQuery))
-    assert ans.ok is True
+    # ЮKassa подтвердила оплату и прислала уведомление
+    from bot.handlers_pay import after_payment_message
 
-    sp = SuccessfulPayment(currency="XTR", total_amount=inv.prices[0].amount, invoice_payload=inv.payload,
-                           telegram_payment_charge_id="tg-charge-1", provider_payment_charge_id="")
-    msg = Message(message_id=next(_ids), date=datetime.now(), chat=Chat(id=U, type="private"), from_user=tg_user(U),
-                  successful_payment=sp)
-    await dp.feed_update(bot, Update(update_id=next(_ids), message=msg))
+    pid = next(iter(fake))
+    fake[pid]["status"] = "succeeded"
+    async with session_scope() as s:
+        p = await payments.handle_notification(s, {"event": "payment.succeeded", "object": {"id": pid}})
+        assert p is not None
+        uid, activated = p.user_id, bool(getattr(p, "activated_now", None))
+    await after_payment_message(bot, U, uid, "run", activated)
     assert any("Оплата прошла" in t for t in session.texts())
     assert any("День 1 из 21" in t for t in session.texts())
-
-    # повторная доставка того же платежа ничего не дублирует
-    await dp.feed_update(bot, Update(update_id=next(_ids), message=msg))
-    from sqlalchemy import func, select
-
-    from db.models import Purchase
-    from db.session import session_scope
-
     async with session_scope() as s:
-        assert await s.scalar(select(func.count(Purchase.id))) == 1
-
-    await send_text(bot, dp, U, "/money_back")
-    assert "mb:yes" in session.last_markup_callbacks()
-    await press(bot, dp, U, "mb:yes")
-    assert any(isinstance(m, RefundStarPayment) and m.telegram_payment_charge_id == "tg-charge-1" for m in session.sent)
-    assert "деньги возвращены" in session.texts()[-1]
-    await send_text(bot, dp, U, "/today")
-    assert "День 1 из 21" not in session.texts()[-1]
+        assert await s.scalar(select(func.count(Purchase.id)).where(Purchase.status == "paid")) == 1
+    get_settings.cache_clear()

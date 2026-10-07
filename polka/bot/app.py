@@ -38,11 +38,9 @@ USER_COMMANDS = [
     BotCommand(command="friends", description="Друзья и личная ссылка"),
     BotCommand(command="settings", description="Время и часовой пояс"),
     BotCommand(command="buy", description="Тарифы и оплата"),
-    BotCommand(command="code", description="Активировать код с сайта"),
     BotCommand(command="help", description="Как это работает"),
     BotCommand(command="terms", description="Условия и оферта"),
-    BotCommand(command="paysupport", description="Вопросы по оплате и возврат"),
-    BotCommand(command="cancel_sub", description="Отключить автопродление"),
+    BotCommand(command="paysupport", description="Вопросы по оплате"),
     BotCommand(command="delete_me", description="Отозвать согласие и удалить данные"),
 ]
 ADMIN_COMMANDS = USER_COMMANDS + [

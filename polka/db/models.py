@@ -67,9 +67,8 @@ class User(Base):
     run_credits: Mapped[int] = mapped_column(Integer, default=0)  # оплаченные, но не начатые забеги
     subscription_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     subscription_kind: Mapped[str | None] = mapped_column(String(16))  # month | year
-    subscription_recurring: Mapped[bool] = mapped_column(Boolean, default=False)  # автопродление (Stars)
     sub_reminded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    star_sub_charge_id: Mapped[str | None] = mapped_column(String(128))  # первый платёж Stars-подписки — для отмены
+    email: Mapped[str | None] = mapped_column(String(128))  # для чека 54-ФЗ, если продавец их формирует
     created_at: Mapped[datetime] = _now_col()
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -354,8 +353,8 @@ class AppState(Base):
 class Purchase(Base):
     """Оплата: разовый забег, абонемент на месяц или год.
 
-    В Telegram — звёздами (сразу на аккаунт). На сайте — рублями через ЮKassa: заказ без аккаунта,
-    после оплаты — одноразовый код, который человек активирует в боте (user_id появляется тогда).
+    Кнопка «Оплатить» в боте или мини-приложении создаёт заказ (pending) и платёж в ЮKassa;
+    после подтверждения ЮKassa заказ становится paid и человек сразу получает доступ.
     """
 
     __tablename__ = "purchases"
@@ -363,22 +362,17 @@ class Purchase(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
     product: Mapped[str] = mapped_column(String(16))  # run | month | year
-    provider: Mapped[str] = mapped_column(String(16))  # stars | yookassa | manual | promo
-    currency: Mapped[str] = mapped_column(String(8))  # XTR | RUB
-    amount: Mapped[int] = mapped_column(Integer)  # Stars — штук, RUB — копеек
-    list_amount: Mapped[int] = mapped_column(Integer, default=0)  # цена без скидки (в тех же единицах)
+    provider: Mapped[str] = mapped_column(String(16))  # yookassa | manual | promo
+    currency: Mapped[str] = mapped_column(String(8), default="RUB")
+    amount: Mapped[int] = mapped_column(Integer)  # копейки
+    list_amount: Mapped[int] = mapped_column(Integer, default=0)  # цена без скидки, копейки
     promo_code: Mapped[str | None] = mapped_column(String(32))
-    # pending (заказ на сайте) | paid | canceled | refund_requested | refunded
-    status: Mapped[str] = mapped_column(String(16), default="paid")
-    telegram_charge_id: Mapped[str | None] = mapped_column(String(128), unique=True)
+    status: Mapped[str] = mapped_column(String(16), default="paid")  # pending | paid | canceled | refunded
     provider_charge_id: Mapped[str | None] = mapped_column(String(128), index=True)  # id платежа ЮKassa
-    is_recurring: Mapped[bool] = mapped_column(Boolean, default=False)
+    order_id: Mapped[str | None] = mapped_column(String(36), unique=True)
     valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     email: Mapped[str | None] = mapped_column(String(128))
-    order_id: Mapped[str | None] = mapped_column(String(36), unique=True)  # заказ на сайте
-    activation_code: Mapped[str | None] = mapped_column(String(24), unique=True)
-    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    source: Mapped[str | None] = mapped_column(String(64))  # метка рекламы для заказов с сайта
+    source: Mapped[str | None] = mapped_column(String(64))
     offer_version: Mapped[str | None] = mapped_column(String(16))
     created_at: Mapped[datetime] = _now_col()
     refunded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
