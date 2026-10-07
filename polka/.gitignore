@@ -1,0 +1,25 @@
+# секреты
+.env
+*.env.local
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# данные и загрузки книг — никогда в репозиторий
+data/
+backups/
+samples/
+tests/books/files/
+tests/ai_eval/results/
+
+# webapp
+webapp/node_modules/
+webapp/dist/
+
+# прочее
+.DS_Store
+*.log

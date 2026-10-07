@@ -1,0 +1,45 @@
+[project]
+name = "polka"
+version = "1.0.0"
+description = "Полка: дочитай книгу за 30 дней. Telegram-бот и мини-приложение."
+requires-python = ">=3.12"
+dependencies = [
+    "aiogram>=3.13,<4",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sqlalchemy[asyncio]>=2.0.30",
+    "asyncpg>=0.29",
+    "alembic>=1.13",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "httpx>=0.27",
+    "anthropic>=0.40",
+    "defusedxml>=0.7",
+    "pillow>=10.4",
+    "python-multipart>=0.0.9",
+    "tzdata>=2024.1",
+    "timezonefinder>=6.5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "aiosqlite>=0.20",
+    "ruff>=0.5",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+extend-exclude = ["webapp", "db/migrations/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501", "B008"]
