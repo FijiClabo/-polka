@@ -63,7 +63,7 @@ async def current_user(
     s = get_settings()
     raw = authorization[4:] if authorization.lower().startswith("tma ") else authorization
     if s.dev_auth_bypass and raw.startswith("dev:"):
-        tg_user = {"id": int(raw[4:] or 1), "first_name": "Dev"}
+        tg_user = {"id": int(raw[4:] or 1)}  # только локально: профиль не перезаписываем
     else:
         try:
             data = validate_init_data(raw, s.bot_token)
@@ -71,7 +71,7 @@ async def current_user(
             raise HTTPException(status_code=401, detail="Нужно открыть приложение из Telegram") from e
         tg_user = data["user"]
     user, _ = await get_or_create_user(
-        session, int(tg_user["id"]), first_name=tg_user.get("first_name", ""), last_name=tg_user.get("last_name"),
+        session, int(tg_user["id"]), first_name=tg_user.get("first_name"), last_name=tg_user.get("last_name"),
         username=tg_user.get("username"), language_code=tg_user.get("language_code"), photo_url=tg_user.get("photo_url"),
     )
     return user

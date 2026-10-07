@@ -1,0 +1,16 @@
+# HTTPS-сертификат Let's Encrypt выпускается и продлевается автоматически.
+{$DOMAIN} {
+	encode zstd gzip
+
+	@assets path /app/assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	reverse_proxy app:8000
+}

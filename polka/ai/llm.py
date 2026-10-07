@@ -168,6 +168,31 @@ class YandexGPTProvider:
         return LLMResult(text=text, provider=self.name, model=model)
 
 
+# --------------------------------------------------------------------------- демо (без ключей)
+
+
+class DemoProvider:
+    """Заглушка для локального просмотра без ключей: засчитывает любой пересказ. LLM_PROVIDERS=demo."""
+
+    name = "demo"
+    model = "demo"
+
+    async def complete(
+        self, system: str, context: str, prompt: str, *, schema: dict | None, cheap: bool, max_tokens: int
+    ) -> LLMResult:
+        if schema and "summary" in schema.get("properties", {}):
+            return LLMResult(json.dumps({"summary": "Краткое содержание (демо).",
+                                         "retell_prompt": "Что запомнилось в этом отрезке? Расскажи своими словами."},
+                                        ensure_ascii=False), self.name, self.model)
+        if schema and "intro" in schema.get("properties", {}):
+            return LLMResult('{"intro": "Итог книги (демо)."}', self.name, self.model)
+        return LLMResult(json.dumps({
+            "verdict": "accepted", "confidence": 0.9,
+            "reply": "Засчитываю — видно, что отрезок прочитан. (Это демо-режим без настоящего ИИ.)",
+            "question": "Какой момент показался самым неожиданным?", "note_for_summary": "Демо-заметка к конспекту.",
+        }, ensure_ascii=False), self.name, self.model)
+
+
 # --------------------------------------------------------------------------- цепочка
 
 
@@ -206,6 +231,8 @@ def build_chain(s: Settings | None = None) -> LLMChain:
             providers.append(AnthropicProvider(s))
         elif name == "yandex" and s.yandex_api_key and s.yandex_folder_id:
             providers.append(YandexGPTProvider(s))
+        elif name == "demo":
+            providers.append(DemoProvider())
     return LLMChain(providers)
 
 

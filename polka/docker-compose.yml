@@ -1,0 +1,56 @@
+# Всё приложение на одном сервере: база, приложение (бот + API + планировщик), Caddy (HTTPS).
+# Запуск: bash scripts/deploy.sh   (или: docker compose up -d --build)
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: polka
+      POSTGRES_USER: polka
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-polka}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U polka -d polka"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://polka:${POSTGRES_PASSWORD:-polka}@db:5432/polka
+      DATA_DIR: /app/data
+      BOT_MODE: ${BOT_MODE:-webhook}
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?Укажи DOMAIN в .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

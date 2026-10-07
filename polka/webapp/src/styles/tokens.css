@@ -1,0 +1,91 @@
+/* Дизайн-токены по макету «Полка · v3». Тёмная тема — основная, светлая — «бумажная». */
+
+:root {
+  --font-ui: "Onest Variable", "Onest", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-num: "Unbounded Variable", "Unbounded", var(--font-ui);
+  --font-title: "Cormorant", "Georgia", serif;
+  --font-read: "Literata", "Georgia", serif;
+
+  --accent-1: #ffb547;
+  --accent-2: #ff6b3d;
+  --accent: #ff7a3d;
+  --accent-grad: linear-gradient(100deg, var(--accent-1) 0%, var(--accent-2) 100%);
+  --accent-glow: 0 10px 30px -8px rgba(255, 110, 50, 0.55);
+  --violet: #b8a8ff;
+  --green: #6ee7a7;
+  --blue: #8ea2ff;
+  --danger: #ff6b6b;
+
+  --r-s: 12px;
+  --r-m: 18px;
+  --r-l: 26px;
+  --r-xl: 32px;
+  --pad: 16px;
+  --tabbar-h: 64px;
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-safe-area-inset-bottom, 0px));
+  --safe-top: var(--tg-content-safe-area-inset-top, 0px);
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+:root,
+[data-theme="dark"] {
+  --bg: #0e0e10;
+  --bg-2: #141417;
+  --surface: #1a1a1d;
+  --surface-2: #232327;
+  --surface-3: #2c2c31;
+  --line: rgba(255, 255, 255, 0.07);
+  --text: #f4f1ec;
+  --text-2: #c9c4bd;
+  --muted: #8f8b85;
+  --faint: #55524f;
+  --chip: #26262a;
+  --done-text: #2a1608;
+  --frozen-bg: #26315c;
+  --frozen-text: #9db0ff;
+  --missed-bg: #2a1d1d;
+  --missed-text: #8a5a55;
+  --future-bg: #1f1f23;
+  --future-text: #4f4c49;
+  --success-bg: rgba(110, 231, 167, 0.12);
+  --streak-pill-bg: #2a1a10;
+  --streak-pill-border: rgba(255, 122, 61, 0.35);
+  --partner-grad: radial-gradient(120% 120% at 85% 0%, #4b3a8f 0%, #2a2150 45%, #1b1730 100%);
+  --reader-bg: #18140f;
+  --reader-text: #e9e1d4;
+  --shadow: 0 12px 40px -12px rgba(0, 0, 0, 0.6);
+  --cover-shadow: 0 18px 30px -10px rgba(0, 0, 0, 0.7);
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --bg: #f5f2ed;
+  --bg-2: #efebe4;
+  --surface: #ffffff;
+  --surface-2: #f2eee8;
+  --surface-3: #e8e2d9;
+  --line: rgba(40, 30, 20, 0.08);
+  --text: #1b1714;
+  --text-2: #3d3630;
+  --muted: #7b746c;
+  --faint: #b5ada3;
+  --chip: #f0ebe4;
+  --done-text: #3a1a06;
+  --frozen-bg: #dfe5ff;
+  --frozen-text: #4459c9;
+  --missed-bg: #f6e3e0;
+  --missed-text: #b0665c;
+  --future-bg: #efebe4;
+  --future-text: #b9b1a6;
+  --success-bg: rgba(46, 160, 100, 0.12);
+  --green: #1f9d5c;
+  --violet: #6b56d6;
+  --streak-pill-bg: #fff1e8;
+  --streak-pill-border: rgba(255, 107, 61, 0.35);
+  --partner-grad: radial-gradient(120% 120% at 85% 0%, #cfc4ff 0%, #e6e0ff 50%, #f3f0ff 100%);
+  --reader-bg: #fbf7f0;
+  --reader-text: #2a241d;
+  --shadow: 0 12px 30px -16px rgba(60, 40, 20, 0.35);
+  --cover-shadow: 0 16px 26px -12px rgba(60, 30, 10, 0.45);
+  color-scheme: light;
+}

@@ -200,12 +200,12 @@ def morning(name: str, day_n: int, plan_days: int, title: str, pages: str, minut
 def evening(partner_name: str | None, partner_done: bool) -> str:
     base = "Сегодняшний отрезок ещё ждёт пересказа. Минуты хватит."
     if partner_name and partner_done:
-        base = f"У {e(partner_name)} день уже сдан. Твоя очередь — минуты хватит."
+        base = f"{e(partner_name)}: день уже сдан. Твоя очередь — минуты хватит."
     return base
 
 
 def partner_done(name: str) -> str:
-    return f"У {e(name)} день сдан ✓ Твоя очередь."
+    return f"{e(name)}: день сдан ✓ Теперь твоя очередь."
 
 
 def nudge_received(name: str) -> str:
@@ -244,7 +244,7 @@ def accepted(reply: str, question: str | None, streak: int, streak_grew: bool, *
         parts.append(f"Стрик: <b>{streak}</b> 🔥")
     if partner_name is not None:
         if partner_done:
-            parts.append(f"У {e(partner_name)} день тоже сдан — общий стрик растёт 🤝")
+            parts.append(f"{e(partner_name)}: день тоже сдан — общий стрик растёт 🤝")
         else:
             parts.append(f"{e(partner_name)} получит весточку — теперь очередь напарника.")
     if can_more and next_title:

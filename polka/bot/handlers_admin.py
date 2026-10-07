@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date
+from datetime import date, timedelta
 
 from aiogram import Bot, Router
 from aiogram.filters import Command, CommandObject
@@ -29,7 +29,7 @@ from settings import get_settings
 router = Router(name="admin")
 
 ADMIN_HELP = """<b>Команды ведущего</b>
-/run_new Название | 2026-10-20 | 990 — создать забег
+/run_new Название | 2026-10-20 | 990 — создать забег (дату можно словом «сегодня»/«завтра»)
 /run_date 2026-10-20 — дата старта текущего забега
 /run_info — текущий забег
 /grant @user — отметить оплату и выдать доступ
@@ -76,7 +76,13 @@ async def cmd_run_new(message: Message, command: CommandObject) -> None:
         await message.answer("Формат: /run_new Название | 2026-10-20 | 990")
         return
     try:
-        start = date.fromisoformat(parts[1]) if len(parts) > 1 and parts[1] else None
+        raw_date = parts[1].lower() if len(parts) > 1 else ""
+        if raw_date in ("сегодня", "today"):
+            start = clock.now().date()
+        elif raw_date in ("завтра", "tomorrow"):
+            start = clock.now().date() + timedelta(days=1)
+        else:
+            start = date.fromisoformat(parts[1]) if raw_date else None
         price = int(parts[2]) if len(parts) > 2 and parts[2] else 990
     except ValueError:
         await message.answer("Дата в формате ГГГГ-ММ-ДД, цена — числом.")
@@ -131,7 +137,10 @@ async def cmd_run_info(message: Message) -> None:
             await message.answer("Открытого забега нет. /run_new Название | 2026-10-20 | 990")
             return
         st = await stats(s, run)
-    await message.answer(f"Забег #{run.id}, старт {texts.d(run.start_date)}, цена {run.price_rub} ₽\n\n{stats_text(st)}")
+    clock_note = ""
+    if clock.is_fast() or clock.offset_seconds():
+        clock_note = f"\n🕐 Часы бота (тестовый режим): {clock.now():%d.%m %H:%M} UTC"
+    await message.answer(f"Забег #{run.id}, старт {texts.d(run.start_date)}, цена {run.price_rub} ₽{clock_note}\n\n{stats_text(st)}")
 
 
 async def _target(message: Message, ref: str) -> tuple[User | None, Run | None]:
