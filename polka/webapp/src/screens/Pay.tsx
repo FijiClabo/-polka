@@ -210,8 +210,7 @@ export default function Pay() {
         </button>
       ) : !data.enabled ? (
         <div className="card mt-16 soon">
-          <b>Оплата скоро появится</b>
-          <p className="small muted" style={{ whiteSpace: "pre-line", margin: "4px 0 0" }}>{data.manual_info}</p>
+          <p className="small" style={{ whiteSpace: "pre-line", margin: 0 }}>{data.manual_info}</p>
         </div>
       ) : (
         <div className="mt-16">

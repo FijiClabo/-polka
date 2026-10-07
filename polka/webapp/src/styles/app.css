@@ -331,9 +331,10 @@ img {
 
 .hello .name {
   font-family: var(--font-title);
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 500;
   line-height: 1.1;
+  overflow-wrap: anywhere;
 }
 
 .streak-pill {
@@ -372,7 +373,7 @@ img {
   align-items: center;
   justify-content: center;
   font-weight: 600;
-  color: #2a2623;
+  color: #fbf8f3; /* фон аватара — всегда средний тон палитры, светлая буква читается в обеих темах */
   flex-shrink: 0;
   overflow: hidden;
   position: relative;
@@ -1095,7 +1096,7 @@ img {
   font-family: var(--font-read);
   margin: 0;
   text-indent: 1.4em;
-  text-align: justify;
+  text-align: left;
   hyphens: auto;
   -webkit-hyphens: auto;
 }
@@ -1479,13 +1480,13 @@ img {
 
 .swatches {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
 .swatch {
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   border: 3px solid transparent;
 }

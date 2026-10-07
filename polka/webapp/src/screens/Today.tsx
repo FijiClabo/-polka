@@ -35,7 +35,7 @@ export default function Today() {
         </button>
         <div className="grow">
           <div className="date">{longDate(data.date)}</div>
-          <div className="name ellipsis">
+          <div className="name">
             {greeting(data.hour)}, {firstName(me.first_name || me.name)}
           </div>
         </div>
