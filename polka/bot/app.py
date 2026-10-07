@@ -17,7 +17,15 @@ from aiogram.types import (
     WebAppInfo,
 )
 
-from bot import handlers_admin, handlers_books, handlers_day, handlers_misc, handlers_social, handlers_start
+from bot import (
+    handlers_admin,
+    handlers_books,
+    handlers_day,
+    handlers_misc,
+    handlers_pay,
+    handlers_social,
+    handlers_start,
+)
 from bot.ui import set_bot_username, webapp_url
 from settings import get_settings
 
@@ -29,13 +37,21 @@ USER_COMMANDS = [
     BotCommand(command="pair", description="Напарник"),
     BotCommand(command="friends", description="Друзья и личная ссылка"),
     BotCommand(command="settings", description="Время и часовой пояс"),
+    BotCommand(command="buy", description="Тарифы и оплата"),
+    BotCommand(command="code", description="Активировать код с сайта"),
     BotCommand(command="help", description="Как это работает"),
+    BotCommand(command="terms", description="Условия и оферта"),
+    BotCommand(command="paysupport", description="Вопросы по оплате и возврат"),
+    BotCommand(command="cancel_sub", description="Отключить автопродление"),
+    BotCommand(command="delete_me", description="Отозвать согласие и удалить данные"),
 ]
 ADMIN_COMMANDS = USER_COMMANDS + [
     BotCommand(command="admin", description="Команды ведущего"),
     BotCommand(command="stats", description="Сводка по забегу"),
     BotCommand(command="user", description="Участник: статус и пересказы"),
-    BotCommand(command="grant", description="Отметить оплату"),
+    BotCommand(command="grant", description="Выдать доступ вручную"),
+    BotCommand(command="sales", description="Продажи и воронка"),
+    BotCommand(command="promos", description="Промокоды"),
     BotCommand(command="export", description="Выгрузка CSV"),
 ]
 
@@ -61,14 +77,22 @@ async def on_error(event: ErrorEvent) -> bool:
 
 def create_bot() -> Bot:
     s = get_settings()
-    return Bot(token=s.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML, link_preview_is_disabled=True))
+    session = None
+    if s.telegram_api_base:
+        # свой адрес Bot API: например, прокси к api.telegram.org, если сервер с данными стоит в РФ
+        from aiogram.client.session.aiohttp import AiohttpSession
+        from aiogram.client.telegram import TelegramAPIServer
+
+        session = AiohttpSession(api=TelegramAPIServer.from_base(s.telegram_api_base))
+    return Bot(token=s.bot_token, session=session,
+               default=DefaultBotProperties(parse_mode=ParseMode.HTML, link_preview_is_disabled=True))
 
 
 def create_dispatcher() -> Dispatcher:
     dp = Dispatcher(storage=MemoryStorage())
     routers = [
-        errors_router, handlers_admin.router, handlers_start.router, handlers_misc.router, handlers_social.router,
-        handlers_books.router,
+        errors_router, handlers_admin.router, handlers_pay.router, handlers_start.router, handlers_misc.router,
+        handlers_social.router, handlers_books.router,
         handlers_day.router,  # последним: ловит любой текст как пересказ
     ]
     for r in routers:

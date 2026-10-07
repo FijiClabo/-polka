@@ -42,6 +42,7 @@ class Flow(StatesGroup):
     paper_title = State()
     paper_author = State()
     paper_pages = State()
+    code = State()
 
 
 async def load_user(session, tg: TgUser) -> tuple[User, bool]:

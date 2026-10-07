@@ -23,7 +23,7 @@ from services.runs import (
     current_enrollment,
     current_main_run,
     ensure_main_enrollment,
-    is_in_any_run,
+    sprint_used,
     start_sprint,
 )
 from services.social import add_friend_by_code, join_pair_by_code
@@ -40,6 +40,7 @@ router = Router(name="start")
 async def cmd_start(message: Message, command: CommandObject, state: FSMContext, bot: Bot) -> None:
     await state.clear()
     payload = (command.args or "").strip()
+    act_code = None
     outbox = Outbox()
     async with session_scope() as s:
         user, created = await load_user(s, message.from_user)
@@ -49,8 +50,25 @@ async def cmd_start(message: Message, command: CommandObject, state: FSMContext,
                                                outbox=outbox)
             if inviter:
                 inviter_name = inviter.display_name
+                if not user.source:
+                    user.source = "friend"
                 if not created and user.onboarding_step == "done":
                     outbox.add(_reply(user, texts.friends_now(inviter.display_name)))
+        elif payload.startswith("promo_") or payload.startswith("src_"):
+            # метка источника (реклама, блогер) и промокод из ссылки: t.me/<бот>?start=promo_READ20
+            from services.billing import normalize_code, valid_promo
+
+            if payload.startswith("promo_"):
+                promo = await valid_promo(s, payload[6:])
+                if promo is not None:
+                    user.promo_code = promo.code
+                    outbox.add(_reply(user, texts.promo_applied(promo.code, promo.discount_percent)))
+                if not user.source:
+                    user.source = f"promo:{normalize_code(payload[6:])}"
+            elif not user.source:
+                user.source = payload[4:36]
+        elif payload.startswith("act_"):
+            act_code = payload[4:]
         elif payload.startswith("p_"):
             status, inviter = await join_pair_by_code(s, user, payload[2:], outbox)
             if status == "ok" and inviter:
@@ -65,6 +83,13 @@ async def cmd_start(message: Message, command: CommandObject, state: FSMContext,
         uid = user.id
         await state.update_data(inviter_name=inviter_name)
     await flush(bot, outbox)
+    if act_code:
+        # оплата на сайте → ссылка t.me/<бот>?start=act_<код>
+        from bot.handlers_pay import redeem_and_reply
+
+        await redeem_and_reply(bot, message.chat.id, message.from_user, act_code)
+        if onboarded:
+            return
     if onboarded:
         await send_status(bot, message.chat.id, uid)
         return
@@ -90,9 +115,33 @@ async def cb_onboarding(call: CallbackQuery) -> None:
     arg = call.data.split(":", 1)[1]
     await call.message.edit_reply_markup(reply_markup=None)
     if arg == "go":
-        await ask_tz(call.message)
+        await ask_consent(call.message)
         return
     await send_welcome(call.message, int(arg))
+
+
+async def ask_consent(message: Message) -> None:
+    from bot.handlers_pay import public_page
+
+    await message.answer(texts.consent_text(public_page("/consent"), public_page("/privacy")),
+                         reply_markup=kb([[{"text": texts.CONSENT_BTN, "callback": "consent:pd"}]]),
+                         disable_web_page_preview=True)
+
+
+@router.callback_query(F.data == "consent:pd")
+async def cb_consent(call: CallbackQuery) -> None:
+    from db.models import Consent
+    from services.site_orders import doc_sha256
+
+    await call.answer()
+    await call.message.edit_reply_markup(reply_markup=None)
+    s_ = get_settings()
+    async with session_scope() as s:
+        user, _ = await load_user(s, call.from_user)
+        s.add(Consent(user_id=user.id, doc_type="pd", doc_version=s_.offer_version, doc_sha256=doc_sha256("consent.html"),
+                      channel="bot"))
+        await log_event(s, "consent_pd", user.id)
+    await ask_tz(call.message)
 
 
 # --------------------------------------------------------------------------- часовой пояс и время
@@ -227,7 +276,7 @@ async def msg_time_input(message: Message, state: FSMContext) -> None:
 
 async def _after_time(message: Message, tg_id: int, which: str, t, settings_mode: bool, state: FSMContext) -> None:
     await _save_time(tg_id, which, t)
-    await message.answer(f"Записал: {t.strftime('%H:%M')}.")
+    await message.answer(f"Записано: {t.strftime('%H:%M')}.")
     if settings_mode:
         return
     if which == "m":
@@ -309,23 +358,18 @@ async def finish_trial(message: Message, state: FSMContext, user_tg=None) -> Non
 
 
 async def after_onboarding(bot: Bot, chat_id: int, user_id: int, inviter_name: str | None = None) -> None:
-    """Запись в забег и предложение добавить книгу (или спринт)."""
+    """После онбординга: книга (личный забег стартует в любой день) и бесплатный спринт как проба."""
     s_ = get_settings()
     async with session_scope() as s:
         user = await s.get(User, user_id)
-        in_run = await is_in_any_run(s, user.id)
-        run = await current_main_run(s)
-        offer_sprint = not in_run and (bool(user.invited_by_id) or s_.sprint_for_everyone or run is None)
-        if run is not None:
+        cohort = await current_main_run(s)
+        if cohort is not None:
             await ensure_main_enrollment(s, user)
-    if offer_sprint:
+        sprint_ok = not await sprint_used(s, user.id) and (bool(user.invited_by_id) or s_.sprint_for_everyone)
+    await send_book_prompt(bot, chat_id)
+    if sprint_ok:
         await bot.send_message(chat_id, texts.sprint_offer(inviter_name),
                                reply_markup=kb([[{"text": "Начать спринт (бесплатно)", "callback": "sprint:start"}]]))
-    if run is not None:
-        await send_book_prompt(bot, chat_id)
-        await send_status(bot, chat_id, user_id)
-    elif not offer_sprint:
-        await bot.send_message(chat_id, texts.STATUS_NO_RUN)
 
 
 async def send_book_prompt(bot: Bot, chat_id: int) -> None:
@@ -342,7 +386,10 @@ async def cb_sprint(call: CallbackQuery, bot: Bot) -> None:
     await call.message.edit_reply_markup(reply_markup=None)
     async with session_scope() as s:
         user, _ = await load_user(s, call.from_user)
-        await start_sprint(s, user)
+        enr = await start_sprint(s, user)
+    if enr is None:
+        await call.message.answer(texts.SPRINT_USED)
+        return
     await call.message.answer(texts.SPRINT_STARTED)
     await send_book_prompt(bot, call.message.chat.id)
 
@@ -357,7 +404,13 @@ async def send_status(bot: Bot, chat_id: int, user_id: int) -> None:
         view = await load_view(s, user, enr)
     st = view.state
     if st == "awaiting_payment":
-        text = texts.status_waiting_payment()
+        from bot.handlers_pay import send_paywall
+
+        await send_paywall(bot, chat_id, user_id)
+        return
+    if st == "no_run":
+        await send_book_prompt(bot, chat_id)
+        return
     elif st == "waiting_start":
         text = texts.status_in_list(view.starts_on)
     elif st == "not_started":

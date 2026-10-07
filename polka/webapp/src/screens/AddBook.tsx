@@ -118,10 +118,11 @@ export default function AddBook() {
         <PlanSummary data={data} onReplan={st.reload} onReplace={() => fileRef.current?.click()} />
       ) : (
         <PlanPicker
-          onConfirmed={() => {
+          onConfirmed={(awaitingPayment) => {
             invalidate();
             haptic("success");
-            nav.tab("today");
+            if (awaitingPayment) nav.replace({ name: "pay" });
+            else nav.tab("today");
           }}
         />
       )}
@@ -181,7 +182,7 @@ function BookMeta({ data, onChange }: { data: BookState; onChange: () => void })
   );
 }
 
-function PlanPicker({ onConfirmed }: { onConfirmed: () => void }) {
+function PlanPicker({ onConfirmed }: { onConfirmed: (awaitingPayment: boolean) => void }) {
   const opts = useApi<{ options: PlanOption[] }>("/book/plan-options");
   const [days, setDays] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -212,8 +213,8 @@ function PlanPicker({ onConfirmed }: { onConfirmed: () => void }) {
           setBusy(true);
           try {
             const r = await api.post<{ start: string | null; awaiting_payment: boolean }>("/book/plan", { days });
-            toast(r.start ? `План готов. Старт — ${dayMonth(r.start)}` : r.awaiting_payment ? "План готов. Включится после оплаты" : "План готов");
-            onConfirmed();
+            toast(r.start ? `План готов. Старт — ${dayMonth(r.start)}` : "План готов");
+            onConfirmed(r.awaiting_payment);
           } catch (e) {
             toast((e as Error).message);
           } finally {
@@ -235,7 +236,12 @@ function PlanSummary({ data, onReplan, onReplace }: { data: BookState; onReplan:
     <div className="card mt-16">
       <div className="eyebrow">План</div>
       <div className="seg-title" style={{ fontSize: 20, margin: "6px 0" }}>{data.plan_days} дней</div>
-      <div className="small muted">{data.start ? `Старт — ${dayMonth(data.start)}` : "Старт — в день начала забега, после оплаты"}</div>
+      <div className="small muted">{data.start ? `Старт — ${dayMonth(data.start)}` : "Старт — сразу после оплаты"}</div>
+      {data.awaiting_payment && (
+        <button className="btn primary block mt-16" onClick={() => nav.push({ name: "pay" })}>
+          Открыть забег
+        </button>
+      )}
       <div className="btn-row mt-16">
         <button className="btn secondary" onClick={onReplace}>Заменить книгу</button>
         <button

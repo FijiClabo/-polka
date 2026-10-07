@@ -34,7 +34,7 @@ class STTProvider(Protocol):
 
 
 async def _ffmpeg(input_bytes: bytes, args: list[str]) -> bytes:
-    with tempfile.TemporaryDirectory(prefix="polka-audio-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="dochitka-audio-") as tmp:
         src = Path(tmp) / "in.bin"
         src.write_bytes(input_bytes)
         proc = await asyncio.create_subprocess_exec(
@@ -56,7 +56,7 @@ async def to_pcm(audio: bytes) -> bytes:
 
 
 async def pcm_to_ogg(pcm: bytes) -> bytes:
-    with tempfile.TemporaryDirectory(prefix="polka-audio-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="dochitka-audio-") as tmp:
         src = Path(tmp) / "in.raw"
         src.write_bytes(pcm)
         proc = await asyncio.create_subprocess_exec(

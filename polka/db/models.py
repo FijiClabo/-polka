@@ -61,6 +61,15 @@ class User(Base):
     onboarding_done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     webapp_onboarded: Mapped[bool] = mapped_column(Boolean, default=False)
     bot_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
+    # продажи: откуда пришёл, промокод, права доступа
+    source: Mapped[str | None] = mapped_column(String(64))  # метка из ссылки ?start=src_xxx / промокод / друг
+    promo_code: Mapped[str | None] = mapped_column(String(32))  # введённый, ещё не использованный промокод
+    run_credits: Mapped[int] = mapped_column(Integer, default=0)  # оплаченные, но не начатые забеги
+    subscription_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    subscription_kind: Mapped[str | None] = mapped_column(String(16))  # month | year
+    subscription_recurring: Mapped[bool] = mapped_column(Boolean, default=False)  # автопродление (Stars)
+    sub_reminded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    star_sub_charge_id: Mapped[str | None] = mapped_column(String(128))  # первый платёж Stars-подписки — для отмены
     created_at: Mapped[datetime] = _now_col()
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -178,6 +187,9 @@ class Enrollment(Base):
     best_streak: Mapped[int] = mapped_column(Integer, default=0)
     freezes_left: Mapped[int] = mapped_column(Integer, default=1)
     freezes_week_start: Mapped[int] = mapped_column(Integer, default=0)  # индекс недели плана
+    freezes_per_week: Mapped[int] = mapped_column(Integer, default=1)  # 2 — по абонементу
+    access: Mapped[str | None] = mapped_column(String(16))  # как открыт доступ: purchase | credit | subscription | free | manual
+    purchase_id: Mapped[int | None] = mapped_column(ForeignKey("purchases.id", ondelete="SET NULL"))
     last_closed_day: Mapped[date | None] = mapped_column(Date)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     conspect_intro: Mapped[str | None] = mapped_column(Text)
@@ -337,3 +349,69 @@ class AppState(Base):
 
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[str] = mapped_column(Text)
+
+
+class Purchase(Base):
+    """Оплата: разовый забег, абонемент на месяц или год.
+
+    В Telegram — звёздами (сразу на аккаунт). На сайте — рублями через ЮKassa: заказ без аккаунта,
+    после оплаты — одноразовый код, который человек активирует в боте (user_id появляется тогда).
+    """
+
+    __tablename__ = "purchases"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    product: Mapped[str] = mapped_column(String(16))  # run | month | year
+    provider: Mapped[str] = mapped_column(String(16))  # stars | yookassa | manual | promo
+    currency: Mapped[str] = mapped_column(String(8))  # XTR | RUB
+    amount: Mapped[int] = mapped_column(Integer)  # Stars — штук, RUB — копеек
+    list_amount: Mapped[int] = mapped_column(Integer, default=0)  # цена без скидки (в тех же единицах)
+    promo_code: Mapped[str | None] = mapped_column(String(32))
+    # pending (заказ на сайте) | paid | canceled | refund_requested | refunded
+    status: Mapped[str] = mapped_column(String(16), default="paid")
+    telegram_charge_id: Mapped[str | None] = mapped_column(String(128), unique=True)
+    provider_charge_id: Mapped[str | None] = mapped_column(String(128), index=True)  # id платежа ЮKassa
+    is_recurring: Mapped[bool] = mapped_column(Boolean, default=False)
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    email: Mapped[str | None] = mapped_column(String(128))
+    order_id: Mapped[str | None] = mapped_column(String(36), unique=True)  # заказ на сайте
+    activation_code: Mapped[str | None] = mapped_column(String(24), unique=True)
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    source: Mapped[str | None] = mapped_column(String(64))  # метка рекламы для заказов с сайта
+    offer_version: Mapped[str | None] = mapped_column(String(16))
+    created_at: Mapped[datetime] = _now_col()
+    refunded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Consent(Base):
+    """Журнал согласий (152-ФЗ): какой документ, какой версии, когда и где принят."""
+
+    __tablename__ = "consents"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    purchase_id: Mapped[int | None] = mapped_column(ForeignKey("purchases.id", ondelete="SET NULL"))
+    doc_type: Mapped[str] = mapped_column(String(16))  # pd | offer | marketing
+    doc_version: Mapped[str] = mapped_column(String(16))
+    doc_sha256: Mapped[str | None] = mapped_column(String(64))
+    channel: Mapped[str] = mapped_column(String(8))  # bot | webapp | web
+    email: Mapped[str | None] = mapped_column(String(128))
+    accepted_at: Mapped[datetime] = _now_col()
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PromoCode(Base):
+    """Промокод: скидка и атрибуция (например, блогер, который привёл аудиторию)."""
+
+    __tablename__ = "promo_codes"
+
+    code: Mapped[str] = mapped_column(String(32), primary_key=True)  # в верхнем регистре
+    discount_percent: Mapped[int] = mapped_column(Integer, default=0)  # 100 — бесплатно
+    products: Mapped[str] = mapped_column(String(32), default="run,month,year")
+    max_uses: Mapped[int | None] = mapped_column(Integer)
+    used: Mapped[int] = mapped_column(Integer, default=0)
+    owner: Mapped[str | None] = mapped_column(String(64))  # чей код (для выплат партнёру)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _now_col()

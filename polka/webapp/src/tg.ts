@@ -33,6 +33,7 @@ interface TgWebApp {
   offEvent(e: string, cb: () => void): void;
   openTelegramLink(url: string): void;
   openLink(url: string): void;
+  openInvoice?(url: string, cb?: (status: "paid" | "cancelled" | "failed" | "pending") => void): void;
   shareToStory?(url: string, params?: { text?: string; widget_link?: { url: string; name?: string } }): void;
   showConfirm?(msg: string, cb: (ok: boolean) => void): void;
   BackButton: TgButton;
@@ -169,4 +170,31 @@ export function confirmDialog(message: string): Promise<boolean> {
     });
   }
   return Promise.resolve(window.confirm(message));
+}
+
+export type InvoiceStatus = "paid" | "cancelled" | "failed" | "pending";
+
+export function canPayInApp(): boolean {
+  return !!tg?.openInvoice && atLeast("6.1");
+}
+
+export function openInvoice(url: string): Promise<InvoiceStatus> {
+  // Окно оплаты Telegram: карта через ЮKassa или звёзды. Вне Telegram — просто ссылка.
+  if (!tg?.openInvoice || !atLeast("6.1")) {
+    window.open(url, "_blank");
+    return Promise.resolve("pending");
+  }
+  return new Promise((resolve) => {
+    try {
+      tg.openInvoice!(url, (status) => resolve(status));
+    } catch {
+      openTgLink(url);
+      resolve("pending");
+    }
+  });
+}
+
+export function openExternal(url: string): void {
+  if (tg) tg.openLink(url);
+  else window.open(url, "_blank");
 }

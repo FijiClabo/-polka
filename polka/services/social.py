@@ -30,7 +30,14 @@ from db.models import (
 )
 from services.common import Outbox, OutMsg, allow_social, log_event, random_code, today_for
 from services.progress import accepted_by_day, load_view
-from services.runs import current_enrollment, enroll
+from services.runs import (
+    OPEN_STATUSES,
+    current_enrollment,
+    enroll,
+    ensure_enrollment,
+    sprint_used,
+    start_sprint,
+)
 
 # --------------------------------------------------------------------------- дружба
 
@@ -198,7 +205,8 @@ async def get_pair_for(session: AsyncSession, enr: Enrollment | None) -> tuple[P
 
 
 async def make_pair(session: AsyncSession, run: Run, ea: Enrollment, eb: Enrollment) -> Pair | None:
-    if ea.user_id == eb.user_id or ea.run_id != eb.run_id:
+    """Пара — это два участия, не обязательно в одном забеге: личные забеги стартуют в любой день."""
+    if ea.user_id == eb.user_id:
         return None
     if ea.pair_id or eb.pair_id:
         return None
@@ -220,13 +228,10 @@ async def join_pair_by_code(session: AsyncSession, user: User, code: str, outbox
         return "self", None
     if inviter_enr.pair_id:
         return "taken", inviter
+    if inviter_enr.status not in OPEN_STATUSES:
+        return "not_found", None
     run = await session.get(Run, inviter_enr.run_id)
-    my = await session.scalar(select(Enrollment).where(Enrollment.run_id == run.id, Enrollment.user_id == user.id))
-    if my is None:
-        if run.kind == "sprint":
-            my = await enroll(session, user, run, "active")
-        else:
-            my = await enroll(session, user, run, "invited")
+    my = await _enrollment_to_pair(session, user, run)
     if my.pair_id:
         return "already_paired", inviter
     pair = await make_pair(session, run, inviter_enr, my)
@@ -239,6 +244,27 @@ async def join_pair_by_code(session: AsyncSession, user: User, code: str, outbox
         low, high = rules.friendship_key(inviter.id, user.id)
         session.add(Friendship(user_low_id=low, user_high_id=high, invited_by_id=inviter.id))
     return "ok", inviter
+
+
+async def _enrollment_to_pair(session: AsyncSession, user: User, run: Run) -> Enrollment:
+    """С каким участием приглашённый встаёт в пару.
+
+    Уже в этом забеге — с ним. Идёт свой забег — со своим. Иначе: в спринт друга (если свой спринт
+    ещё не был), в групповой забег друга, а если он закрыт — в новый личный забег.
+    """
+    same = await session.scalar(select(Enrollment).where(Enrollment.run_id == run.id, Enrollment.user_id == user.id))
+    if same is not None and same.status in OPEN_STATUSES:
+        return same
+    cur = await current_enrollment(session, user.id)
+    if cur is not None and cur.status in OPEN_STATUSES:
+        return cur
+    if run.kind == "sprint" and not await sprint_used(session, user.id):
+        enr = await start_sprint(session, user)
+        if enr is not None:
+            return enr
+    if run.kind == "main" and run.status in ("open", "active") and same is None:
+        return await enroll(session, user, run, "invited")
+    return await ensure_enrollment(session, user)
 
 
 async def auto_pairs(session: AsyncSession, run: Run, seed: int | None = None) -> list[Pair]:

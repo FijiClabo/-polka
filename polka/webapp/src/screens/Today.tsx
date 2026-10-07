@@ -60,7 +60,7 @@ function MainCard({ data }: { data: TodayData }) {
   const s = data.state;
   const book = data.book;
 
-  if (s === "no_run" || s === "refunded") return <NoRun />;
+  if (s === "no_run" || s === "refunded") return <NoRun data={data} />;
   if (s === "awaiting_payment") return <AwaitingPayment data={data} />;
   if (s === "no_book" || s === "parse_failed") {
     return (
@@ -129,7 +129,8 @@ function MainCard({ data }: { data: TodayData }) {
       <div className="card book-card">
         <div className="eyebrow">Срок вышел</div>
         <div className="seg-title">Забег закончился</div>
-        <p className="meta">Пересказы и конспект сохранились. Дочитать книгу можно в следующем забеге — напишем, когда он откроется.</p>
+        <p className="meta">Пересказы и конспект сохранились. Можно начать новый забег — с этой же книгой или с другой.</p>
+        <NewRunButton label="Новый забег" />
       </div>
     );
   }
@@ -270,58 +271,100 @@ function ShareStreak({ streak }: { streak: number }) {
   );
 }
 
-function NoRun() {
+function NewRunButton({ label, primary = true }: { label: string; primary?: boolean }) {
   const nav = useNav();
   const [busy, setBusy] = useState(false);
   return (
+    <button
+      className={`btn ${primary ? "primary" : "secondary"} block mt-12`}
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        try {
+          await api.post("/runs/new");
+          invalidate();
+          nav.push({ name: "book" });
+        } catch (e) {
+          toast((e as Error).message);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      {label} <IArrow size={18} />
+    </button>
+  );
+}
+
+function SprintButton() {
+  const nav = useNav();
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      className="btn secondary block mt-12"
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        try {
+          await api.post("/sprint");
+          invalidate();
+          nav.push({ name: "book" });
+        } catch (e) {
+          toast((e as Error).message);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      Бесплатный спринт на 7 дней
+    </button>
+  );
+}
+
+function NoRun({ data }: { data: TodayData }) {
+  return (
     <div className="card book-card">
-      <div className="eyebrow">Пока без забега</div>
-      <div className="seg-title" style={{ fontSize: 22 }}>Попробуй спринт</div>
-      <p className="meta">7 дней на рассказ или короткую книгу — бесплатно. Всё как в забеге, только короче.</p>
-      <button
-        className="btn primary block mt-12"
-        disabled={busy}
-        onClick={async () => {
-          setBusy(true);
-          try {
-            await api.post("/sprint");
-            invalidate();
-            nav.push({ name: "book" });
-          } catch (e) {
-            toast((e as Error).message);
-          } finally {
-            setBusy(false);
-          }
-        }}
-      >
-        Начать спринт
-      </button>
+      <div className="eyebrow">{data.has_access ? "Доступ открыт" : "С чего начать"}</div>
+      <div className="seg-title" style={{ fontSize: 22 }}>Какую книгу дочитаем?</div>
+      <p className="meta">
+        Загрузи epub или fb2 — или выбери бумажную книгу. Разобьём её на отрезки по 15 минут в день, а ИИ будет проверять
+        короткие пересказы.
+      </p>
+      <NewRunButton label="Выбрать книгу" />
+      {data.sprint_available && (
+        <>
+          <SprintButton />
+          <p className="tiny muted center mt-8">Спринт — рассказ или короткая книга за неделю, бесплатно.</p>
+        </>
+      )}
     </div>
   );
 }
 
 function AwaitingPayment({ data }: { data: TodayData }) {
   const nav = useNav();
+  const book = data.book;
   return (
     <div className="card book-card">
-      <div className="eyebrow">Ты в списке</div>
-      <div className="seg-title" style={{ fontSize: 22 }}>{data.run?.title || "Забег"}</div>
-      <p className="meta">
-        {data.run?.start_date ? `Старт ${dayMonth(data.run.start_date)}. ` : ""}
-        {data.payment_info}
-      </p>
-      {data.book ? (
-        <div className="row mt-12">
-          <Cover title={data.book.title} author={data.book.author} color={data.book.spine_color} small />
-          <div className="grow small">
-            Книга готова: <b>{data.book.title}</b>
+      {book && (
+        <div className="top">
+          <Cover title={book.title} author={book.author} color={book.spine_color} />
+          <div className="grow">
+            <div className="eyebrow">План готов</div>
+            <div className="seg-title">{book.title}</div>
+            {data.plan_days && <p className="meta">{days(data.plan_days)} · по 15 минут в день</p>}
           </div>
         </div>
-      ) : (
-        <button className="btn secondary block mt-12" onClick={() => nav.push({ name: "book" })}>
-          Пока можно добавить книгу
-        </button>
       )}
+      {!book && <div className="seg-title" style={{ fontSize: 22 }}>{data.run?.title || "Забег"}</div>}
+      <p className="meta">
+        {data.run?.kind === "main" && data.run.start_date ? `Старт группы — ${dayMonth(data.run.start_date)}. ` : ""}
+        Осталось открыть доступ — первый отрезок придёт сразу, а если уже вечер — завтра утром.
+      </p>
+      <button className="btn primary block mt-12" onClick={() => nav.push({ name: "pay" })}>
+        Открыть забег <IArrow size={18} />
+      </button>
+      {data.sprint_available && <SprintButton />}
     </div>
   );
 }
@@ -399,7 +442,7 @@ function PartnerCard({ data, reload }: { data: TodayData; reload: () => void }) 
             haptic("light");
             const r = await api.post<{ result: string }>("/pair/nudge").catch(() => ({ result: "error" }));
             setNudged(true);
-            toast(r.result === "ok" ? "Напомнил 👋" : r.result === "already" ? "Сегодня уже напоминали" : "Не получилось");
+            toast(r.result === "ok" ? "Напоминание отправлено 👋" : r.result === "already" ? "Сегодня уже напоминали" : "Не получилось");
             reload();
           }}
         >

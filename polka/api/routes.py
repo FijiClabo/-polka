@@ -29,7 +29,8 @@ from books.parse import detect_format, is_other_book_format
 from books.plan import PlanError, segment_minutes
 from books.types import PARSE_ERRORS, SUBHEADING_MARK
 from core.days import local_now, plan_day_number
-from db.models import Book, DayResult, Enrollment, Retelling, Segment, User
+from db.models import Book, DayResult, Enrollment, Purchase, Retelling, Segment, User
+from services import billing
 from services.books import (
     add_paper_book,
     confirm_plan,
@@ -44,7 +45,7 @@ from services.common import Outbox, log_event, today_for
 from services.flow import submit_retelling
 from services.progress import DayView, accepted_by_day, effective_freezes, load_view
 from services.retell import RetellOutcome
-from services.runs import current_enrollment, current_main_run, ensure_main_enrollment, start_sprint
+from services.runs import current_enrollment, ensure_enrollment, sprint_used, start_sprint
 from services.shelf import achievements_of, conspect, shelf
 from services.social import (
     are_friends,
@@ -280,6 +281,9 @@ async def get_today(user: User = Depends(current_user), s: AsyncSession = Depend
         "week": await _week(s, user, enr, v.today or today_for(user)),
         "payment_info": get_settings().payment_info if v.state == "awaiting_payment" else None,
         "accepted_days": sorted(v.accepted),
+        "sprint_available": v.state in ("no_run", "refunded", "expired", "awaiting_payment", "no_book")
+        and not await sprint_used(s, user.id),
+        "has_access": billing.has_access(user),
     }
     return data
 
@@ -428,14 +432,8 @@ class PlanBody(BaseModel):
 
 
 async def _book_enrollment(s: AsyncSession, user: User) -> Enrollment:
-    enr = await current_enrollment(s, user.id)
-    if enr is None or enr.status not in ("invited", "paid", "active"):
-        run = await current_main_run(s)
-        if run is not None:
-            enr = await ensure_main_enrollment(s, user)
-    if enr is None:
-        raise HTTPException(409, "Сейчас нет открытого забега")
-    return enr
+    """Текущее участие или новое: групповой забег ведущего, иначе личный забег."""
+    return await ensure_enrollment(s, user)
 
 
 @router.get("/book")
@@ -451,6 +449,7 @@ async def get_book(user: User = Depends(current_user), s: AsyncSession = Depends
         "plan_days": enr.plan_days, "plan_confirmed": bool(enr.plan_confirmed_at),
         "start": enr.plan_start_date.isoformat() if enr.plan_start_date else None,
         "has_progress": await has_progress(s, enr), "run": run_brief(enr), "max_mb": get_settings().max_book_mb,
+        "awaiting_payment": enr.status == "invited" and bool(enr.plan_confirmed_at),
     }
 
 
@@ -474,7 +473,160 @@ async def post_paper(body: PaperBook, user: User = Depends(current_user), s: Asy
 @router.post("/sprint")
 async def post_sprint(user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
     enr = await start_sprint(s, user)
+    if enr is None:
+        raise HTTPException(409, "Бесплатный спринт уже был — дальше забег по тарифу")
     return {"ok": True, "enrollment_id": enr.id}
+
+
+@router.post("/runs/new")
+async def post_new_run(user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    """Следующая книга: новое участие (личный забег), если текущее закончено."""
+    enr = await ensure_enrollment(s, user)
+    await log_event(s, "next_run", user.id, enr.run_id)
+    return {"ok": True, "enrollment_id": enr.id, "status": enr.status}
+
+
+# --------------------------------------------------------------------------- оплата
+
+
+def _price_json(p) -> dict:
+    return {"rub": p.rub, "stars": p.stars, "list_rub": p.list_rub, "list_stars": p.list_stars, "promo": p.promo,
+            "discount": p.discount, "free": p.free}
+
+
+async def _billing_state(s: AsyncSession, user: User) -> dict:
+    st = get_settings()
+    prices = await billing.prices_for(s, user)
+    chk = await billing.refund_check(s, user)
+    base = st.public_url if st.public_url.startswith("http") else ""
+    enr = await current_enrollment(s, user.id)
+    book = await s.get(Book, enr.book_id) if enr and enr.book_id else None
+    purchases = list(await s.scalars(
+        select(Purchase).where(Purchase.user_id == user.id).order_by(Purchase.id.desc()).limit(10)
+    ))
+    return {
+        "enabled": st.payments_enabled,
+        "methods": {"card": st.payments_yookassa, "stars": st.payments_stars},
+        "prices": {k: _price_json(v) for k, v in prices.items()},
+        "promo": user.promo_code,
+        "subscription": {
+            "active": billing.subscription_active(user),
+            "until": user.subscription_until.isoformat() if user.subscription_until else None,
+            "kind": user.subscription_kind, "recurring": user.subscription_recurring,
+        },
+        "credits": user.run_credits,
+        "refund": {"eligible": chk.eligible, "partial": chk.partial, "reason": chk.reason if not chk.eligible else "",
+                   "until": chk.until.isoformat() if chk.until else None},
+        "guarantee_days": st.refund_days,
+        "offer_url": f"{base}/offer" if base else None,
+        "privacy_url": f"{base}/privacy" if base else None,
+        "manual_info": st.payment_info,
+        "sprint_available": not await sprint_used(s, user.id),
+        "book": {"title": book.title, "author": book.author, "spine_color": book.spine_color} if book else None,
+        "plan_days": enr.plan_days if enr and enr.plan_confirmed_at else None,
+        "needs_access": bool(enr and enr.status == "invited"),
+        "purchases": [
+            {"id": p.id, "product": p.product, "status": p.status, "date": p.created_at.date().isoformat(),
+             "amount": billing.format_amount(p)}
+            for p in purchases
+        ],
+    }
+
+
+@router.get("/billing")
+async def get_billing(user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    await log_event(s, "paywall_shown", user.id, via="webapp")
+    return await _billing_state(s, user)
+
+
+class InvoiceBody(BaseModel):
+    product: str = Field(pattern=r"^(run|month|year)$")
+    method: str = Field(pattern=r"^(card|stars)$")
+
+
+@router.post("/billing/invoice")
+async def post_invoice(body: InvoiceBody, user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    """Ссылка на оплату для Telegram.WebApp.openInvoice."""
+    from aiogram.types import LabeledPrice
+
+    try:
+        inv = await billing.build_invoice(s, user, body.product, body.method)
+    except ValueError as e:
+        raise HTTPException(400, "Этот способ оплаты сейчас недоступен") from e
+    if _bot is None:
+        raise HTTPException(503, "Оплата временно недоступна")
+    await log_event(s, "invoice_opened", user.id, product=body.product, method=body.method, via="webapp")
+    link = await _bot.create_invoice_link(
+        title=inv.title[:32], description=inv.description[:255], payload=inv.payload, currency=inv.currency,
+        prices=[LabeledPrice(label=inv.title[:32], amount=inv.amount)], provider_token=inv.provider_token or None,
+        subscription_period=inv.subscription_period, need_email=inv.need_email or None,
+        send_email_to_provider=inv.send_email_to_provider or None, provider_data=inv.provider_data,
+    )
+    return {"url": link}
+
+
+class PromoBody(BaseModel):
+    code: str = Field(min_length=1, max_length=32)
+
+
+@router.post("/billing/promo")
+async def post_promo(body: PromoBody, user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    promo = await billing.valid_promo(s, body.code)
+    if promo is None:
+        raise HTTPException(404, "Такого промокода нет или он закончился")
+    user.promo_code = promo.code
+    if not user.source:
+        user.source = f"promo:{promo.code}"
+    await log_event(s, "promo_applied", user.id, code=promo.code, via="webapp")
+    return await _billing_state(s, user)
+
+
+class FreeBody(BaseModel):
+    product: str = Field(default="run", pattern=r"^(run|month|year)$")
+
+
+@router.post("/billing/free")
+async def post_free(body: FreeBody, user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    p = await billing.apply_free_promo(s, user, body.product)
+    if p is None:
+        raise HTTPException(400, "Промокод не даёт бесплатный доступ")
+    return await _billing_state(s, user)
+
+
+class CodeBody(BaseModel):
+    code: str = Field(min_length=4, max_length=40)
+
+
+@router.post("/billing/redeem")
+async def post_redeem(body: CodeBody, user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    """Код активации из заказа на сайте."""
+    out = Outbox()
+    status, p = await billing.redeem_code(s, user, body.code, out)
+    if status not in ("ok", "already"):
+        raise HTTPException(404 if status == "not_found" else 409, texts.CODE_RESULT[status])
+    await s.commit()
+    await _flush(out)
+    return {"result": status, "product": p.product if p else None, **(await _billing_state(s, user))}
+
+
+@router.post("/billing/cancel")
+async def post_cancel_sub(user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    """Отключить автопродление звёздного абонемента; доступ остаётся до конца срока."""
+    res = await billing.cancel_subscription(s, user, _bot)
+    if res == "error":
+        raise HTTPException(502, texts.sub_cancel_result(res, user.subscription_until))
+    return {"result": res, "message": texts.sub_cancel_result(res, user.subscription_until)}
+
+
+@router.post("/billing/refund")
+async def post_refund(user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    out = Outbox()
+    res = await billing.request_refund(s, user, _bot, out)
+    await s.commit()
+    await _flush(out)
+    if res not in ("ok", "requested"):
+        raise HTTPException(400, res)
+    return {"result": res}
 
 
 @router.post("/book/upload")
@@ -601,7 +753,7 @@ async def post_retell_voice(
         text, dur = await transcribe_audio(data)
     except STTError as e:
         log.warning("webapp STT failed: %s", e)
-        raise HTTPException(503, "Не разобрал запись. Попробуй ещё раз или напиши текстом.") from e
+        raise HTTPException(503, "Не получилось разобрать запись. Попробуй ещё раз или напиши текстом.") from e
     if dur > get_settings().voice_max_sec + 5:
         raise HTTPException(400, "Запись длиннее 3 минут")
     if not text.strip():

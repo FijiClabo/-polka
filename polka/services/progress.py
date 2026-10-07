@@ -71,7 +71,7 @@ async def segment_by_day(session: AsyncSession, book_id: int, day_number: int) -
 def effective_freezes(enr: Enrollment, plan_day: int | None) -> int:
     if not plan_day or plan_day < 1:
         return enr.freezes_left
-    left, _ = rules.refresh_freezes(enr.freezes_left, enr.freezes_week_start, plan_day)
+    left, _ = rules.refresh_freezes(enr.freezes_left, enr.freezes_week_start, plan_day, enr.freezes_per_week or 1)
     return left
 
 
@@ -86,11 +86,6 @@ async def load_view(session: AsyncSession, user: User, enr: Enrollment | None) -
         return v
     book = await session.get(Book, enr.book_id) if enr.book_id else None
     v.book = book
-    if enr.status == "invited" and enr.run.kind == "main":
-        v.state = "awaiting_payment"
-        if book is None:
-            v.state = "awaiting_payment"
-        return v
     if book is None:
         v.state = "no_book"
         return v
@@ -102,6 +97,12 @@ async def load_view(session: AsyncSession, user: User, enr: Enrollment | None) -
         return v
     if not enr.plan_days:
         v.state = "plan_needed"
+        return v
+    if enr.status == "invited":
+        # книга и план готовы — осталось открыть доступ (оплата, абонемент или ведущий)
+        v.state = "awaiting_payment"
+        v.plan_days = enr.plan_days
+        v.starts_on = enr.run.start_date if enr.run.kind == "main" else None
         return v
     v.plan_days = enr.plan_days
     v.accepted = await accepted_by_day(session, enr)
@@ -205,7 +206,9 @@ async def close_pending_days(session: AsyncSession, enr: Enrollment, user: User,
             for r in pending:
                 await force_accept_pending(session, r, enr, user, outbox)
         plan_day = plan_day_number(enr.plan_start_date, d)
-        enr.freezes_left, enr.freezes_week_start = rules.refresh_freezes(enr.freezes_left, enr.freezes_week_start, plan_day)
+        enr.freezes_left, enr.freezes_week_start = rules.refresh_freezes(
+            enr.freezes_left, enr.freezes_week_start, plan_day, enr.freezes_per_week or 1
+        )
         existing = await _day_result(session, enr.id, d)
         had_done = existing is not None and existing.result == rules.DONE
         res = rules.close_day(had_done, enr.streak, enr.freezes_left)

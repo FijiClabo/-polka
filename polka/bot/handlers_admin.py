@@ -11,14 +11,15 @@ from datetime import date, timedelta
 from aiogram import Bot, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import BufferedInputFile, Message
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 import texts
 from bot.common import is_admin, load_user
 from bot.ui import flush
 from core import clock
-from db.models import Enrollment, Retelling, Run, Segment, User
+from db.models import Enrollment, Event, PromoCode, Purchase, Retelling, Run, Segment, User
 from db.session import session_scope
+from services import billing
 from services.admin import export_zip, find_user, stats, stats_text
 from services.common import Outbox, OutMsg, log_event
 from services.retell import override
@@ -32,8 +33,13 @@ ADMIN_HELP = """<b>Команды ведущего</b>
 /run_new Название | 2026-10-20 | 990 — создать забег (дату можно словом «сегодня»/«завтра»)
 /run_date 2026-10-20 — дата старта текущего забега
 /run_info — текущий забег
-/grant @user — отметить оплату и выдать доступ
-/refund @user — возврат, рассылки отключаются
+/grant @user [run|month|year] — выдать доступ вручную (оплата переводом, подарок)
+/promo_new КОД 20 [лимит] [чей] — промокод со скидкой (100 — бесплатно)
+/promos — промокоды: сколько пришло, оплатило, выручка
+/sales — продажи, воронка, источники
+/refund_ok ID [сумма] — одобрить заявку на возврат (деньги уйдут автоматически)
+/refund_done ID — отметить ручной возврат по платежу
+/refund @user — возврат в групповом забеге
 /pair_set @a @b — назначить пару
 /pairs_auto — разбить половину оплативших без пары на пары
 /user @user — статус и последние пересказы (с id)
@@ -154,30 +160,176 @@ async def _target(message: Message, ref: str) -> tuple[User | None, Run | None]:
     return u, run
 
 
-@router.message(Command("grant"))
+@router.message(Command("grant", "gift"))
 async def cmd_grant(message: Message, command: CommandObject, bot: Bot) -> None:
+    """Выдать доступ вручную: /grant @user [run|month|year]. В групповом забеге — отметить оплату забега."""
     if not await _guard(message):
         return
-    ref = (command.args or "").strip()
-    if not ref:
-        await message.answer("Формат: /grant @username или /grant 123456789 (tg_id)")
+    parts = (command.args or "").split()
+    if not parts:
+        await message.answer("Формат: /grant @username [run|month|year] — по умолчанию один забег")
         return
+    product = parts[1].lower() if len(parts) > 1 else "run"
+    if product not in ("run", "month", "year"):
+        await message.answer("Тариф: run (забег), month (месяц) или year (год)")
+        return
+    outbox = Outbox()
     async with session_scope() as s:
-        u = await find_user(s, ref)
-        run = await current_main_run(s)
+        u = await find_user(s, parts[0])
         if not u:
             await message.answer("Не нашёл пользователя. Он должен хотя бы раз нажать /start в боте.")
             return
-        if not run:
-            await message.answer("Нет открытого забега.")
-            return
-        enr = await grant(s, u, run)
-        start = enr.plan_start_date or run.start_date
-        tg_id, name = u.tg_id, u.display_name
-        has_plan = bool(enr.plan_days)
-    note = "" if has_plan else "\n\nОсталось добавить книгу — пришли файл epub/fb2 или выбери бумажную."
-    await bot.send_message(tg_id, f"Оплата получена, спасибо! {texts.status_in_list(start)}{note}")
-    await message.answer(f"Доступ выдан: {texts.e(name)}.")
+        cohort = await current_main_run(s)
+        cohort_enr = None
+        if cohort is not None and product == "run":
+            cohort_enr = await s.scalar(select(Enrollment).where(Enrollment.run_id == cohort.id, Enrollment.user_id == u.id))
+        if cohort_enr is not None:
+            await grant(s, u, cohort)
+            start = cohort_enr.plan_start_date or cohort.start_date
+        else:
+            await billing.grant_manual(s, u, product, outbox)
+            start = None
+        tg_id, uid, name = u.tg_id, u.id, u.display_name
+    if cohort_enr is not None:
+        await bot.send_message(tg_id, f"Оплата получена, спасибо! {texts.status_in_list(start)}")
+    else:
+        from bot.handlers_pay import after_payment_message
+
+        await after_payment_message(bot, tg_id, uid, product)
+    await flush(bot, outbox)
+    await message.answer(f"Доступ выдан: {texts.e(name)} — {billing.product_title(product).lower()}.")
+
+
+@router.message(Command("promo_new"))
+async def cmd_promo_new(message: Message, command: CommandObject) -> None:
+    """/promo_new КОД СКИДКА% [лимит] [чей] — например: /promo_new KNIGA20 20 100 @blogger"""
+    if not await _guard(message):
+        return
+    parts = (command.args or "").split()
+    if len(parts) < 2 or not parts[1].rstrip("%").isdigit():
+        await message.answer("Формат: /promo_new КОД СКИДКА [лимит] [чей]\nНапример: /promo_new KNIGA20 20 100 @blogger\n"
+                             "Скидка 100 — бесплатный доступ. Ссылка для рекламы: t.me/<бот>?start=promo_КОД")
+        return
+    code = billing.normalize_code(parts[0])
+    pct = max(0, min(100, int(parts[1].rstrip("%"))))
+    limit = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else None
+    owner = next((x for x in parts[2:] if not x.isdigit()), None)
+    async with session_scope() as s:
+        p = await s.get(PromoCode, code)
+        if p is None:
+            p = PromoCode(code=code)
+            s.add(p)
+        p.discount_percent, p.max_uses, p.owner, p.active = pct, limit, owner, True
+    from bot.ui import deep_link
+
+    await message.answer(f"Промокод {code}: −{pct}%{f', до {limit} использований' if limit else ''}"
+                         f"{f', чей: {texts.e(owner)}' if owner else ''}.\nСсылка: {deep_link('promo_' + code)}")
+
+
+@router.message(Command("promo_off"))
+async def cmd_promo_off(message: Message, command: CommandObject) -> None:
+    if not await _guard(message):
+        return
+    code = billing.normalize_code(command.args)
+    async with session_scope() as s:
+        p = await s.get(PromoCode, code)
+        if p:
+            p.active = False
+    await message.answer(f"Промокод {code} выключен." if p else "Нет такого промокода.")
+
+
+@router.message(Command("promos"))
+async def cmd_promos(message: Message) -> None:
+    if not await _guard(message):
+        return
+    async with session_scope() as s:
+        codes = list(await s.scalars(select(PromoCode).order_by(PromoCode.created_at.desc()).limit(30)))
+        lines = ["<b>Промокоды</b> (использований · выручка)"]
+        for c in codes:
+            rows = list(await s.scalars(select(Purchase).where(Purchase.promo_code == c.code, Purchase.status == "paid")))
+            rub = sum(p.amount for p in rows if p.currency == "RUB") / 100
+            stars = sum(p.amount for p in rows if p.currency == "XTR")
+            users = await s.scalar(select(func.count(User.id)).where(User.source == f"promo:{c.code}"))
+            lines.append(f"{'✅' if c.active else '⛔'} {c.code} −{c.discount_percent}% · пришли {users or 0} · оплат {c.used}"
+                         f" · {rub:.0f} ₽ + {stars} ⭐{f' · {texts.e(c.owner)}' if c.owner else ''}")
+    await message.answer("\n".join(lines) if codes else "Промокодов пока нет. Создать: /promo_new КОД 20")
+
+
+@router.message(Command("sales"))
+async def cmd_sales(message: Message, bot: Bot) -> None:
+    """Продажи и воронка: старт → онбординг → книга → план → оплата → дочитали."""
+    if not await _guard(message):
+        return
+    async with session_scope() as s:
+        day, week, total = (await billing.sales_summary(s, 1), await billing.sales_summary(s, 7),
+                            await billing.sales_summary(s))
+
+        async def users_with(event: str) -> int:
+            return await s.scalar(select(func.count(func.distinct(Event.user_id))).where(Event.type == event)) or 0
+
+        funnel = [("Нажали /start", await users_with("start")), ("Прошли онбординг", await users_with("onboarding_done")),
+                  ("Загрузили или добавили книгу", await users_with("book_parsed") + await users_with("book_paper_added")),
+                  ("Выбрали план", await users_with("plan_confirmed")), ("Увидели тарифы", await users_with("paywall_shown")),
+                  ("Оплатили", total["payers"]), ("Сдали первый день", await users_with("day_done")),
+                  ("Дочитали книгу", await users_with("finish"))]
+        sources = (await s.execute(
+            select(User.source, func.count(User.id)).group_by(User.source).order_by(func.count(User.id).desc()).limit(8)
+        )).all()
+
+    def line(title: str, x: dict) -> str:
+        prod = ", ".join(f"{k}: {v}" for k, v in x["by_product"].items()) or "—"
+        return f"{title}: {x['count']} оплат · {x['rub']:.0f} ₽ + {x['stars']} ⭐ ({prod})"
+
+    try:
+        bal = await bot.get_my_star_balance()
+        balance = f"Баланс звёзд у бота: {bal.amount} ⭐ (держи запас под возвраты)"
+    except Exception:
+        balance = "Баланс звёзд: недоступен"
+    text = ["<b>Продажи</b>", line("Сегодня", day), line("7 дней", week), line("Всего", total),
+            f"Возвратов: {total['refunds']} · кодов с сайта ждут активации: {total['not_activated']}", balance,
+            "", "<b>Воронка</b>"]
+    text += [f"{t}: {n}" for t, n in funnel]
+    text += ["", "<b>Источники</b>"] + [f"{texts.e(src or 'без метки')}: {n}" for src, n in sources]
+    await message.answer("\n".join(text))
+
+
+@router.message(Command("refund_done"))
+async def cmd_refund_done(message: Message, command: CommandObject, bot: Bot) -> None:
+    """Отметить, что деньги по платежу возвращены вручную (в кабинете ЮKassa): /refund_done ID"""
+    if not await _guard(message):
+        return
+    arg = (command.args or "").strip()
+    if not arg.isdigit():
+        await message.answer("Формат: /refund_done ID_платежа (номер пришёл в уведомлении о запросе возврата)")
+        return
+    async with session_scope() as s:
+        p = await billing.mark_refunded(s, int(arg))
+        tg = (await s.get(User, p.user_id)).tg_id if p and p.user_id else None
+    if p is None:
+        await message.answer("Платёж не найден.")
+        return
+    if tg:
+        await bot.send_message(tg, texts.REFUND_OK)
+    await message.answer(f"Платёж #{arg} отмечен как возвращённый, доступ закрыт.")
+
+
+@router.message(Command("refund_ok"))
+async def cmd_refund_ok(message: Message, command: CommandObject, bot: Bot) -> None:
+    """Одобрить заявку на возврат: /refund_ok ID [сумма в рублях] — деньги уйдут через провайдера автоматически."""
+    if not await _guard(message):
+        return
+    parts = (command.args or "").split()
+    if not parts or not parts[0].isdigit() or (len(parts) > 1 and not parts[1].isdigit()):
+        await message.answer("Формат: /refund_ok ID [сумма в ₽]. Без суммы — полный возврат. Звёзды — только целиком.")
+        return
+    pid, amount = int(parts[0]), (int(parts[1]) if len(parts) > 1 else None)
+    async with session_scope() as s:
+        res = await billing.approve_refund(s, pid, bot, amount)
+        p = await s.get(Purchase, pid)
+        tg = (await s.get(User, p.user_id)).tg_id if p and p.user_id and res == "ok" else None
+    if tg:
+        await bot.send_message(tg, texts.REFUND_OK)
+    await message.answer(f"Платёж #{pid}: возврат оформлен, доступ закрыт." if res == "ok" else texts.e(res))
 
 
 @router.message(Command("refund"))
@@ -335,7 +487,7 @@ async def cmd_export(message: Message) -> None:
             await message.answer("Забегов ещё не было.")
             return
         data = await export_zip(s, run)
-    await message.answer_document(BufferedInputFile(data, f"polka_run{run.id}_{date.today()}.zip"),
+    await message.answer_document(BufferedInputFile(data, f"dochitka_run{run.id}_{date.today()}.zip"),
                                   caption="participants, retellings, days, events (CSV) + metrics.txt")
 
 

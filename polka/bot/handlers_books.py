@@ -32,7 +32,7 @@ from services.books import (
     store_upload,
 )
 from services.common import Outbox, log_event
-from services.runs import current_enrollment, current_main_run, ensure_main_enrollment
+from services.runs import current_enrollment, ensure_enrollment
 from settings import get_settings
 
 log = logging.getLogger(__name__)
@@ -42,14 +42,8 @@ PARSE_TIMEOUT = 120
 
 
 async def _enrollment_for_book(s, user: User):
-    enr = await current_enrollment(s, user.id)
-    if enr is None or enr.status not in ("invited", "paid", "active"):
-        run = await current_main_run(s)
-        if run is not None:
-            enr = await ensure_main_enrollment(s, user)
-        else:
-            enr = None
-    return enr
+    """Текущее участие или новое: групповой забег ведущего, иначе личный забег (стартует в любой день)."""
+    return await ensure_enrollment(s, user)
 
 
 @router.message(F.document)
@@ -69,9 +63,6 @@ async def msg_document(message: Message, bot: Bot, state: FSMContext) -> None:
     async with session_scope() as s:
         user, _ = await load_user(s, message.from_user)
         enr = await _enrollment_for_book(s, user)
-        if enr is None:
-            await message.answer(texts.STATUS_NO_RUN)
-            return
         progress = await has_progress(s, enr)
         cur_title = (await s.get(Book, enr.book_id)).title if enr.book_id else ""
     if progress:
@@ -234,11 +225,7 @@ async def msg_paper_pages(message: Message, state: FSMContext) -> None:
     async with session_scope() as s:
         user, _ = await load_user(s, message.from_user)
         enr = await _enrollment_for_book(s, user)
-        if enr is None:
-            await message.answer(texts.STATUS_NO_RUN, reply_markup=kb([[
-                {"text": "Начать спринт (бесплатно)", "callback": "sprint:start"}]]))
-            return
         book = await add_paper_book(s, user, enr, data.get("paper_title", "Книга"), data.get("paper_author", ""), int(raw))
         opts = options_for(book, enr)
         title = book.title
-    await message.answer(f"Записал: «{texts.e(title)}», {raw} стр. Выбери срок:", reply_markup=plan_kb(opts))
+    await message.answer(f"Записано: «{texts.e(title)}», {raw} стр. Выбери срок:", reply_markup=plan_kb(opts))

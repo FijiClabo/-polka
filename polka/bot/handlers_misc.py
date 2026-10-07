@@ -95,7 +95,7 @@ async def cb_delete(call: CallbackQuery, state: FSMContext) -> None:
     await call.answer()
     await call.message.edit_reply_markup(reply_markup=None)
     if call.data == "del:no":
-        await call.message.answer("Ничего не удалял.")
+        await call.message.answer("Ничего не удалено.")
         return
     async with session_scope() as s:
         u = await get_user_by_tg(s, call.from_user.id)

@@ -176,6 +176,10 @@ async def confirm_plan(session: AsyncSession, user: User, enr: Enrollment, plan_
     enr.plan_confirmed_at = now()
     enr.plan_start_date = plan_start_for(enr.run, user) if can_start_plan(enr) else None
     enr.last_closed_day = None
+    if enr.status == "invited":
+        from services.billing import try_activate
+
+        await try_activate(session, user, enr)  # есть абонемент или оплаченный забег — стартуем сразу
     if enr.pair_code is None:
         from services.common import random_code
 

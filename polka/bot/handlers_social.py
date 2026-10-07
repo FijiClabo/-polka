@@ -88,7 +88,7 @@ async def cb_nudge(call: CallbackQuery, bot: Bot) -> None:
         user, _ = await load_user(s, call.from_user)
         target = await s.get(User, int(uid))
         res = await nudge(s, user, target, outbox, kind="partner" if kind == "p" else "friend") if target else "not_found"
-    msg = {"ok": "Отправил 👋", "already": "Сегодня толчок уже был — хватит одного.", "done": "Там день уже сдан ✓",
+    msg = {"ok": "Отправлено 👋", "already": "Сегодня толчок уже был — хватит одного.", "done": "Там день уже сдан ✓",
            "disabled": "Этот человек отключил толчки."}.get(res, "Не получилось.")
     await call.answer(msg, show_alert=False)
     await flush(bot, outbox)
@@ -114,6 +114,14 @@ async def send_finish(bot: Bot, chat_id: int, user_id: int) -> None:
                               partner.display_name if partner else None)
         png = render_card("finish", user=user, enr=enr, book=book, partner=partner, retells=retells or 0)
         await log_event(s, "share_generated", user.id, type="finish", via="bot")
+        from services.billing import subscription_active
+
+        subscribed = subscription_active(user) or user.run_credits > 0
+        upsell = texts.after_finish(enr.run.kind, subscribed)
     await bot.send_message(chat_id, text, reply_markup=app_kb("Полка и конспект", "finish"))
     await bot.send_photo(chat_id, BufferedInputFile(png, "finish.png"),
                          caption="Карточка для сторис — перешли друзьям или сохрани.")
+    rows = [[{"text": "📚 Следующая книга", "callback": "next:run"}]]
+    if not subscribed:
+        rows.append([{"text": "Тарифы", "webapp": "pay"}])
+    await bot.send_message(chat_id, upsell, reply_markup=kb(rows))

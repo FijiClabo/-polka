@@ -6,13 +6,13 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: polka
-      POSTGRES_USER: polka
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-polka}
+      POSTGRES_DB: dochitka
+      POSTGRES_USER: dochitka
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dochitka}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U polka -d polka"]
+      test: ["CMD-SHELL", "pg_isready -U dochitka -d dochitka"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -22,7 +22,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://polka:${POSTGRES_PASSWORD:-polka}@db:5432/polka
+      DATABASE_URL: postgresql+asyncpg://dochitka:${POSTGRES_PASSWORD:-dochitka}@db:5432/dochitka
       DATA_DIR: /app/data
       BOT_MODE: ${BOT_MODE:-webhook}
     volumes:

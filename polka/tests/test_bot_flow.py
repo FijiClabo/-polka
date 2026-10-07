@@ -27,7 +27,7 @@ class MockSession(BaseSession):
     async def make_request(self, bot, method, timeout=None):
         self.sent.append(method)
         if isinstance(method, GetMe):
-            return User(id=1, is_bot=True, first_name="Polka", username="polka_test_bot")
+            return User(id=1, is_bot=True, first_name="Dochitka", username="dochitka_test_bot")
         if isinstance(method, GetFile):
             return File(file_id=method.file_id, file_unique_id=method.file_id, file_path=method.file_id)
         if isinstance(method, (SendMessage, SendPhoto, SendDocument)):
@@ -55,7 +55,7 @@ class MockSession(BaseSession):
 @pytest.fixture
 async def env(tmp_path, monkeypatch):
     monkeypatch.setenv("ADMIN_TG_IDS", "900")
-    monkeypatch.setenv("WEBAPP_URL", "https://polka.example.com/app")
+    monkeypatch.setenv("WEBAPP_URL", "https://dochitka.example.com/app")
     from settings import get_settings
 
     get_settings.cache_clear()
@@ -67,7 +67,7 @@ async def env(tmp_path, monkeypatch):
     from bot.app import create_dispatcher
     from bot.ui import set_bot_username
 
-    set_bot_username("polka_test_bot")
+    set_bot_username("dochitka_test_bot")
     session = MockSession()
     bot = Bot("123456:TEST-TOKEN", session=session)
     from aiogram.client.default import DefaultBotProperties
@@ -91,7 +91,7 @@ async def send_text(bot, dp, uid, text, name="Саша"):
 
 async def press(bot, dp, uid, data, name="Саша"):
     bot_msg = Message(message_id=next(_ids), date=datetime.now(), chat=Chat(id=uid, type="private"),
-                      from_user=User(id=1, is_bot=True, first_name="Polka"), text="…")
+                      from_user=User(id=1, is_bot=True, first_name="Dochitka"), text="…")
     cq = CallbackQuery(id=str(next(_ids)), from_user=tg_user(uid, name), chat_instance="x", data=data, message=bot_msg)
     await dp.feed_update(bot, Update(update_id=next(_ids), callback_query=cq))
 
@@ -122,6 +122,9 @@ async def test_full_flow(env):
     await press(bot, dp, U, "ob:1")
     await press(bot, dp, U, "ob:2")
     await press(bot, dp, U, "ob:go")
+    assert "согласие на обработку данных" in session.texts()[-1]
+    assert "consent:pd" in session.last_markup_callbacks()
+    await press(bot, dp, U, "consent:pd")
     assert any("Где ты живёшь" in t for t in session.texts())
     await press(bot, dp, U, "tz:Asia/Yekaterinburg")
     await press(bot, dp, U, "mt:08:00")
@@ -131,7 +134,7 @@ async def test_full_flow(env):
     await send_text(bot, dp, U, "Червяков в театре чихнул на лысину генерала Бризжалова и сильно смутился, начал думать.")
     texts = session.texts()
     assert any("Засчитано" in t for t in texts)
-    assert any("Ожидаем оплату" in t for t in texts)
+    assert any("Теперь книга" in t for t in texts)
 
     # книга файлом
     await send_doc(bot, dp, session, U, "book.epub", sample_set()["01_clean_with_toc.epub"])
@@ -140,6 +143,8 @@ async def test_full_flow(env):
     assert "plan:21" in cbs
     await press(bot, dp, U, "plan:21")
     assert any("План готов" in t for t in session.texts())
+    assert "Осталось открыть доступ" in session.texts()[-1]  # пейвол
+    assert "pay:run:stars" in session.last_markup_callbacks()
 
     # плохой файл
     await send_doc(bot, dp, session, U, "scan.epub", sample_set()["07_scanned_images.epub"])
@@ -204,3 +209,59 @@ async def test_paper_book_flow(env):
     assert "plan:45" in session.last_markup_callbacks()
     await press(bot, dp, 601, "plan:45")
     assert any("План готов" in t for t in session.texts())
+
+
+async def test_self_serve_paid_flow(env):
+    """Без ведущего: книга → план → пейвол → счёт в Stars → оплата → день 1 → возврат по гарантии."""
+    from aiogram.methods import AnswerPreCheckoutQuery, RefundStarPayment, SendInvoice
+    from aiogram.types import PreCheckoutQuery, SuccessfulPayment
+
+    bot, dp, session = env
+    day = datetime.now().date()
+    set_now(day, 10)
+    U = 777
+    await send_text(bot, dp, U, "/start")
+    for cb in ("ob:1", "ob:2", "ob:go", "consent:pd", "tz:Europe/Moscow", "mt:08:00", "et:21:00"):
+        await press(bot, dp, U, cb)
+    await send_text(bot, dp, U, "Червяков в театре чихнул на лысину генерала Бризжалова и сильно смутился, начал думать.")
+    assert any("Теперь книга" in t for t in session.texts())
+
+    await send_doc(bot, dp, session, U, "book.epub", sample_set()["01_clean_with_toc.epub"])
+    await press(bot, dp, U, "plan:21")
+    assert "Осталось открыть доступ" in session.texts()[-1]
+
+    await press(bot, dp, U, "pay:run:stars")
+    inv = next(m for m in reversed(session.sent) if isinstance(m, SendInvoice))
+    assert inv.currency == "XTR" and inv.prices[0].amount > 0
+
+    q = PreCheckoutQuery(id="pc1", from_user=tg_user(U), currency="XTR", total_amount=inv.prices[0].amount,
+                         invoice_payload=inv.payload)
+    await dp.feed_update(bot, Update(update_id=next(_ids), pre_checkout_query=q))
+    ans = next(m for m in reversed(session.sent) if isinstance(m, AnswerPreCheckoutQuery))
+    assert ans.ok is True
+
+    sp = SuccessfulPayment(currency="XTR", total_amount=inv.prices[0].amount, invoice_payload=inv.payload,
+                           telegram_payment_charge_id="tg-charge-1", provider_payment_charge_id="")
+    msg = Message(message_id=next(_ids), date=datetime.now(), chat=Chat(id=U, type="private"), from_user=tg_user(U),
+                  successful_payment=sp)
+    await dp.feed_update(bot, Update(update_id=next(_ids), message=msg))
+    assert any("Оплата прошла" in t for t in session.texts())
+    assert any("День 1 из 21" in t for t in session.texts())
+
+    # повторная доставка того же платежа ничего не дублирует
+    await dp.feed_update(bot, Update(update_id=next(_ids), message=msg))
+    from sqlalchemy import func, select
+
+    from db.models import Purchase
+    from db.session import session_scope
+
+    async with session_scope() as s:
+        assert await s.scalar(select(func.count(Purchase.id))) == 1
+
+    await send_text(bot, dp, U, "/money_back")
+    assert "mb:yes" in session.last_markup_callbacks()
+    await press(bot, dp, U, "mb:yes")
+    assert any(isinstance(m, RefundStarPayment) and m.telegram_payment_charge_id == "tg-charge-1" for m in session.sent)
+    assert "деньги возвращены" in session.texts()[-1]
+    await send_text(bot, dp, U, "/today")
+    assert "День 1 из 21" not in session.texts()[-1]

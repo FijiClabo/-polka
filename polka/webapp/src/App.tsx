@@ -7,6 +7,7 @@ import Conspect from "./screens/Conspect";
 import Finish from "./screens/Finish";
 import FriendCard from "./screens/FriendCard";
 import Friends from "./screens/Friends";
+import Pay from "./screens/Pay";
 import Profile from "./screens/Profile";
 import Read from "./screens/Read";
 import Retell from "./screens/Retell";
@@ -19,7 +20,7 @@ import { inTelegram, initTelegram, onThemeChange, paintChrome, setBackButton, se
 function initialRoute(): Route {
   const p = startParams();
   const s = p.get("s") || "today";
-  const known = ["today", "run", "friends", "shelf", "read", "retell", "profile", "book", "finish"];
+  const known = ["today", "run", "friends", "shelf", "read", "retell", "profile", "book", "finish", "pay"];
   if (!known.includes(s)) return { name: "today" };
   const params: Record<string, string> = {};
   p.forEach((v, k) => {
@@ -95,7 +96,7 @@ export default function App() {
         <div className="state" style={{ paddingTop: 120 }}>
           <div className="ill">📚</div>
           <h3>Открой приложение в Telegram</h3>
-          <p>Полка работает внутри Telegram: найди бота и нажми кнопку «Полка» внизу чата.</p>
+          <p>Приложение работает внутри Telegram: открой бота и нажми кнопку внизу чата.</p>
         </div>
       </div>
     );
@@ -131,6 +132,7 @@ export default function App() {
     case "friend": screen = <FriendCard id={Number(route.params?.id)} />; break;
     case "conspect": screen = <Conspect bookId={Number(route.params?.book)} />; break;
     case "finish": screen = <Finish />; break;
+    case "pay": screen = <Pay />; break;
     default: screen = <Today />;
   }
 

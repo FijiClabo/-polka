@@ -2,9 +2,9 @@ import { useState } from "react";
 import { api, type FinishData } from "../api";
 import { Confetti, ErrorState, ScreenSkeleton, Sheet, Shelf, toast, type SpineItem } from "../components/ui";
 import { dayMonth, days, firstName } from "../format";
-import { useApi } from "../hooks";
+import { invalidate, useApi } from "../hooks";
 import { useNav } from "../nav";
-import { canShareStory, closeApp, haptic, shareStory } from "../tg";
+import { canShareStory, haptic, shareStory } from "../tg";
 
 export default function Finish() {
   const nav = useNav();
@@ -72,7 +72,24 @@ export default function Finish() {
       <button className="btn primary block" onClick={() => { haptic("medium"); setShare(true); }}>Поделиться</button>
       <div className="btn-row mt-12">
         <button className="btn secondary" onClick={() => data.book && nav.push({ name: "conspect", params: { book: data.book.id } })}>Конспект</button>
-        <button className="btn secondary" onClick={closeApp}>Следующий забег</button>
+        <button
+          className="btn secondary"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await api.post("/runs/new");
+              invalidate();
+              nav.replace({ name: "book" });
+            } catch (e) {
+              toast((e as Error).message);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Следующая книга
+        </button>
       </div>
 
       <Sheet open={share} onClose={() => setShare(false)}>

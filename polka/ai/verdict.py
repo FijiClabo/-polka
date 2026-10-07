@@ -107,7 +107,7 @@ def fallback_accept(reason: str = "ai_error") -> Verdict:
     return Verdict(
         verdict="accepted",
         confidence=0.0,
-        reply="Сегодня проверял без сверки с текстом — техника капризничала, но твой день на месте.",
+        reply="Сегодня проверка прошла без сверки с текстом — техника капризничала, но твой день на месте.",
         question=None,
         note_for_summary="",
         verified=False,

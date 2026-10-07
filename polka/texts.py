@@ -65,14 +65,14 @@ ASK_TZ_OTHER = (
     "Напиши смещение от Москвы (например, <code>+4</code> или <code>-1</code>) "
     "или от UTC в формате <code>UTC+5</code>. Можно просто отправить геопозицию."
 )
-TZ_BAD = "Не понял пояс. Пример: <code>+2</code> (от Москвы) или <code>UTC+5</code>."
+TZ_BAD = "Не получилось распознать пояс. Пример: <code>+2</code> (от Москвы) или <code>UTC+5</code>."
 ASK_MORNING = "Во сколько присылать отрезок на день?"
 ASK_EVENING = "А во сколько напомнить вечером, если день ещё не сдан? Напоминание одно, без занудства."
-TIME_BAD = "Не понял время. Напиши в формате <code>08:30</code>."
+TIME_BAD = "Не получилось распознать время. Напиши в формате <code>08:30</code>."
 
 
 def tz_set(label: str) -> str:
-    return f"Записал: {e(label)}."
+    return f"Записано: {e(label)}."
 
 
 def trial_intro(title: str, author: str, text: str) -> str:
@@ -96,7 +96,7 @@ def add_book_prompt() -> str:
     )
 
 
-BOOK_RECEIVED = "Получил, разбираю. Это займёт до минуты ⏳"
+BOOK_RECEIVED = "Файл получен, разбираю. Это займёт до минуты ⏳"
 BOOK_TOO_BIG = "Файл больше {mb} МБ — Telegram не даст мне его скачать. Попробуй другой файл или добавь книгу как бумажную."
 BOOK_UNSUPPORTED = "Пока умею только epub и fb2. Можно найти книгу в другом формате или добавить её как бумажную."
 BOOK_NOT_A_BOOK = "Это не похоже на книгу. Я жду файл epub или fb2."
@@ -131,6 +131,8 @@ def plan_ready(title: str, days: int, start: date | None, ppd: float, minutes: i
         when = f"Старт — {d(start)}."
     elif run_start:
         when = f"Старт забега — {d(run_start)}." + (" План включится после оплаты." if awaiting_payment else "")
+    elif awaiting_payment:
+        when = "Старт — сразу после оплаты (если уже вечер — следующим утром)."
     else:
         when = "Старт — в день начала забега."
     ppd_s = f"{ppd:g}".replace(".", ",")
@@ -155,16 +157,18 @@ def status_in_list(start: date | None) -> str:
     return f"Забег стартует {d(start)}. Ты в списке ✓" if start else "Ты в списке ✓ Дату старта сообщу отдельно."
 
 
-STATUS_NO_RUN = "Сейчас нет открытого забега. Как только ведущий его откроет — напишу."
+STATUS_NO_RUN = "Забег ещё не начат: пришли книгу — и соберём план."
 
 
 def sprint_offer(inviter: str | None) -> str:
     who = f"{e(inviter)} зовёт тебя читать вместе. " if inviter else ""
-    return (f"{who}Хочешь попробовать бесплатно? <b>Спринт</b> — 7 дней на короткую книгу или рассказ. "
-            "Всё как в забеге, только короче.")
+    return (f"{who}Не готов сразу к целой книге? Попробуй бесплатно: <b>спринт</b> — 7 дней на рассказ или короткую "
+            "книгу. Всё как в забеге, только короче.")
 
 
-SPRINT_STARTED = "Спринт открыт. Пришли файл короткой книги или рассказа (epub/fb2) — или выбери бумажную."
+SPRINT_STARTED = ("Спринт открыт. Пришли файл короткой книги или рассказа (epub/fb2, до 140 страниц) — "
+                  "или выбери бумажную.")
+SPRINT_USED = "Бесплатный спринт уже был. Дальше — забег: /buy"
 
 
 # --------------------------------------------------------------------------- день
@@ -231,7 +235,7 @@ NO_BOOK_REMINDER = "Забег уже идёт, а книги у тебя пок
 
 def heard(text: str) -> str:
     short = text if len(text) <= 300 else text[:300] + "…"
-    return f"🎙 Я услышал: <i>{e(short)}</i>"
+    return f"🎙 Распознано: <i>{e(short)}</i>"
 
 
 def accepted(reply: str, question: str | None, streak: int, streak_grew: bool, *, verified: bool,
@@ -267,12 +271,12 @@ QUEUED = "Принял. Проверю чуть позже — день не с�
 CHECKING = "Ещё проверяю прошлый пересказ — секунду."
 RATE_LIMITED = "Многовато попыток за час. Давай сделаем паузу и вернёмся чуть позже."
 VOICE_TOO_LONG = "Голосовое длиннее 3 минут — я столько не осилю. Достаточно 30–60 секунд."
-VOICE_FAILED = "Не разобрал голосовое. Попробуй ещё раз или напиши текстом."
+VOICE_FAILED = "Не получилось разобрать голосовое. Попробуй ещё раз или напиши текстом."
 STT_OFF = "Голосовые пока не настроены — напиши, пожалуйста, текстом."
 
 
 def pending_resolved(out) -> str:
-    return "Вернулся к твоему пересказу: засчитано ✅ День на месте."
+    return "Твой пересказ проверен повторно: засчитано ✅ День на месте."
 
 
 def override_notice() -> str:
@@ -287,8 +291,8 @@ def too_short_hint(seg_title: str | None) -> str:
 
 def state_message(state: str, *, next_title: str | None = None, start: date | None = None) -> str:
     return {
-        "no_run": "Сейчас ты не в забеге. Загляни в приложение — там видно, что дальше.",
-        "awaiting_payment": status_waiting_payment(),
+        "no_run": "Начнём с книги: пришли файл epub или fb2 — или нажми /paper, если читаешь на бумаге.",
+        "awaiting_payment": "План готов — осталось открыть доступ: /buy",
         "no_book": add_book_prompt(),
         "parsing": "Ещё разбираю твою книгу — минутку.",
         "parse_failed": "С файлом не вышло. Пришли другой или добавь книгу как бумажную.",
@@ -352,3 +356,183 @@ def friend_invite_text(name: str) -> str:
 
 def pair_invite_text(name: str) -> str:
     return f"{name} зовёт тебя в напарники: читаем каждый свою книгу, а стрик — общий."
+
+
+# --------------------------------------------------------------------------- оплата
+
+def rub(n: float) -> str:
+    return f"{n:,.0f}".replace(",", "\u00a0") + "\u00a0₽"
+
+
+def _price(rub_or_stars: int, list_value: int, unit: str) -> str:
+    fmt = (lambda v: f"{v}\u00a0⭐") if unit == "stars" else rub
+    return f"<s>{fmt(list_value)}</s> {fmt(rub_or_stars)}" if rub_or_stars < list_value else fmt(rub_or_stars)
+
+
+def paywall(book_title: str | None, plan_days: int | None, prices: dict, *, card: bool, stars: bool,
+            guarantee_days: int) -> str:
+    run, m, y = prices["run"], prices["month"], prices["year"]
+    unit = "rub" if card else "stars"
+    val = (lambda p: p.rub) if card else (lambda p: p.stars)
+    lst = (lambda p: p.list_rub) if card else (lambda p: p.list_stars)
+    head = (f"План готов: «{e(book_title)}» за {days_word(plan_days)}. Осталось открыть доступ — и первый отрезок "
+            f"придёт сразу (или завтра утром, если уже вечер).") if book_title and plan_days else \
+        "Чтобы начать забег, открой доступ:"
+    lines = [head, ""]
+    lines.append(f"📖 <b>Забег — {_price(val(run), lst(run), unit)}</b>. Одна книга до финиша: план, проверка пересказов, "
+                 "напарник, конспект.")
+    lines.append(f"🔁 <b>Абонемент — {_price(val(m), lst(m), unit)}/мес или {_price(val(y), lst(y), unit)}/год</b>. "
+                 "Книга за книгой без доплат и вторая заморозка в неделю.")
+    if run.promo and run.discount:
+        lines.append(f"🎟 Промокод {e(run.promo)}: −{run.discount}%")
+    lines.append("")
+    lines.append(f"Гарантия: не зашло — вернём всё в первые {guarantee_days} дня, без вопросов (/money_back).")
+    if stars and not card:
+        lines.append("Оплата — звёздами Telegram ⭐, купить их можно прямо в окне оплаты.")
+    lines.append("Есть код активации (например, подарочный) — нажми «У меня есть код».")
+    return "\n".join(lines)
+
+
+def paywall_buttons(prices: dict, *, card: bool, stars: bool) -> list[list[dict]]:
+    rows = []
+    run, m, y = prices["run"], prices["month"], prices["year"]
+    if run.free:
+        return [[{"text": "🎟 Активировать по промокоду", "callback": "pay:free:run"}]]
+    if stars:
+        rows.append([{"text": f"⭐ Забег — {run.stars} звёзд", "callback": "pay:run:stars"}])
+        rows.append([{"text": f"Месяц — {m.stars} ⭐", "callback": "pay:month:stars"},
+                     {"text": f"Год — {y.stars} ⭐", "callback": "pay:year:stars"}])
+    if card:  # аварийный режим: рубли в боте
+        rows.append([{"text": f"Забег — {rub(run.rub)}", "callback": "pay:run:card"}])
+        rows.append([{"text": f"Месяц — {rub(m.rub)}", "callback": "pay:month:card"},
+                     {"text": f"Год — {rub(y.rub)}", "callback": "pay:year:card"}])
+    rows.append([{"text": "🔑 У меня есть код", "callback": "code:enter"}])
+    rows.append([{"text": "Тарифы в приложении", "webapp": "pay"}])
+    return rows
+
+
+ASK_CODE = "Пришли код активации — 10 букв и цифр из письма или подарочной открытки."
+CODE_RESULT = {
+    "not_found": "Такого кода нет. Проверь буквы — например, путают O и 0 — или напиши в /paysupport.",
+    "used": "Этот код уже активирован другим аккаунтом. Если это ошибка — напиши в /paysupport.",
+    "already": "Этот код уже активирован на тебе — всё в порядке ✅",
+    "expired": "Срок действия кода истёк. Напиши в /paysupport — разберёмся.",
+}
+
+
+def code_ok(product: str) -> str:
+    what = {"run": "забег на одну книгу", "month": "абонемент на месяц", "year": "абонемент на год"}[product]
+    return f"Код активирован: {what} ✅"
+
+
+def consent_text(consent_url: str | None, privacy_url: str | None) -> str:
+    links = []
+    if consent_url:
+        links.append(f'<a href="{consent_url}">согласие на обработку данных</a>')
+    if privacy_url:
+        links.append(f'<a href="{privacy_url}">политика конфиденциальности</a>')
+    docs = (" Документы: " + " и ".join(links) + ".") if links else ""
+    return ("Последний шаг перед стартом — согласие на обработку данных.\n\n"
+            "Что храним: имя и id в Telegram, часовой пояс, книги и пересказы — чтобы строить план, проверять "
+            "пересказы и напоминать о чтении. Голосовые не храним: распознаём и сразу удаляем. Пересказы видишь только ты."
+            f"{docs}\n\nОтозвать согласие и удалить всё — командой /delete_me.")
+
+
+CONSENT_BTN = "✅ Даю согласие"
+
+
+def sub_cancel_result(res: str, until) -> str:
+    if res == "ok":
+        when = f" до {until.day} {MONTHS[until.month - 1]}" if until else ""
+        return f"Автопродление отключено. Абонемент действует{when} — списаний больше не будет."
+    if res == "not_recurring":
+        return "Автопродления нет — списаний не будет."
+    return "Не получилось отключить автоматически. Отключи в Telegram: Настройки → Звёзды → Подписки — или напиши в /paysupport."
+
+
+PAY_DISABLED = "Онлайн-оплата ещё не подключена. Напиши в поддержку (/paysupport) — доступ откроют вручную."
+
+
+def pay_ok_started(start: date | None) -> str:
+    when = "сегодня" if start is None else d(start)
+    return f"Оплата прошла, спасибо! 🔥 Забег открыт, старт — {when}. Первый отрезок пришлю утром в день старта."
+
+
+def pay_ok_started_today() -> str:
+    return "Оплата прошла, спасибо! 🔥 Забег стартует сегодня — первый отрезок уже ждёт."
+
+
+PAY_OK_CREDIT = ("Оплата прошла, спасибо! Забег на счету — осталось добавить книгу и выбрать срок, "
+                 "и он стартует сам.")
+
+
+def pay_ok_subscription(until, recurring: bool) -> str:
+    tail = " Продлевается автоматически, отменить можно в любой момент в настройках Telegram." if recurring else ""
+    return (f"Абонемент активен до {until.day} {MONTHS[until.month - 1]} {until.year}. "
+            f"Книга за книгой без доплат и вторая заморозка в неделю.{tail}")
+
+
+def promo_applied(code: str, discount: int) -> str:
+    if discount >= 100:
+        return f"Промокод {e(code)} принят: доступ бесплатно 🎉"
+    return f"Промокод {e(code)} принят: скидка {discount}% ✓"
+
+
+PROMO_BAD = "Такого промокода нет или он закончился."
+
+
+def terms_text(offer_url: str | None, privacy_url: str | None, consent_url: str | None = None) -> str:
+    s = get_settings()
+    parts = ["<b>Условия</b>",
+             "Услуга — сервис чтения «забег»: план для твоей книги на 21–60 дней, ежедневная проверка пересказов ИИ, "
+             "напарник и конспект. Абонемент — забеги без доплат на месяц или год.",
+             f"Цены: забег — {s.price_run_stars} ⭐ ({rub(s.price_run_rub)}), месяц — {s.price_month_stars} ⭐ "
+             f"({rub(s.price_month_rub)}), год — {s.price_year_stars} ⭐ ({rub(s.price_year_rub)}).",
+             f"Возврат: в первые {s.refund_days} дня после оплаты — без вопросов, один раз (/money_back). Позже — "
+             "за неиспользованную часть по заявке, ответ в течение 10 дней. Автопродление отключается командой /cancel_sub."]
+    if offer_url:
+        parts.append(f"Оферта (ред. {e(s.offer_version)}): {offer_url}")
+    if privacy_url:
+        parts.append(f"Политика обработки данных: {privacy_url}")
+    if consent_url:
+        parts.append(f"Согласие на обработку данных: {consent_url}")
+    seller = " · ".join(x for x in (s.seller_name, s.seller_status if s.seller_name else "",
+                                     f"ИНН {s.seller_inn}" if s.seller_inn else "") if x)
+    if seller:
+        parts.append(f"Исполнитель: {e(seller)}")
+    return "\n".join(parts)
+
+
+def paysupport_text() -> str:
+    s = get_settings()
+    contact = s.support_contact or s.seller_email or "в поддержку через /help"
+    return (f"Вопросы по оплате — {e(contact)}, отвечаем в течение 48 часов.\n"
+            f"Возврат в первые {s.refund_days} дня — командой /money_back: звёзды возвращаются сразу, деньги на карту — "
+            "за 1–3 рабочих дня. Позже — заявка на возврат за неиспользованную часть.\n"
+            "Отключить автопродление абонемента — /cancel_sub. Активировать код — /code.")
+
+
+REFUND_CONFIRM = "Вернуть деньги за последнюю оплату? Доступ к забегу закроется."
+REFUND_OK = "Готово: деньги возвращены. Жаль расставаться — возвращайся, когда захочешь."
+REFUND_REQUESTED = "Запрос на возврат принят — вернём деньги в течение 1–3 рабочих дней и напишем тебе."
+
+
+def paywall_nudge(book_title: str | None, guarantee_days: int) -> str:
+    book = f"«{e(book_title)}» " if book_title else ""
+    return (f"План для {book}готов и ждёт старта 📖\n\n"
+            f"15 минут чтения и минута пересказа в день — и через месяц книга дочитана. "
+            f"Если не зайдёт, вернём деньги в первые {guarantee_days} дня.")
+
+
+def sub_expiring(until) -> str:
+    return (f"Абонемент заканчивается {until.day} {MONTHS[until.month - 1]}. Начатый забег можно дочитать в любом случае, "
+            f"а чтобы следующая книга тоже шла без доплат — продли абонемент.")
+
+
+def after_finish(kind: str, subscribed: bool) -> str:
+    if subscribed:
+        return "Что дальше? Абонемент активен — следующая книга без доплат. Выбирай 📚"
+    if kind == "sprint":
+        return ("Спринт пройден — значит, привычка работает 🔥 Дальше — забег на целую книгу: свой план на 21–60 дней, "
+                "напарник и конспект. Не зайдёт — вернём деньги в первые дни.")
+    return "Что дальше? Следующая книга — в любой день. С абонементом — книга за книгой без доплат."

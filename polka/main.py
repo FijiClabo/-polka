@@ -15,10 +15,11 @@ import uvicorn
 from aiogram.types import Update
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
+from api.pages import router as pages_router
 from api.routes import public_router, set_bot
 from api.routes import router as api_router
 from bot.app import create_bot, create_dispatcher, setup_bot
@@ -27,7 +28,7 @@ from jobs.scheduler import run_scheduler
 from services.common import init_clock
 from settings import get_settings
 
-log = logging.getLogger("polka")
+log = logging.getLogger("dochitka")
 WEBAPP_DIST = Path(__file__).parent / "webapp" / "dist"
 
 _tasks: set[asyncio.Task] = set()
@@ -89,10 +90,11 @@ async def lifespan(app: FastAPI):
         await get_engine().dispose()
 
 
-app = FastAPI(title="Polka", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="Dochitka", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.include_router(api_router)
 app.include_router(public_router)
+app.include_router(pages_router)
 
 
 @app.post(get_settings().webhook_path)
@@ -129,10 +131,6 @@ if WEBAPP_DIST.exists():
         if path and f.is_file() and WEBAPP_DIST in f.resolve().parents:
             return FileResponse(f)
         return FileResponse(WEBAPP_DIST / "index.html", headers={"Cache-Control": "no-cache"})
-
-    @app.get("/")
-    async def root():
-        return RedirectResponse("/app/")
 
 
 if __name__ == "__main__":

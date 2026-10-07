@@ -115,7 +115,7 @@ export interface Me {
 export interface RunBrief {
   id: number;
   title: string;
-  kind: "main" | "sprint";
+  kind: "main" | "sprint" | "solo";
   start_date: string | null;
   price_rub: number;
   grace_days: number;
@@ -165,6 +165,8 @@ export interface Today {
   week: WeekDay[];
   payment_info: string | null;
   accepted_days: number[];
+  sprint_available: boolean;
+  has_access: boolean;
 }
 
 export interface RetellResult {
@@ -297,6 +299,7 @@ export interface BookState {
   run?: RunBrief | null;
   max_mb: number;
   can_add?: boolean;
+  awaiting_payment?: boolean;
 }
 
 export interface Conspect {
@@ -315,4 +318,35 @@ export interface FinishData {
   start: string | null;
   finished_at: string | null;
   shelf: { color: string; pages: number }[];
+}
+
+export interface PriceInfo {
+  rub: number;
+  stars: number;
+  list_rub: number;
+  list_stars: number;
+  promo: string | null;
+  discount: number;
+  free: boolean;
+}
+
+export type Product = "run" | "month" | "year";
+
+export interface Billing {
+  enabled: boolean;
+  methods: { card: boolean; stars: boolean };
+  prices: Record<Product, PriceInfo>;
+  promo: string | null;
+  subscription: { active: boolean; until: string | null; kind: string | null; recurring: boolean };
+  credits: number;
+  refund: { eligible: boolean; partial: boolean; reason: string; until: string | null };
+  guarantee_days: number;
+  offer_url: string | null;
+  privacy_url: string | null;
+  manual_info: string;
+  sprint_available: boolean;
+  book: { title: string; author: string; spine_color: string } | null;
+  plan_days: number | null;
+  needs_access: boolean;
+  purchases: { id: number; product: Product; amount: string; date: string; status: string }[];
 }

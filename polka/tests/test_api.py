@@ -194,3 +194,64 @@ async def test_paper_book_and_plan_options(client):
     assert r.status_code == 400
     r = await client.post("/api/book/plan", json={"days": 60}, headers=h)
     assert r.status_code == 200 and r.json()["awaiting_payment"] is True
+
+
+class _InvoiceBot:
+    def __init__(self):
+        self.links: list[dict] = []
+
+    async def create_invoice_link(self, **kw):
+        self.links.append(kw)
+        return "https://t.me/$invoice-test"
+
+
+async def test_billing_api_paywall_promo_invoice(client):
+    from api.routes import set_bot
+    from db.models import PromoCode
+
+    set_now(clock.real_now().date(), 10)
+    h = H(888, "Покупатель")
+    await client.get("/api/me", headers=h)
+    r = await client.post("/api/book/paper", json={"title": "Идиот", "author": "Достоевский", "pages": 640}, headers=h)
+    assert r.status_code == 200
+    days = (await client.get("/api/book/plan-options", headers=h)).json()["options"][0]["days"]
+    r = await client.post("/api/book/plan", json={"days": days}, headers=h)
+    assert r.json()["awaiting_payment"] is True
+    assert (await client.get("/api/today", headers=h)).json()["state"] == "awaiting_payment"
+
+    b = (await client.get("/api/billing", headers=h)).json()
+    assert b["needs_access"] is True and b["plan_days"] == days and b["book"]["title"] == "Идиот"
+    assert b["methods"]["stars"] is True and b["prices"]["run"]["stars"] > 0
+
+    r = await client.post("/api/billing/promo", json={"code": "nope"}, headers=h)
+    assert r.status_code == 404
+    async with session_scope() as s:
+        s.add(PromoCode(code="READ30", discount_percent=30, products="run,month", active=True, used=0))
+    b = (await client.post("/api/billing/promo", json={"code": "read30"}, headers=h)).json()
+    assert b["promo"] == "READ30" and b["prices"]["run"]["discount"] == 30
+
+    fake = _InvoiceBot()
+    set_bot(fake)
+    try:
+        r = await client.post("/api/billing/invoice", json={"product": "run", "method": "stars"}, headers=h)
+        assert r.status_code == 200 and r.json()["url"].startswith("https://t.me/")
+        assert fake.links[-1]["currency"] == "XTR" and fake.links[-1]["prices"][0].amount == b["prices"]["run"]["stars"]
+        r = await client.post("/api/billing/invoice", json={"product": "run", "method": "card"}, headers=h)
+        assert r.status_code == 400  # ЮKassa не подключена
+        r = await client.post("/api/billing/invoice", json={"product": "boat", "method": "stars"}, headers=h)
+        assert r.status_code == 422
+    finally:
+        set_bot(None)
+
+    # чужой не видит ни покупок, ни промокода
+    other = (await client.get("/api/billing", headers=H(889, "Другой"))).json()
+    assert other["promo"] is None and other["purchases"] == []
+
+
+async def test_public_pages(client):
+    r = await client.get("/robots.txt")
+    assert r.status_code == 200 and "Disallow: /api/" in r.text
+    r = await client.get("/offer")
+    assert r.status_code in (200, 404)
+    if r.status_code == 200:
+        assert "{{" not in r.text

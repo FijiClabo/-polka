@@ -22,7 +22,7 @@ from core import clock
 from core.days import clock_minutes_in_user_day, minutes_since_day_start, plan_day_number
 from db.models import Book, DayResult, Enrollment, Run, Segment, User
 from db.session import session_scope
-from services.common import Outbox, OutMsg, allow_initiative, log_event, today_for
+from services.common import Outbox, OutMsg, allow_initiative, allow_once, log_event, today_for
 from services.flow import process_pending_queue
 from services.progress import close_pending_days, load_view
 from services.shelf import conspect
@@ -40,6 +40,7 @@ async def tick(bot: Bot) -> None:
     outbox = Outbox()
     await _activate_runs()
     await _daily(outbox)
+    await _sales(outbox)
     await process_pending_queue(outbox)
     await flush(bot, outbox)
     await _summaries(limit=5)
@@ -120,6 +121,62 @@ async def _morning_evening(s, enr: Enrollment, user: User, outbox: Outbox) -> No
                 p_done = st.today == "done"
             outbox.add(OutMsg(user.tg_id, texts.evening(partner.display_name if partner else None, p_done),
                               buttons=[[{"text": "Открыть отрезок", "webapp": "today"}]], kind="evening"))
+
+
+async def _sales(outbox: Outbox) -> None:
+    """Напоминания, которые помогают продажам: каждое уходит человеку один раз и не раньше утра."""
+    from services.billing import subscription_active
+    from services.runs import sprint_used
+
+    s_ = get_settings()
+    now = clock.now()
+    try:
+        async with session_scope() as s:
+            # план собран, а доступ так и не открыт — одно напоминание на следующий день
+            rows = (await s.execute(
+                select(Enrollment, User).join(User, User.id == Enrollment.user_id).where(
+                    Enrollment.status == "invited", Enrollment.plan_confirmed_at.is_not(None),
+                    Enrollment.plan_confirmed_at < now - timedelta(hours=20),
+                    Enrollment.plan_confirmed_at > now - timedelta(days=7),
+                    User.bot_blocked.is_(False),
+                )
+            )).all()
+            for enr, user in rows:
+                if not _due(user, user.morning_time) or subscription_active(user) or user.run_credits > 0:
+                    continue
+                if not await allow_once(s, user, "paywall", f"paywall:{enr.id}"):
+                    continue
+                book = await s.get(Book, enr.book_id) if enr.book_id else None
+                buttons = [[{"text": "Открыть забег", "webapp": "pay"}]]
+                if not await sprint_used(s, user.id):
+                    buttons.append([{"text": "Сначала спринт на 7 дней — бесплатно", "callback": "sprint:start"}])
+                outbox.add(OutMsg(user.tg_id, texts.paywall_nudge(book.title if book else None, s_.refund_days),
+                                  buttons=buttons, kind="paywall"))
+                await log_event(s, "paywall_nudge", user.id, enr.run_id)
+
+            # абонемент без автопродления заканчивается: напоминания за 7 дней и за день
+            users = list(await s.scalars(
+                select(User).where(
+                    User.subscription_until.is_not(None), User.subscription_until > now,
+                    User.subscription_until < now + timedelta(days=7), User.subscription_recurring.is_(False),
+                    User.bot_blocked.is_(False),
+                )
+            ))
+            for user in users:
+                if not _due(user, user.morning_time):
+                    continue
+                left = user.subscription_until - now if user.subscription_until.tzinfo else \
+                    user.subscription_until.replace(tzinfo=now.tzinfo) - now
+                stage = "1" if left <= timedelta(days=1, hours=12) else "7"
+                key = f"sub{stage}:{user.subscription_until.date().isoformat()}"
+                if not await allow_once(s, user, "sub", key):
+                    continue
+                user.sub_reminded_at = now
+                outbox.add(OutMsg(user.tg_id, texts.sub_expiring(user.subscription_until),
+                                  buttons=[[{"text": "Продлить", "webapp": "pay"}]], kind="sub"))
+                await log_event(s, "sub_expiring_sent", user.id, stage=stage)
+    except Exception:
+        log.exception("sales job failed")
 
 
 async def _summaries(limit: int) -> None:

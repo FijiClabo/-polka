@@ -69,6 +69,16 @@ async def cmd_today(message: Message) -> None:
 
 
 async def reply_outcome(message: Message, out: RetellOutcome, bot: Bot, user_id: int) -> None:
+    if out.status == "awaiting_payment":
+        from bot.handlers_pay import send_paywall
+
+        await send_paywall(bot, message.chat.id, user_id)
+        return
+    if out.status == "no_run":
+        from bot.handlers_start import send_book_prompt
+
+        await send_book_prompt(bot, message.chat.id)
+        return
     text = verdict_text(out)
     markup = None
     if out.status == "accepted" and not out.finished:

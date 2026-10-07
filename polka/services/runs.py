@@ -70,18 +70,55 @@ async def enroll(session: AsyncSession, user: User, run: Run, status: str = "inv
 
 
 async def ensure_main_enrollment(session: AsyncSession, user: User) -> Enrollment | None:
-    """После онбординга записываем в текущий забег (статус «ожидаем оплату»)."""
+    """Если ведущий открыл групповой забег — записываем в него (статус «ожидаем оплату»)."""
     run = await current_main_run(session)
     if run is None:
         return None
     return await enroll(session, user, run, "invited")
 
 
-async def start_sprint(session: AsyncSession, user: User) -> Enrollment:
+async def new_personal_run(session: AsyncSession) -> Run:
+    """Личный забег: стартует в любой день, у каждого свой. Отдельная запись — можно проходить книгу за книгой."""
+    run = Run(title="Личный забег", kind="solo", status="active", grace_days=3, price_rub=0)
+    session.add(run)
+    await session.flush()
+    return run
+
+
+async def ensure_enrollment(session: AsyncSession, user: User) -> Enrollment:
+    """Текущее открытое участие, а если его нет — групповой забег ведущего или новый личный забег."""
+    enr = await current_enrollment(session, user.id)
+    if enr is not None and enr.status in OPEN_STATUSES:
+        return enr
+    cohort = await current_main_run(session)
+    if cohort is not None:
+        existing = await session.scalar(select(Enrollment).where(Enrollment.run_id == cohort.id, Enrollment.user_id == user.id))
+        if existing is None:
+            return await enroll(session, user, cohort, "invited")
+    run = await new_personal_run(session)
+    enr = await enroll(session, user, run, "invited")
+    await log_event(session, "run_created", user.id, run.id)
+    return enr
+
+
+async def sprint_used(session: AsyncSession, user_id: int) -> bool:
+    return bool(
+        await session.scalar(
+            select(Enrollment.id).join(Run, Run.id == Enrollment.run_id).where(
+                Enrollment.user_id == user_id, Run.kind == "sprint"
+            )
+        )
+    )
+
+
+async def start_sprint(session: AsyncSession, user: User) -> Enrollment | None:
+    """Бесплатный 7-дневный спринт — один раз на человека. None — уже был."""
     run = await sprint_run(session)
+    existing = await session.scalar(select(Enrollment).where(Enrollment.run_id == run.id, Enrollment.user_id == user.id))
+    if existing is not None:
+        return existing if existing.status in OPEN_STATUSES else None
     enr = await enroll(session, user, run, "active")
-    if enr.status not in ("active", "paid"):
-        enr.status = "active"
+    enr.access = "free"
     await log_event(session, "sprint_started", user.id, run.id)
     return enr
 
@@ -113,13 +150,13 @@ async def refund(session: AsyncSession, enr: Enrollment) -> None:
 
 
 def plan_start_for(run: Run, user: User, confirmed_at: datetime | None = None) -> date | None:
-    """День старта плана: день старта забега, а при позднем подтверждении — следующий день.
+    """День старта плана: в групповом забеге — день старта, при позднем подтверждении — следующий день.
 
-    Спринт стартует сразу, если план подтверждён до 18:00, иначе завтра.
+    Личный забег и спринт стартуют сразу, если доступ открыт до 18:00, иначе завтра.
     """
     at = confirmed_at or now()
     today = today_for(user, at)
-    if run.kind == "sprint":
+    if run.kind in ("sprint", "solo"):
         hour = local_now(at, user.timezone).hour
         return today if 4 <= hour < 18 else today + timedelta(days=1)
     if run.start_date is None:

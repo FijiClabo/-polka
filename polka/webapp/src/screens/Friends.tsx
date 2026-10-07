@@ -160,7 +160,7 @@ function PairBlock({ data, reload }: { data: PairData; reload: () => void }) {
             setBusy(true);
             haptic("light");
             const r = await api.post<{ result: string }>("/pair/nudge").catch(() => ({ result: "error" }));
-            toast(r.result === "ok" ? "Напомнил 👋" : "Сегодня уже напоминали");
+            toast(r.result === "ok" ? "Напоминание отправлено 👋" : "Сегодня уже напоминали");
             reload();
             setBusy(false);
           }}

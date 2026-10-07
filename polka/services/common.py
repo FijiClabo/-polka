@@ -109,6 +109,16 @@ async def allow_initiative(session: AsyncSession, user: User, kind: str, key: st
     return await _try_insert_notification(session, user, day, kind, key)
 
 
+async def allow_once(session: AsyncSession, user: User, kind: str, key: str) -> bool:
+    """Сообщение, которое уходит человеку один раз за всё время (напоминание об оплате и т. п.)."""
+    if user.bot_blocked:
+        return False
+    exists = await session.scalar(select(Notification.id).where(Notification.user_id == user.id, Notification.key == key))
+    if exists:
+        return False
+    return await _try_insert_notification(session, user, today_for(user), kind, key)
+
+
 async def allow_social(session: AsyncSession, user: User, from_user_id: int) -> bool:
     """Толчки от друзей и напарника вместе — не больше двух в день, остальные молча отбрасываются."""
     if user.bot_blocked or not user.nudges_enabled:

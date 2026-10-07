@@ -12,7 +12,8 @@ export type RouteName =
   | "book"
   | "friend"
   | "conspect"
-  | "finish";
+  | "finish"
+  | "pay";
 
 export interface Route {
   name: RouteName;

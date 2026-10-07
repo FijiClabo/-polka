@@ -1,0 +1,845 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{PROJECT}} — дочитай книгу за 30 дней в Telegram</title>
+<meta name="description" content="Telegram-бот, который помогает дочитать свою книгу: 15 минут чтения и 30 секунд пересказа в день, стрик и напарник, которого нельзя подвести. Попробовать можно бесплатно — 7-дневный спринт на рассказ.">
+<meta name="theme-color" content="#0e0e10">
+<meta name="color-scheme" content="dark">
+<meta name="format-detection" content="telephone=no">
+<meta property="og:type" content="website">
+<meta property="og:locale" content="ru_RU">
+<meta property="og:site_name" content="{{PROJECT}}">
+<meta property="og:title" content="{{PROJECT}} — дочитай книгу за 30 дней">
+<meta property="og:description" content="15 минут чтения и 30 секунд пересказа в день. С напарником, которого нельзя подвести. Бесплатный спринт — 7 дней на рассказ.">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20x='5'%20y='6'%20width='6'%20height='20'%20rx='2'%20fill='%23F2C14E'/%3E%3Crect%20x='13'%20y='3'%20width='6'%20height='23'%20rx='2'%20fill='%233E8E6E'/%3E%3Crect%20x='21'%20y='8'%20width='6'%20height='18'%20rx='2'%20fill='%23FF6B3D'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant:ital,wght@1,600&family=Onest:wght@400;600&family=Unbounded:wght@700&display=swap">
+<style>
+:root{
+  --bg:#0e0e10;--card:#1a1a1d;--card-2:#232327;--text:#f4f1ec;--muted:#8f8b85;--muted-2:#b0aba3;
+  --fire-1:#ffb547;--fire-2:#ff6b3d;--fire:linear-gradient(135deg,#ffb547 0%,#ff6b3d 100%);
+  --violet:#b8a8ff;--green:#6ee7a7;--ice:#9fd3ff;--ink:#1b0f08;--line:rgba(244,241,236,.08);
+  --r-sm:18px;--r:24px;--r-lg:32px;
+  --f-head:"Unbounded","Arial Black",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-text:"Onest",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  --f-book:"Cormorant","Cormorant Garamond",Georgia,"Times New Roman",serif;
+  color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+@media (prefers-reduced-motion:no-preference){html{scroll-behavior:smooth}}
+body{margin:0;background:var(--bg);color:var(--text);font:400 16px/1.55 var(--f-text);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+b,strong{font-weight:600}
+a{color:inherit}
+img,svg{display:block}
+svg.wave{width:100%;min-width:0;overflow:visible}
+.steps,.why,.bento,.prices,.pain,.faq-wrap,.hero .wrap{grid-template-columns:minmax(0,1fr)}
+[id]{scroll-margin-top:84px}
+:focus-visible{outline:3px solid var(--fire-1);outline-offset:3px;border-radius:8px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.skip{position:absolute;left:12px;top:-80px;z-index:100;background:var(--text);color:var(--bg);padding:10px 16px;border-radius:12px;font-weight:600;text-decoration:none}
+.skip:focus{top:12px}
+
+.wrap{width:100%;max-width:1128px;margin:0 auto;padding:0 16px}
+@media (min-width:768px){.wrap{padding:0 24px}}
+section{padding:72px 0}
+@media (min-width:900px){section{padding:112px 0}}
+
+/* типографика */
+.kicker{display:inline-flex;align-items:center;gap:8px;margin:0 0 14px;font:600 14px/1.2 var(--f-text);letter-spacing:.08em;text-transform:uppercase;color:var(--fire-1)}
+h1,h2,h3{font-family:var(--f-head);font-weight:700;margin:0}
+h2{font-size:clamp(26px,6.6vw,44px);line-height:1.12;letter-spacing:-.01em;margin-bottom:16px;text-wrap:balance}
+.lead{font-size:18px;color:var(--muted-2);max-width:640px;margin:0}
+.fire-text{color:var(--fire-2);background:var(--fire);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.book{font-family:var(--f-book);font-style:italic;font-weight:600}
+.cmd{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:max(14px,.9em);background:var(--card-2);color:var(--fire-1);padding:2px 8px;border-radius:8px;white-space:nowrap}
+
+/* кнопки */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:56px;padding:0 28px;border-radius:999px;font:600 17px/1 var(--f-text);text-decoration:none;transition:transform .2s ease,filter .2s ease,background-color .2s ease;white-space:nowrap}
+.btn svg{width:20px;height:20px;flex:none}
+.btn-fire{background:var(--fire);color:var(--ink);box-shadow:0 14px 34px -14px rgba(255,107,61,.75)}
+.btn-fire:hover{filter:brightness(1.07);transform:translateY(-1px)}
+.btn-ghost{background:var(--card-2);color:var(--text);border:1px solid rgba(244,241,236,.12)}
+.btn-ghost:hover{background:#2c2c31}
+.btn-sm{min-height:44px;padding:0 16px;font-size:14px;gap:8px}
+.btn-sm svg{width:16px;height:16px}
+
+/* шапка */
+.hdr{position:sticky;top:0;z-index:50;background:rgba(14,14,16,.8);-webkit-backdrop-filter:saturate(1.4) blur(14px);backdrop-filter:saturate(1.4) blur(14px);border-bottom:1px solid var(--line)}
+.hdr .wrap{display:flex;align-items:center;justify-content:space-between;gap:12px;height:64px}
+.logo{display:flex;align-items:center;gap:10px;min-width:0;min-height:44px;font:700 18px/1 var(--f-head);color:var(--text);text-decoration:none}
+.logo svg{width:28px;height:28px;flex:none}
+.logo span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nav{display:none}
+@media (min-width:900px){
+  .nav{display:flex;gap:28px;margin-left:auto;margin-right:12px}
+  .nav a{display:inline-flex;align-items:center;min-height:44px;color:var(--muted-2);text-decoration:none;font-size:15px;font-weight:600}
+  .nav a:hover{color:var(--text)}
+}
+@media (max-width:359px){.hdr .btn-sm svg{display:none}}
+
+/* герой */
+.hero{position:relative;overflow:hidden;padding:36px 0 72px}
+.hero .wrap{display:grid;gap:48px}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;padding:7px 14px 7px 10px;border-radius:999px;background:var(--card);border:1px solid var(--line);font-size:14px;color:var(--muted-2)}
+.eyebrow svg{width:18px;height:18px}
+.hero h1{font-size:clamp(34px,9vw,56px);line-height:1.04;letter-spacing:-.02em;margin:20px 0;text-wrap:balance}
+.hero-sub{font-size:clamp(18px,4.6vw,21px);line-height:1.5;color:var(--muted-2);max-width:540px;margin:0 0 28px}
+.hero-sub b{color:var(--text)}
+.cta{display:flex;flex-direction:column;align-items:stretch;gap:12px}
+.cta-note{margin:0;font-size:15px;color:var(--muted-2);text-align:center;text-wrap:balance}
+.cta-note::before{content:"";display:inline-block;width:8px;height:8px;margin:0 10px 0 4px;vertical-align:.1em;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px rgba(110,231,167,.15)}
+@media (min-width:600px){.cta{align-items:flex-start}.cta-note{text-align:left;padding-left:6px}}
+.facts{display:flex;flex-wrap:wrap;gap:8px;list-style:none;padding:0;margin:28px 0 0}
+.facts li{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;background:var(--card);border:1px solid var(--line);font-size:14px;color:var(--muted-2)}
+.facts svg{width:14px;height:14px;color:var(--green)}
+
+.hero-art{position:relative;display:flex;justify-content:center;padding:8px 0}
+.hero-art::before{content:"";position:absolute;left:-30%;right:-30%;top:-8%;bottom:-8%;background:radial-gradient(closest-side,rgba(255,107,61,.30),rgba(255,181,71,.08) 55%,transparent 78%);pointer-events:none}
+@media (min-width:960px){
+  .hero{padding:64px 0 104px}
+  .hero .wrap{grid-template-columns:1.08fr .92fr;align-items:center;gap:40px}
+  .hero h1{font-size:clamp(44px,4.9vw,56px)}
+}
+
+/* телефон */
+.phone{position:relative;z-index:1;width:300px;max-width:100%;border-radius:46px;padding:10px;background:linear-gradient(155deg,#2e2e33,#131315 62%);box-shadow:inset 0 0 0 1px rgba(255,255,255,.08),0 50px 90px -30px rgba(0,0,0,.9),0 30px 70px -40px rgba(255,107,61,.55)}
+.screen{position:relative;border-radius:37px;background:var(--bg);padding:12px 12px 8px;overflow:hidden}
+.screen::before{content:"";position:absolute;top:9px;left:50%;width:84px;height:24px;margin-left:-42px;border-radius:20px;background:#000}
+.m-status{display:flex;justify-content:space-between;align-items:center;padding:3px 12px 16px;font:600 12px/1 var(--f-text)}
+.m-sig{display:flex;gap:2px;align-items:flex-end}
+.m-sig i{width:3px;border-radius:1px;background:var(--text)}
+.m-top{display:flex;justify-content:space-between;align-items:flex-end;padding:0 4px;margin-bottom:12px}
+.m-date{font-size:11px;color:var(--muted);margin-bottom:4px}
+.m-title{font:700 23px/1.05 var(--f-head)}
+.m-streak{display:flex;align-items:center;gap:4px;padding:6px 10px 6px 8px;border-radius:999px;background:rgba(255,140,60,.12);border:1px solid rgba(255,140,60,.3);font:700 14px/1 var(--f-head);color:#ffc078}
+.m-streak svg{width:16px;height:16px}
+.m-card{background:var(--card);border-radius:20px;padding:12px;margin-bottom:8px}
+.m-book{display:flex;gap:12px}
+.m-cover{position:relative;flex:none;width:56px;height:82px;border-radius:5px 9px 9px 5px;background:linear-gradient(160deg,#717ae9,#363b9d);box-shadow:inset 4px 0 0 rgba(0,0,0,.2);padding:6px 6px 6px 9px;display:flex;align-items:flex-end;font:italic 600 11px/1.05 var(--f-book);color:#f4f1ec}
+.m-info{flex:1;min-width:0}
+.m-name{font:italic 600 21px/1.02 var(--f-book)}
+.m-author{font-size:11px;color:var(--muted);margin:3px 0 10px}
+.m-bar{height:6px;border-radius:6px;background:var(--card-2);overflow:hidden}
+.m-bar i{display:block;height:100%;width:40%;border-radius:inherit;background:var(--fire)}
+.m-meta{display:flex;justify-content:space-between;margin-top:6px;font-size:10.5px;color:var(--muted)}
+.m-seg{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.m-label{font-size:10px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.m-seg-t{font-size:13.5px;font-weight:600;margin-top:4px}
+.m-seg-m{font-size:11px;color:var(--muted)}
+.m-read{flex:none;padding:9px 14px;border-radius:999px;background:var(--fire);color:var(--ink);font-size:12.5px;font-weight:600}
+.m-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.m-ok{display:inline-flex;align-items:center;gap:4px;padding:4px 9px;border-radius:999px;background:rgba(110,231,167,.12);color:var(--green);font-size:11px;font-weight:600}
+.m-ok svg{width:12px;height:12px}
+.m-wave{display:flex;align-items:center;gap:8px}
+.m-play{flex:none;width:28px;height:28px;border-radius:50%;background:var(--card-2);display:grid;place-items:center}
+.m-play svg{width:10px;height:10px;margin-left:2px}
+.m-wave .wave{flex:1;height:26px;min-width:0}
+.m-time{font-size:11px;color:var(--muted)}
+.m-pair{display:flex;align-items:center;gap:10px;background:rgba(184,168,255,.10);border:1px solid rgba(184,168,255,.24)}
+.m-pair div{flex:1;min-width:0}
+.m-pair b{display:block;font-size:13px}
+.m-pair small{display:block;font-size:11px;color:#d4cbff}
+.m-pf{display:flex;align-items:center;gap:3px;font:700 13px/1 var(--f-head);color:var(--violet)}
+.m-pf svg{width:15px;height:15px}
+.m-tabs{display:flex;justify-content:space-around;margin-top:6px;padding:10px 0 4px;border-top:1px solid var(--line);font-size:9.5px;color:var(--muted)}
+.m-tabs span{display:flex;flex-direction:column;align-items:center;gap:4px}
+.m-tabs span::before{content:"";width:16px;height:16px;border-radius:5px;border:2px solid currentColor}
+.m-tabs .on{color:var(--fire-1)}
+.m-tabs .on::before{background:currentColor}
+
+.ava{flex:none;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font:700 14px/1 var(--f-head);color:#16131f;background:var(--violet)}
+.ava.f{background:var(--fire);color:var(--ink)}
+.ava.g{background:var(--green);color:#0b1f15}
+
+/* плашки привязаны к краю телефона и заходят только на рамку — контент экрана не перекрывают */
+.float{display:none}
+@media (min-width:600px){
+  .float{position:absolute;z-index:2;display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:16px;background:rgba(35,35,39,.94);border:1px solid rgba(244,241,236,.1);box-shadow:0 24px 40px -20px rgba(0,0,0,.85);font-size:14px;font-weight:600;white-space:nowrap}
+  .float svg{width:18px;height:18px}
+  .float-1{top:19%;right:calc(100% - 26px)}
+  .float-2{top:56%;left:calc(100% - 26px)}
+  .float-2 svg{color:var(--green)}
+}
+@media (min-width:960px) and (max-width:1179px){.float{display:none}}
+@media (prefers-reduced-motion:no-preference){
+  .float{animation:bob 6s ease-in-out infinite}
+  .float-2{animation-delay:-3s}
+}
+@keyframes bob{50%{transform:translateY(-7px)}}
+
+/* проблема */
+.pain{display:grid;gap:32px}
+@media (min-width:900px){.pain{grid-template-columns:1fr 1fr;gap:56px;align-items:center}}
+.shelf{order:2;margin:0;background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:28px 18px 18px}
+.shelf svg{width:100%;height:auto}
+.shelf figcaption{margin-top:14px;text-align:center;font-size:14px;color:var(--muted)}
+.pains{list-style:none;padding:0;margin:24px 0 0;display:grid;gap:10px}
+.pains li{display:flex;gap:14px;align-items:flex-start;padding:16px 18px;border-radius:var(--r-sm);background:var(--card);border:1px solid var(--line)}
+.pains li::before{content:"";flex:none;width:12px;height:18px;margin-top:3px;background:var(--fire);clip-path:polygon(0 0,100% 0,100% 100%,50% 70%,0 100%)}
+.punch{margin:16px 0 0;padding:20px 22px;border-radius:var(--r);background:linear-gradient(135deg,rgba(255,181,71,.13),rgba(255,107,61,.05));border:1px solid rgba(255,140,60,.26);font-size:17px}
+
+/* шаги */
+.steps{display:grid;gap:14px;list-style:none;padding:0;margin:40px 0 0}
+@media (min-width:640px){.steps{grid-template-columns:1fr 1fr}}
+@media (min-width:1000px){.steps{grid-template-columns:repeat(4,1fr)}}
+.step{display:flex;flex-direction:column;gap:10px;padding:24px 22px;border-radius:var(--r);background:var(--card);border:1px solid var(--line)}
+.step-n{font:700 34px/1 var(--f-head)}
+.step h3{font-size:18px;line-height:1.25;margin-top:6px}
+.step p{margin:0;font-size:15px;color:var(--muted-2)}
+.vis{margin-top:auto;padding-top:16px}
+.pills{display:flex;flex-wrap:wrap;gap:6px}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;background:var(--card-2);font-size:14px;font-weight:600}
+.pill svg{width:14px;height:14px}
+.pill.ok{background:rgba(110,231,167,.12);color:var(--green)}
+.days{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.days span{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:60px;border-radius:16px;background:var(--card-2);font:700 18px/1 var(--f-head);color:var(--muted-2)}
+.days small{font:400 14px/1 var(--f-text);color:var(--muted)}
+.days .on{background:var(--fire);color:var(--ink)}
+.days .on small{color:var(--ink);opacity:.75}
+.wave-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:16px;background:var(--card-2)}
+.wave-row .wave{flex:1;height:28px;min-width:0}
+.wave-row span{font-size:14px;color:var(--muted)}
+
+/* почему работает */
+.why{display:grid;gap:14px;margin-top:40px}
+@media (min-width:900px){.why{grid-template-columns:repeat(3,1fr)}}
+.why-card{display:flex;flex-direction:column;gap:12px;padding:26px 24px;border-radius:var(--r-lg);background:var(--card);border:1px solid var(--line)}
+.why-card.v{background:linear-gradient(180deg,rgba(184,168,255,.13),rgba(184,168,255,.02) 70%),var(--card);border-color:rgba(184,168,255,.26)}
+.ico{width:48px;height:48px;border-radius:15px;display:grid;place-items:center;background:var(--card-2)}
+.ico svg{width:24px;height:24px}
+.why-card h3{font-size:20px;line-height:1.25}
+.why-card p{margin:0;color:var(--muted-2);font-size:15.5px}
+.bubble{padding:12px 14px;border-radius:18px 18px 18px 6px;background:var(--card-2);font-size:14px}
+.bubble small{display:block;margin-top:8px;font-size:14px;font-weight:600;color:var(--green)}
+.duo{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:18px;background:rgba(184,168,255,.09)}
+.duo .ava+.ava{margin-left:-8px;box-shadow:0 0 0 3px #201f27}
+.duo-t{flex:1;font-size:14px;line-height:1.35;color:#d4cbff}
+.duo b{display:flex;align-items:center;gap:4px;font:700 18px/1 var(--f-head);color:var(--violet)}
+.duo b svg{width:20px;height:20px}
+.fin{padding:14px;border-radius:18px;background:var(--card-2)}
+.fin-bar{position:relative;height:8px;border-radius:8px;background:#2f2f35}
+.fin-bar i{position:absolute;left:0;top:0;bottom:0;width:40%;border-radius:inherit;background:var(--fire)}
+.fin-bar svg{position:absolute;right:-2px;top:-22px;width:20px;height:20px;color:var(--text)}
+.fin-l{display:flex;justify-content:space-between;margin-top:10px;font-size:14px;color:var(--muted)}
+
+/* что внутри */
+.bento{display:grid;gap:14px;margin-top:40px}
+@media (min-width:768px){
+  .bento{grid-template-columns:repeat(6,1fr)}
+  .b-3{grid-column:span 3}
+  .b-2{grid-column:span 2}
+}
+@media (min-width:768px) and (max-width:1023px){.b-2{grid-column:span 3}.b-2.wide{grid-column:span 6}}
+.b{display:flex;flex-direction:column;gap:10px;padding:24px;border-radius:var(--r-lg);background:var(--card);border:1px solid var(--line);overflow:hidden}
+.b h3{font-size:19px;line-height:1.25}
+.b p{margin:0;font-size:15px;color:var(--muted-2)}
+.page{padding:18px 18px 14px;border-radius:16px;background:#f4f1ec;color:#1b1a18;box-shadow:0 20px 40px -24px rgba(0,0,0,.9)}
+.page-h{font-size:22px;line-height:1.1;margin:0 0 4px}
+.page-s{font-size:14px;color:#6b665f;margin-bottom:10px}
+.ln{height:7px;border-radius:4px;background:#ddd6cb;margin:8px 0}
+.page-f{display:flex;justify-content:space-between;gap:8px;margin-top:14px;font-size:14px;color:#6b665f}
+.page-f b{color:#c2410c}
+.rec{display:flex;align-items:center;gap:14px;padding:14px;border-radius:20px;background:var(--card-2)}
+.rec-btn{flex:none;width:52px;height:52px;border-radius:50%;display:grid;place-items:center;background:var(--fire);box-shadow:0 0 0 8px rgba(255,107,61,.16)}
+.rec-btn svg{width:22px;height:22px;color:var(--ink)}
+.rec .wave{flex:1;height:36px;min-width:0}
+.rec-time{font-size:14px;color:var(--muted)}
+.seg{display:inline-flex;gap:2px;margin-top:12px;padding:4px;border-radius:999px;background:var(--card-2)}
+.seg span{padding:7px 14px;border-radius:999px;font-size:14px;font-weight:600;color:var(--muted-2)}
+.seg .on{background:var(--text);color:var(--bg)}
+.cal{display:grid;grid-template-columns:repeat(10,1fr);gap:5px}
+.cal i{aspect-ratio:1;border-radius:6px;background:var(--card-2)}
+.cal .d{background:var(--green)}
+.cal .z{background:rgba(159,211,255,.08);border:1.5px dashed var(--ice)}
+.cal .t{background:var(--fire);box-shadow:0 0 0 2px var(--card),0 0 0 4px rgba(255,140,60,.55)}
+.legend{display:flex;flex-wrap:wrap;gap:8px 14px;margin-top:14px;font-size:14px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend span::before{content:"";width:10px;height:10px;border-radius:3px;background:var(--card-2)}
+.legend .d::before{background:var(--green)}
+.legend .z::before{border:1.5px dashed var(--ice);background:none}
+.legend .t::before{background:var(--fire)}
+.spines{display:flex;align-items:flex-end;gap:4px;height:72px;padding:0 8px;border-bottom:5px solid #2c2c31;border-radius:0 0 4px 4px}
+.spines i{width:16px;border-radius:3px 3px 1px 1px;box-shadow:inset 0 6px 0 rgba(0,0,0,.14)}
+.note{margin-top:12px;padding:12px 14px;border-radius:14px;background:var(--card-2);font-size:14px;line-height:1.45}
+.note-h{font-size:17px;line-height:1.1;margin-bottom:6px}
+.note ul{list-style:none;margin:0;padding:0;display:grid;gap:4px;color:var(--muted-2)}
+.note li b{color:var(--fire-1)}
+.stack{display:flex;align-items:center;gap:12px}
+.stack div{display:flex}
+.stack .ava{box-shadow:0 0 0 3px var(--card)}
+.stack .ava+.ava{margin-left:-10px}
+.stack-t{font-size:14px;line-height:1.35;color:var(--muted-2)}
+.achs{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.achs span{padding:6px 10px;border-radius:12px;background:var(--card-2);font-size:14px;font-weight:600}
+
+/* тарифы */
+.center{text-align:center}
+.center .lead{margin:0 auto}
+.prices{display:grid;gap:22px;margin-top:44px}
+@media (min-width:900px){.prices{grid-template-columns:repeat(3,1fr);gap:16px;align-items:stretch}}
+.plan{position:relative;display:flex;flex-direction:column;padding:30px 24px 24px;border-radius:var(--r-lg);background:var(--card);border:1px solid var(--line)}
+.plan h3{font-size:18px}
+.plan-d{margin:6px 0 20px;font-size:14px;color:var(--muted)}
+.plan-p{font:700 clamp(34px,9vw,40px)/1 var(--f-head);letter-spacing:-.02em;overflow-wrap:anywhere}
+.plan-p small{font:600 16px/1 var(--f-text);letter-spacing:0;color:var(--muted-2)}
+.plan-s{margin-top:10px;font-size:14px;color:var(--muted-2)}
+.plan ul{list-style:none;padding:0;margin:22px 0 26px;display:grid;gap:10px;font-size:15px}
+.plan li{display:flex;gap:10px;align-items:flex-start}
+.plan li svg{flex:none;width:18px;height:18px;margin-top:2px;color:var(--green)}
+.plan-n{margin:-10px 0 22px;font-size:14px;line-height:1.45;color:var(--muted)}
+.plan .btn{width:100%;margin-top:auto}
+.plan-btns{display:grid;gap:10px;margin-top:auto}
+.plan-btns .btn{margin-top:0}
+.plan-alt{display:block;margin-top:12px;text-align:center;font-size:14px;color:var(--muted-2);text-decoration:underline;text-underline-offset:3px}
+.plan-alt:hover{color:var(--text)}
+.plan.hot{border:2px solid transparent;background:linear-gradient(var(--card),var(--card)) padding-box,var(--fire) border-box;box-shadow:0 34px 70px -36px rgba(255,107,61,.6)}
+.plan.hot .plan-s b{color:var(--fire-1)}
+.badge{position:absolute;top:-14px;left:22px;max-width:calc(100% - 44px);padding:7px 12px;border-radius:999px;background:var(--fire);color:var(--ink);font:600 14px/1.1 var(--f-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (min-width:900px){.plan.hot{transform:translateY(-10px)}}
+.pay{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;list-style:none;padding:0;margin:32px 0 0;font-size:14px;color:var(--muted-2)}
+.pay li{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;background:var(--card);border:1px solid var(--line)}
+.pay svg{width:16px;height:16px;color:var(--fire-1)}
+
+/* гарантия */
+.guar-sec{padding-top:0}
+.guar{display:grid;gap:20px;align-items:center;padding:28px 24px;border-radius:var(--r-lg);background:radial-gradient(120% 140% at 0% 0%,rgba(110,231,167,.15),transparent 55%),var(--card);border:1px solid rgba(110,231,167,.24)}
+@media (min-width:768px){.guar{grid-template-columns:auto 1fr;gap:32px;padding:40px 44px}}
+.guar-ico{width:72px;height:72px;border-radius:22px;display:grid;place-items:center;background:rgba(110,231,167,.12)}
+.guar-ico svg{width:36px;height:36px;color:var(--green)}
+.guar h2{font-size:clamp(22px,5.6vw,32px);margin-bottom:10px}
+.guar p{margin:0;color:var(--muted-2);font-size:16.5px}
+.guar p+p{margin-top:8px;font-size:14px;color:var(--muted)}
+
+/* FAQ */
+.faq-wrap{display:grid;gap:28px}
+@media (min-width:900px){.faq-wrap{grid-template-columns:.8fr 1.2fr;gap:56px;align-items:start}.faq-head{position:sticky;top:104px}}
+.faq-head p:not(.kicker){margin:0;color:var(--muted-2);overflow-wrap:anywhere}
+.faq{display:grid;gap:10px}
+.faq details{border-radius:var(--r-sm);background:var(--card);border:1px solid var(--line);transition:border-color .2s}
+.faq details[open]{border-color:rgba(255,181,71,.3)}
+.faq summary{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:18px 20px;list-style:none;cursor:pointer;font-size:17px;font-weight:600;border-radius:inherit}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary::after{content:"";flex:none;width:30px;height:30px;border-radius:50%;background:var(--card-2) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cpath d='M7 1.5v11M1.5 7h11' stroke='%23ffb547' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") center/13px no-repeat;transition:transform .25s ease}
+.faq details[open] summary::after{transform:rotate(45deg)}
+.faq-a{padding:0 20px 20px;color:var(--muted-2)}
+.faq-a p{margin:0}
+.faq-a p+p{margin-top:10px}
+
+/* финал */
+.final-sec{padding-bottom:0}
+.final{position:relative;overflow:hidden;text-align:center;padding:52px 22px;border-radius:var(--r-lg);background:radial-gradient(80% 110% at 50% 0%,rgba(255,140,60,.26),transparent 62%),var(--card);border:1px solid rgba(255,140,60,.26)}
+@media (min-width:768px){.final{padding:76px 48px}}
+.final-flame{width:64px;height:64px;margin:0 auto 22px;filter:drop-shadow(0 10px 24px rgba(255,107,61,.55))}
+@media (prefers-reduced-motion:no-preference){.final-flame{animation:flick 2.6s ease-in-out infinite;transform-origin:50% 90%}}
+@keyframes flick{0%,100%{transform:scale(1)}40%{transform:scale(1.06,.97)}70%{transform:scale(.97,1.04)}}
+.final h2{max-width:720px;margin:0 auto 14px}
+.final-lead{max-width:540px;margin:0 auto 28px;color:var(--muted-2);font-size:18px}
+@media (min-width:600px){.final .cta{align-items:center}.final .cta-note{text-align:center;padding:0}}
+
+/* подвал */
+.foot{border-top:1px solid var(--line);margin-top:72px;padding:36px 0 calc(36px + env(safe-area-inset-bottom));font-size:14px;color:var(--muted)}
+@media (min-width:900px){.foot{margin-top:112px}}
+.foot .wrap{display:grid;gap:20px}
+@media (min-width:768px){.foot .wrap{grid-template-columns:1fr auto;align-items:start}}
+.foot .logo{font-size:16px}
+.foot .logo svg{width:24px;height:24px}
+.seller{margin:12px 0 0;max-width:620px;font-size:14px;overflow-wrap:anywhere}
+.flinks{display:flex;flex-wrap:wrap;gap:0 22px;list-style:none;margin:0;padding:0}
+.flinks a{display:inline-flex;align-items:center;min-height:44px;color:var(--muted-2);text-decoration:underline;text-decoration-color:rgba(244,241,236,.25);text-underline-offset:3px}
+.flinks a:hover{color:var(--text)}
+.support{margin:6px 0 0;color:var(--muted-2);overflow-wrap:anywhere}
+.copy{margin:6px 0 0}
+@media (min-width:768px){.foot-r{text-align:right}.flinks{justify-content:flex-end}}
+
+/* липкая кнопка на мобильном */
+.sticky{position:fixed;left:0;right:0;bottom:0;z-index:60;padding:14px 16px calc(14px + env(safe-area-inset-bottom));background:linear-gradient(to top,rgba(14,14,16,.97) 62%,rgba(14,14,16,0));transform:translateY(110%);visibility:hidden;transition:transform .3s ease,visibility 0s linear .3s}
+.sticky.show{transform:none;visibility:visible;transition:transform .3s ease}
+.sticky .btn{width:100%;padding:0 18px;white-space:normal;text-align:center}
+@media (min-width:900px){.sticky{display:none}}
+
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body id="top">
+<a class="skip" href="#main">Перейти к содержанию</a>
+
+<!-- общие иконки и градиенты -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="gFire" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffb547"/><stop offset="1" stop-color="#ff6b3d"/></linearGradient>
+    <linearGradient id="gFireH" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ffb547"/><stop offset="1" stop-color="#ff6b3d"/></linearGradient>
+    <symbol id="i-flame" viewBox="0 0 24 24"><path fill="url(#gFire)" d="M12.2 1.8c.5 3.1 2.4 4.8 4.1 6.6 1.7 1.8 2.9 3.8 2.9 6.4 0 4.1-3.2 7.4-7.2 7.4s-7.2-3.3-7.2-7.4c0-2.5 1.1-4.4 2.7-5.9.2 1.7 1 3 2.3 3.7-.4-3.6.6-7.6 2.4-10.8z"/><path fill="#ffe3ad" d="M12.1 12.6c1.5 1.4 3 2.6 3 4.7a3.1 3.1 0 0 1-6.2.1c0-1.3.6-2.2 1.4-2.9.1.8.5 1.4 1.1 1.7-.2-1.3.3-2.6.7-3.6z"/></symbol>
+    <symbol id="i-tg" viewBox="0 0 24 24"><path fill="currentColor" d="M21.4 3.6 2.9 10.8c-1.1.4-1 1.9.1 2.2l4.5 1.4 1.7 5.4c.2.8 1.2 1 1.8.4l2.5-2.4 4.6 3.4c.7.5 1.6.1 1.8-.7l3-14.6c.2-1-.7-1.8-1.5-1.3zM10 14.5l-.6 3.4-1.1-3.9 9.2-6.6z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" d="m5 12.5 4.3 4.3L19 7.2"/></symbol>
+    <symbol id="i-play" viewBox="0 0 10 12"><path fill="#f4f1ec" d="M0 1.1v9.8c0 .8.9 1.3 1.6.9l7.8-4.9c.6-.4.6-1.3 0-1.7L1.6.3C.9-.2 0 .3 0 1.1z"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="8.5" y="2.5" width="7" height="12" rx="3.5" fill="currentColor"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3.5"/></g></symbol>
+    <symbol id="i-flag" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M5 21V4h11l-2 4 2 4H5"/></symbol>
+    <symbol id="i-card" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5.5" width="18" height="13" rx="3"/><path d="M3 10h18M7 14.5h3"/></g></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path fill="currentColor" d="m12 2.8 2.7 5.6 6.1.8-4.5 4.3 1.1 6.1L12 16.7l-5.4 2.9 1.1-6.1-4.5-4.3 6.1-.8z"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5 4.5 5.4v5.7c0 4.8 3.2 8.8 7.5 10.4 4.3-1.6 7.5-5.6 7.5-10.4V5.4z"/><path d="m8.6 12.2 2.4 2.4 4.6-4.8"/></g></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><g fill="none" stroke="#ffb547" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12.5a7.5 7.5 0 0 1-11 6.6L4 20.5l1.4-4.6A7.5 7.5 0 1 1 20 12.5z"/><path d="M9 11h6M9 14h4"/></g></symbol>
+    <symbol id="i-duo" viewBox="0 0 24 24"><g fill="none" stroke="#b8a8ff" stroke-width="2" stroke-linecap="round"><circle cx="8.5" cy="8" r="3.2"/><circle cx="16.5" cy="9" r="2.7"/><path d="M2.8 19.5c.6-3.3 3-5.2 5.7-5.2s5.1 1.9 5.7 5.2M15 14.4c2.8-.5 5.4 1.1 6.2 4.6"/></g></symbol>
+    <symbol id="i-logo" viewBox="0 0 32 32"><rect x="5" y="6" width="6" height="20" rx="2" fill="#F2C14E"/><rect x="13" y="3" width="6" height="23" rx="2" fill="#3E8E6E"/><rect x="21" y="8" width="6" height="18" rx="2" fill="#FF6B3D"/><rect x="3" y="27" width="26" height="2.5" rx="1.25" fill="#3a3a40"/></symbol>
+    <symbol id="wave" viewBox="0 0 180 36" preserveAspectRatio="none"><path fill="none" stroke="url(#gFireH)" stroke-width="3.2" stroke-linecap="round" vector-effect="non-scaling-stroke" d="M2 14v8M8 11v14M14 7v22M20 12v12M26 5v26M32 2v32M38 9v18M44 13v10M50 6v24M56 3v30M62 4v28M68 10v16M74 13.5v9M80 8v20M86 3v30M92 2v32M98 6v24M104 11v14"/><path fill="none" stroke="#45454d" stroke-width="3.2" stroke-linecap="round" vector-effect="non-scaling-stroke" d="M110 14v8M116 10v16M122 5v26M128 8v20M134 12v12M140 9v18M146 4v28M152 10.5v15M158 13v10M164 7v22M170 12v12M176 15v6"/></symbol>
+  </defs>
+</svg>
+
+<header class="hdr">
+  <div class="wrap">
+    <a class="logo" href="#top" aria-label="{{PROJECT}} — на главную"><svg aria-hidden="true" focusable="false"><use href="#i-logo"/></svg><span>{{PROJECT}}</span></a>
+    <nav class="nav" aria-label="Разделы">
+      <a href="#how">Как это работает</a>
+      <a href="#pricing">Тарифы</a>
+      <a href="#faq">Вопросы</a>
+    </nav>
+    <a class="btn btn-ghost btn-sm" href="{{BOT_URL}}" rel="noopener"><svg aria-hidden="true" focusable="false"><use href="#i-tg"/></svg>Открыть в Telegram</a>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- ГЕРОЙ -->
+<section class="hero" aria-labelledby="hero-title">
+  <div class="wrap">
+    <div>
+      <span class="eyebrow"><svg aria-hidden="true" focusable="false"><use href="#i-flame"/></svg>Бот и мини-приложение в Telegram</span>
+      <h1 id="hero-title">Дочитай книгу <span class="fire-text">за&nbsp;30&nbsp;дней</span></h1>
+      <p class="hero-sub"><b>15 минут чтения и 30 секунд пересказа в день.</b> С&nbsp;напарником, которого нельзя подвести.</p>
+      <div class="cta">
+        <a class="btn btn-fire" id="heroCta" href="{{BOT_URL}}" rel="noopener"><svg aria-hidden="true" focusable="false"><use href="#i-tg"/></svg>Начать в Telegram</a>
+        <p class="cta-note">Бесплатный спринт: 7 дней на рассказ</p>
+      </div>
+      <ul class="facts" aria-label="Коротко">
+        <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg>Своя книга: epub, fb2 или бумажная</li>
+        <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg>Всё в Telegram, ставить ничего не нужно</li>
+        <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg>Возврат денег в первые {{REFUND_DAYS}} дня</li>
+      </ul>
+    </div>
+
+    <div class="hero-art">
+      <div class="phone" role="img" aria-label="Экран «Сегодня» в мини-приложении: книга «Мастер и Маргарита», день 12 из 30, стрик 11 дней, пересказ сдан, напарница Аня тоже сдала">
+        <div class="float float-1" aria-hidden="true"><svg><use href="#i-flame"/></svg>+1 к стрику</div>
+        <div class="float float-2" aria-hidden="true"><svg><use href="#i-check"/></svg>День засчитан</div>
+        <div class="screen" aria-hidden="true">
+          <div class="m-status"><span>9:41</span><span class="m-sig"><i style="height:4px"></i><i style="height:6px"></i><i style="height:8px"></i><i style="height:10px"></i></span></div>
+          <div class="m-top">
+            <div><div class="m-date">Вторник · день 12 из 30</div><div class="m-title">Сегодня</div></div>
+            <div class="m-streak"><svg><use href="#i-flame"/></svg>11</div>
+          </div>
+          <div class="m-card m-book">
+            <div class="m-cover">Мастер и Маргарита</div>
+            <div class="m-info">
+              <div class="m-name">Мастер и&nbsp;Маргарита</div>
+              <div class="m-author">Михаил Булгаков</div>
+              <div class="m-bar"><i></i></div>
+              <div class="m-meta"><span>40%</span><span>финиш через 18 дней</span></div>
+            </div>
+          </div>
+          <div class="m-card m-seg">
+            <div><div class="m-label">Отрезок на сегодня</div><div class="m-seg-t">Глава 13 · стр. 148–161</div><div class="m-seg-m">≈ 15 минут</div></div>
+            <span class="m-read">Читать</span>
+          </div>
+          <div class="m-card">
+            <div class="m-row"><span class="m-label">Пересказ</span><span class="m-ok"><svg><use href="#i-check"/></svg>Сдано</span></div>
+            <div class="m-wave"><span class="m-play"><svg><use href="#i-play"/></svg></span><svg class="wave" preserveAspectRatio="none"><use href="#wave" width="100%" height="100%"/></svg><span class="m-time">0:42</span></div>
+          </div>
+          <div class="m-card m-pair">
+            <span class="ava">А</span>
+            <div><b>Аня</b><small>тоже сдала · общий стрик</small></div>
+            <span class="m-pf"><svg><use href="#i-flame"/></svg>9</span>
+          </div>
+          <div class="m-tabs"><span class="on">Сегодня</span><span>Календарь</span><span>Друзья</span><span>Полка</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ПРОБЛЕМА -->
+<section aria-labelledby="pain-title">
+  <div class="wrap pain">
+    <figure class="shelf">
+      <svg viewBox="0 0 360 222" role="img" aria-labelledby="shelf-t">
+        <title id="shelf-t">Полка с книгами: почти из каждой торчит закладка где-то на середине</title>
+        <g font-family="Onest, system-ui, sans-serif" font-size="15" fill="#8f8b85" text-anchor="middle">
+          <text x="43" y="27">стр. 132</text><text x="103" y="13">стр. 87</text><text x="224" y="20">стр. 41</text>
+        </g>
+        <rect x="22" y="46" width="30" height="150" rx="4" fill="#5B63D6"/>
+        <rect x="54" y="72" width="24" height="124" rx="4" fill="#F2C14E"/>
+        <rect x="80" y="34" width="34" height="162" rx="4" fill="#3E8E6E"/>
+        <rect x="116" y="80" width="22" height="116" rx="4" fill="#E98A6B"/>
+        <rect x="140" y="54" width="30" height="142" rx="4" fill="#B8A8FF"/>
+        <rect x="172" y="64" width="26" height="132" rx="4" fill="#E2553F"/>
+        <rect x="200" y="40" width="36" height="156" rx="4" fill="#3a3a42"/>
+        <g fill="#000" opacity=".2">
+          <rect x="22" y="58" width="30" height="3"/><rect x="22" y="176" width="30" height="3"/>
+          <rect x="54" y="84" width="24" height="3"/><rect x="54" y="176" width="24" height="3"/>
+          <rect x="80" y="46" width="34" height="3"/><rect x="80" y="176" width="34" height="3"/>
+          <rect x="116" y="92" width="22" height="3"/><rect x="116" y="176" width="22" height="3"/>
+          <rect x="140" y="66" width="30" height="3"/><rect x="140" y="176" width="30" height="3"/>
+          <rect x="172" y="76" width="26" height="3"/><rect x="172" y="176" width="26" height="3"/>
+          <rect x="200" y="52" width="36" height="3"/><rect x="200" y="176" width="36" height="3"/>
+        </g>
+        <g fill="#fff" opacity=".28">
+          <rect x="35" y="80" width="4" height="44" rx="2"/><rect x="64" y="100" width="4" height="36" rx="2"/>
+          <rect x="95" y="70" width="4" height="50" rx="2"/><rect x="125" y="110" width="4" height="30" rx="2"/>
+          <rect x="153" y="88" width="4" height="42" rx="2"/><rect x="183" y="98" width="4" height="38" rx="2"/>
+          <rect x="216" y="76" width="4" height="48" rx="2"/>
+        </g>
+        <g transform="rotate(-15 267 196)">
+          <rect x="267" y="76" width="26" height="120" rx="4" fill="#F2C14E"/>
+          <rect x="267" y="88" width="26" height="3" fill="#000" opacity=".2"/>
+          <rect x="278" y="110" width="4" height="34" rx="2" fill="#fff" opacity=".28"/>
+          <path d="M280 78V62l3.5 4 3.5-4v16z" fill="#f4f1ec"/>
+        </g>
+        <rect x="298" y="180" width="52" height="16" rx="3" fill="#E98A6B"/>
+        <rect x="302" y="164" width="46" height="16" rx="3" fill="#5B63D6"/>
+        <rect x="296" y="148" width="50" height="16" rx="3" fill="#3E8E6E"/>
+        <path d="M40 48V32l3.5 4 3.5-4v16z" fill="#ff6b3d"/>
+        <path d="M66 74V58l3.5 4 3.5-4v16z" fill="#f4f1ec"/>
+        <path d="M99 36V20l3.5 4 3.5-4v16z" fill="#ffb547"/>
+        <path d="M158 56V40l3.5 4 3.5-4v16z" fill="#f4f1ec"/>
+        <path d="M186 66V50l3.5 4 3.5-4v16z" fill="#ffb547"/>
+        <path d="M220 42V26l3.5 4 3.5-4v16z" fill="#ff6b3d"/>
+        <rect x="8" y="196" width="344" height="12" rx="6" fill="#2c2c31"/>
+        <rect x="18" y="208" width="324" height="6" rx="3" fill="#161618"/>
+      </svg>
+      <figcaption>Знакомая полка: закладки застряли где-то посередине.</figcaption>
+    </figure>
+
+    <div>
+      <p class="kicker">Проблема</p>
+      <h2 id="pain-title">Покупаешь книги и&nbsp;бросаешь на&nbsp;середине&nbsp;— знакомо?</h2>
+      <ul class="pains">
+        <li>Купить книгу — пять минут. Дочитать — «как-нибудь потом».</li>
+        <li>Закладка уже месяц живёт на одной и той же странице.</li>
+        <li>Открываешь телефон почитать — и через час всё ещё в ленте.</li>
+        <li>После недельной паузы уже не вспомнить, кто все эти люди и почему они ругаются.</li>
+      </ul>
+      <p class="punch"><strong>Дело не в силе воли.</strong> У книги просто нет дедлайна — и никто не спросит, чем закончилась глава. {{PROJECT}} добавляет и то, и другое.</p>
+    </div>
+  </div>
+</section>
+
+<!-- КАК ЭТО РАБОТАЕТ -->
+<section id="how" aria-labelledby="how-title">
+  <div class="wrap">
+    <p class="kicker">Как это работает</p>
+    <h2 id="how-title">Четыре шага от «куплено» до&nbsp;«дочитано»</h2>
+    <p class="lead">Никаких подборок «100 книг, которые надо прочесть». Только твоя книга и понятный план до последней страницы.</p>
+    <ol class="steps">
+      <li class="step">
+        <span class="step-n fire-text" aria-hidden="true">01</span>
+        <h3>Добавь свою книгу</h3>
+        <p>Пришли файл epub или fb2 прямо в бот. Читаешь на бумаге — хватит названия и числа страниц.</p>
+        <div class="vis pills" aria-hidden="true"><span class="pill">epub</span><span class="pill">fb2</span><span class="pill">бумажная</span></div>
+      </li>
+      <li class="step">
+        <span class="step-n fire-text" aria-hidden="true">02</span>
+        <h3>Выбери срок</h3>
+        <p>21, 30, 45 или 60 дней — бот подскажет, какой подходит под объём книги. Отрезок на день — минут на 15: столько найдётся даже в плотный день.</p>
+        <div class="vis days" aria-hidden="true"><span>21<small>дн.</small></span><span class="on">30<small>дн.</small></span><span>45<small>дн.</small></span><span>60<small>дн.</small></span></div>
+      </li>
+      <li class="step">
+        <span class="step-n fire-text" aria-hidden="true">03</span>
+        <h3>Читай и пересказывай</h3>
+        <p>Утром приходит отрезок. После чтения перескажи его ИИ за 30–60 секунд — голосом или текстом. Есть пересказ — день засчитан.</p>
+        <div class="vis" aria-hidden="true"><div class="wave-row"><svg class="wave" preserveAspectRatio="none"><use href="#wave" width="100%" height="100%"/></svg><span>0:42</span></div></div>
+      </li>
+      <li class="step">
+        <span class="step-n fire-text" aria-hidden="true">04</span>
+        <h3>Дойди до финиша</h3>
+        <p>В финишный день книга встаёт на полку, а из твоих пересказов собирается конспект.</p>
+        <div class="vis pills" aria-hidden="true"><span class="pill"><svg><use href="#i-flag"/></svg>Финиш</span><span class="pill ok"><svg><use href="#i-check"/></svg>Конспект готов</span></div>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<!-- ПОЧЕМУ РАБОТАЕТ -->
+<section aria-labelledby="why-title">
+  <div class="wrap">
+    <p class="kicker">Почему это работает</p>
+    <h2 id="why-title">Не сила воли, а&nbsp;механика</h2>
+    <p class="lead">Мы не уговариваем читать больше. Мы делаем так, чтобы бросить было сложнее, чем дочитать.</p>
+    <div class="why">
+      <article class="why-card">
+        <div class="ico" aria-hidden="true"><svg><use href="#i-chat"/></svg></div>
+        <h3>Пересказ вместо галочки</h3>
+        <p>Галочку «прочитано» можно поставить, не открывая книгу. Пересказать — нет. ИИ не экзаменует: просто убеждается, что отрезок прочитан. А пересказанное своими словами держится в голове куда дольше пролистанного.</p>
+        <div class="vis" aria-hidden="true"><div class="bubble">«На Патриарших странный иностранец предсказал Берлиозу смерть. Тот не поверил. Зря»<small>✓ День засчитан</small></div></div>
+      </article>
+      <article class="why-card v">
+        <div class="ico" aria-hidden="true"><svg><use href="#i-duo"/></svg></div>
+        <h3>Напарник, которого нельзя подвести</h3>
+        <p>Позови друга по ссылке. У вас общий стрик: огонёк растёт, только когда сдали оба. Себе пропуск простить легко. Подвести напарника — уже неловко.</p>
+        <div class="vis" aria-hidden="true"><div class="duo"><span class="ava f">Ты</span><span class="ava">А</span><span class="duo-t">Оба сдали —<br>огонёк растёт</span><b><svg><use href="#i-flame"/></svg>9</b></div></div>
+      </article>
+      <article class="why-card">
+        <div class="ico" aria-hidden="true"><svg style="color:#6ee7a7"><use href="#i-flag"/></svg></div>
+        <h3>Понятный финиш</h3>
+        <p>Не «когда-нибудь дочитаю», а конкретная дата в календаре. Каждый день ясно, что читать и сколько осталось, — и финиш становится ближе на глазах.</p>
+        <div class="vis" aria-hidden="true"><div class="fin"><div class="fin-bar"><i></i><svg><use href="#i-flag"/></svg></div><div class="fin-l"><span>день 12</span><span>финиш · день 30</span></div></div></div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ЧТО ВНУТРИ -->
+<section aria-labelledby="inside-title">
+  <div class="wrap">
+    <p class="kicker">Что внутри</p>
+    <h2 id="inside-title">Всё нужное — в&nbsp;одном чате</h2>
+    <p class="lead">Бот утром присылает отрезок и вечером один раз напоминает, если день не сдан. Остальное — в мини-приложении, которое открывается прямо из Telegram.</p>
+    <div class="bento">
+      <article class="b b-3">
+        <h3>Читалка прямо в Telegram</h3>
+        <p>Книги в epub и fb2 открываются сразу на сегодняшнем отрезке — не нужно искать закладку. Привычнее своя читалка или бумага? Тоже можно.</p>
+        <div class="vis" aria-hidden="true">
+          <div class="page">
+            <div class="page-h book">Глава 13. Явление героя</div>
+            <div class="page-s">Отрезок 12 из 30</div>
+            <div class="ln" style="width:100%"></div><div class="ln" style="width:94%"></div><div class="ln" style="width:98%"></div><div class="ln" style="width:72%"></div><div class="ln" style="width:96%"></div><div class="ln" style="width:58%"></div>
+            <div class="page-f"><span>стр. 151</span><b>осталось ≈ 9 мин</b></div>
+          </div>
+        </div>
+      </article>
+      <article class="b b-3">
+        <h3>Пересказ голосом или текстом</h3>
+        <p>Нажми запись и расскажи, что было в отрезке, — 30–60 секунд хватит. Не хочется вслух — напиши пару фраз. Если что-то неясно, ИИ сначала задаст уточняющий вопрос, а не отклонит пересказ.</p>
+        <div class="vis" aria-hidden="true">
+          <div class="rec"><span class="rec-btn"><svg><use href="#i-mic"/></svg></span><svg class="wave" preserveAspectRatio="none"><use href="#wave" width="100%" height="100%"/></svg><span class="rec-time">0:42</span></div>
+          <div class="seg"><span class="on">Голосом</span><span>Текстом</span></div>
+        </div>
+      </article>
+      <article class="b b-2">
+        <h3>Календарь забега</h3>
+        <p>Дни подряд складываются в стрик. Раз в неделю заморозка прикроет пропуск, чтобы одна простуда не обнулила всё.</p>
+        <div class="vis">
+          <div class="cal" role="img" aria-label="Календарь забега на 30 дней: 10 дней сдано, одна заморозка, сегодня двенадцатый день">
+            <i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="z"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i>
+            <i class="d"></i><i class="t"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+          </div>
+          <div class="legend" aria-hidden="true"><span class="d">сдано</span><span class="z">заморозка</span><span class="t">сегодня</span><span>впереди</span></div>
+        </div>
+      </article>
+      <article class="b b-2">
+        <h3>Полка и конспект</h3>
+        <p>Дочитанные книги встают на полку, а из твоих пересказов собирается конспект — краткое содержание твоими же словами.</p>
+        <div class="vis" aria-hidden="true">
+          <div class="spines"><i style="height:58px;background:#5B63D6"></i><i style="height:66px;background:#3E8E6E"></i><i style="height:50px;background:#F2C14E"></i><i style="height:62px;background:#E2553F"></i><i style="height:54px;background:#B8A8FF"></i><i style="height:68px;background:#E98A6B"></i></div>
+          <div class="note">
+            <div class="note-h book">Мастер и Маргарита · конспект</div>
+            <ul><li><b>День 1.</b> Иностранец на Патриарших и подсолнечное масло.</li><li><b>День 2.</b> Иван гонится за Воландом через всю Москву.</li></ul>
+          </div>
+        </div>
+      </article>
+      <article class="b b-2 wide">
+        <h3>Друзья и ачивки</h3>
+        <p>Зови друзей по ссылке и смотри, кто что читает и какой у кого стрик. Друзьям видны книга, стрик и полка — пересказы и конспект нет.</p>
+        <div class="vis" aria-hidden="true">
+          <div class="stack"><div><span class="ava">А</span><span class="ava g">М</span><span class="ava f">Л</span></div><span class="stack-t">Аня, Макс и Лера уже сдали сегодня</span></div>
+          <div class="achs"><span>📖 Первая страница</span><span>🔥 Неделя</span><span>🤝 Дуэт</span><span>🏁 Финиш</span></div>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ТАРИФЫ -->
+<section id="pricing" aria-labelledby="price-title">
+  <div class="wrap">
+    <div class="center">
+      <p class="kicker">Тарифы</p>
+      <h2 id="price-title">Сначала попробуй&nbsp;— потом решай</h2>
+      <p class="lead">Начни с бесплатного спринта. Понравится — бери забег на одну книгу или абонемент, чтобы читать без пауз.</p>
+    </div>
+    <div class="prices">
+      <article class="plan">
+        <h3>Спринт</h3>
+        <p class="plan-d">Чтобы понять, твоё ли это</p>
+        <div class="plan-p">0 ₽</div>
+        <div class="plan-s">7 дней · один раз</div>
+        <ul>
+          <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg>Рассказ или короткая книга до 140 страниц</li>
+          <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg>Пересказы, стрик и напарник — всё по-настоящему</li>
+          <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg>Без оплаты и привязки карты</li>
+        </ul>
+        <a class="btn btn-ghost" href="{{BOT_URL}}" rel="noopener">Попробовать бесплатно</a>
+      </article>
+      <article class="plan hot">
+        <span class="badge">Одна книга — один финиш</span>
+        <h3>Забег</h3>
+        <p class="plan-d">Твоя книга до последней страницы</p>
+        <div class="plan-p">{{PRICE_RUN}}</div>
+        <div class="plan-s">≈ <b>{{PRICE_RUN_DAY}} в день</b> при плане на 30 дней</div>
+        <ul>
+          <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg>План на 21–60 дней, по ~15 минут в день</li>
+          <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg>ИИ проверяет каждый пересказ</li>
+          <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg>Заморозка раз в неделю</li>
+          <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg>Напарник и общий стрик</li>
+          <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg>Конспект из твоих пересказов</li>
+          <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg>Разовая оплата, без подписки</li>
+        </ul>
+        <a class="btn btn-fire" href="{{BUY_RUN_URL}}">Купить забег — {{PRICE_RUN}}</a>
+        <a class="plan-alt" href="{{BOT_URL}}" rel="noopener">или оплатить звёздами в Telegram — {{PRICE_RUN_STARS}}</a>
+      </article>
+      <article class="plan">
+        <h3>Абонемент</h3>
+        <p class="plan-d">Для тех, кто хочет читать постоянно</p>
+        <div class="plan-p">{{PRICE_MONTH}}<small>&nbsp;/&nbsp;мес</small></div>
+        <div class="plan-s">или {{PRICE_YEAR}} в год</div>
+        <ul>
+          <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg>Всё, что есть в забеге</li>
+          <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg>Книга за книгой без доплат</li>
+          <li><svg aria-hidden="true" focusable="false"><use href="#i-check"/></svg>Вторая заморозка в неделю</li>
+        </ul>
+        <p class="plan-n">Картой и через СБП — без автопродления. Месяц в Telegram Stars продлевается сам, отключить — командой <span class="cmd">/cancel_sub</span>.</p>
+        <div class="plan-btns">
+          <a class="btn btn-ghost" href="{{BUY_MONTH_URL}}">Месяц — {{PRICE_MONTH}}</a>
+          <a class="btn btn-ghost" href="{{BUY_YEAR_URL}}">Год — {{PRICE_YEAR}}</a>
+        </div>
+        <a class="plan-alt" href="{{BOT_URL}}" rel="noopener">или звёздами в Telegram — {{PRICE_MONTH_STARS}} в месяц</a>
+      </article>
+    </div>
+    <ul class="pay" aria-label="Способы оплаты">
+      <li><svg aria-hidden="true" focusable="false"><use href="#i-card"/></svg>Карта или СБП через ЮKassa, с&nbsp;чеком</li>
+      <li><svg aria-hidden="true" focusable="false"><use href="#i-star"/></svg>Telegram Stars</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ГАРАНТИЯ -->
+<section class="guar-sec" aria-labelledby="guar-title">
+  <div class="wrap">
+    <div class="guar">
+      <div class="guar-ico" aria-hidden="true"><svg><use href="#i-shield"/></svg></div>
+      <div>
+        <h2 id="guar-title">Не зашло — вернём деньги</h2>
+        <p>Если в первые {{REFUND_DAYS}} дня после оплаты станет ясно, что это не твоё, отправь боту <span class="cmd">/money_back</span>. Без анкет и «а может, всё-таки останетесь?».</p>
+        <p>Возврат оформляем сразу. Звёзды возвращаются моментально, деньги на карту или счёт — в срок банка. Если передумаешь позже, вернём деньги за неиспользованные дни — подробности в <a href="{{OFFER_URL}}">оферте</a>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section id="faq" aria-labelledby="faq-title">
+  <div class="wrap faq-wrap">
+    <div class="faq-head">
+      <p class="kicker">Вопросы</p>
+      <h2 id="faq-title">Что обычно спрашивают</h2>
+      <p>Не нашлось ответа? Напиши нам: {{SUPPORT}}</p>
+    </div>
+    <div class="faq">
+      <details name="faq">
+        <summary>А если пропущу день?</summary>
+        <div class="faq-a"><p>Бывает. Раз в неделю срабатывает заморозка — стрик не сгорит (в абонементе заморозок две). Вчерашний отрезок можно догнать сегодня.</p><p>Если пропусков больше, стрик обнулится, но забег продолжится: просто начинаешь копить огонёк заново.</p></div>
+      </details>
+      <details name="faq">
+        <summary>У меня бумажная книга — так можно?</summary>
+        <div class="faq-a"><p>Можно. Добавь её по названию и числу страниц — план разобьётся по страницам. Читаешь с бумаги, пересказываешь в боте.</p></div>
+      </details>
+      <details name="faq">
+        <summary>Какие форматы файлов подходят?</summary>
+        <div class="faq-a"><p>epub и fb2 — такие книги можно читать прямо в мини-приложении. Если книга в другом формате или в другой читалке, добавь её как бумажную: по названию и числу страниц.</p></div>
+      </details>
+      <details name="faq">
+        <summary>Кто видит мои пересказы?</summary>
+        <div class="faq-a"><p>Ты и ИИ, который их проверяет. Ещё — напарник, но только если вы читаете одну и ту же книгу, и только те отрезки, которые он уже прочитал сам: без спойлеров.</p><p>Друзья видят твою книгу, стрик и полку — пересказов и конспекта им не видно. Голосовые мы не храним: переводим в текст и удаляем. Удалить все свои данные можно командой <span class="cmd">/delete_me</span>.</p></div>
+      </details>
+      <details name="faq">
+        <summary>А если ИИ не засчитает пересказ?</summary>
+        <div class="faq-a"><p>Он подскажет, чего не хватило, — обычно пары конкретных деталей из отрезка. Дополни и отправь ещё раз. Если что-то неясно, ИИ сначала задаст уточняющий вопрос, а не отклонит сразу.</p><p>Кажется, что засчитать должны были? Напиши в поддержку: {{SUPPORT}} — пересказ посмотрит живой человек.</p></div>
+      </details>
+      <details name="faq">
+        <summary>Как оплатить и вернуть деньги?</summary>
+        <div class="faq-a"><p>Прямо в боте, командой <span class="cmd">/buy</span>: картой или через СБП — через ЮKassa, с электронным чеком. Или в Telegram Stars.</p><p>Вернуть деньги можно в первые {{REFUND_DAYS}} дня после оплаты: отправь боту <span class="cmd">/money_back</span>, без вопросов. Звёзды вернутся сразу, деньги на карту или счёт — в срок банка.</p><p>Абонемент картой или через СБП сам не продлевается. Месячный абонемент в Stars продлевается автоматически — отключить можно в любой момент командой <span class="cmd">/cancel_sub</span>.</p></div>
+      </details>
+      <details name="faq">
+        <summary>Что за напарник?</summary>
+        <div class="faq-a"><p>Друг, с которым вы читаете в паре. Позови его по ссылке из бота — команда <span class="cmd">/pair</span>. Книги можно читать разные, а стрик у пары общий: он растёт, только если в этот день сдали оба.</p><p>А ещё напарник может тебя поторопить — бот вежливо передаст: «Аня ждёт твой пересказ».</p></div>
+      </details>
+      <details name="faq">
+        <summary>Нужно ли что-то устанавливать?</summary>
+        <div class="faq-a"><p>Нет. Всё живёт в Telegram: бот присылает отрезок и напоминания, а чтение, пересказ, календарь и полка — в мини-приложении, которое открывается прямо из чата.</p></div>
+      </details>
+      <details name="faq">
+        <summary>Что входит в бесплатный спринт?</summary>
+        <div class="faq-a"><p>Семь дней по рассказу или короткой книге до 140 страниц: отрезки, пересказы, стрик и напарник — всё как в забеге, только короче. Спринт даётся один раз, карта не нужна.</p></div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<div id="end">
+  <!-- ФИНАЛЬНЫЙ ПРИЗЫВ -->
+  <section class="final-sec" aria-labelledby="final-title">
+    <div class="wrap">
+      <div class="final">
+        <svg class="final-flame" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-flame"/></svg>
+        <h2 id="final-title">Какая книга ждёт тебя на&nbsp;середине?</h2>
+        <p class="final-lead">Добавь её в бот, выбери срок — и в финишный день она встанет на полку дочитанной.</p>
+        <div class="cta">
+          <a class="btn btn-fire" href="{{BOT_URL}}" rel="noopener"><svg aria-hidden="true" focusable="false"><use href="#i-tg"/></svg>Начать в Telegram</a>
+          <p class="cta-note">Бесплатный спринт: 7 дней на рассказ</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <div class="wrap">
+      <div>
+        <a class="logo" href="#top" aria-label="{{PROJECT}} — наверх"><svg aria-hidden="true" focusable="false"><use href="#i-logo"/></svg><span>{{PROJECT}}</span></a>
+        <p class="seller">{{SELLER_LINE}}</p>
+      </div>
+      <div class="foot-r">
+        <ul class="flinks">
+          <li><a href="{{OFFER_URL}}">Публичная оферта</a></li>
+          <li><a href="{{PRIVACY_URL}}">Политика обработки персональных данных</a></li>
+        </ul>
+        <p class="support">Поддержка и возвраты: {{SUPPORT}}</p>
+        <p class="copy">Оплата картой и СБП через ЮKassa или в Telegram Stars</p>
+      </div>
+    </div>
+  </footer>
+</div>
+</main>
+
+<div class="sticky" id="stickyCta">
+  <a class="btn btn-fire" href="{{BOT_URL}}" rel="noopener"><svg aria-hidden="true" focusable="false"><use href="#i-tg"/></svg>Начать бесплатно в Telegram</a>
+</div>
+
+<script>
+(function () {
+  // FAQ: открыт только один ответ (запасной вариант для браузеров без details[name])
+  var items = document.querySelectorAll('.faq details');
+  items.forEach(function (d) {
+    d.addEventListener('toggle', function () {
+      if (d.open) items.forEach(function (o) { if (o !== d) o.open = false; });
+    });
+  });
+  // Липкая кнопка на мобильном: видна после героя и прячется у финального призыва
+  var bar = document.getElementById('stickyCta'), hero = document.getElementById('heroCta'), end = document.getElementById('end');
+  if (!bar || !hero || !end || !('IntersectionObserver' in window)) return;
+  var st = { past: false, end: false };
+  var io = new IntersectionObserver(function (es) {
+    es.forEach(function (e) {
+      if (e.target === hero) st.past = !e.isIntersecting && e.boundingClientRect.top < 0;
+      else st.end = e.isIntersecting;
+    });
+    bar.classList.toggle('show', st.past && !st.end);
+  });
+  io.observe(hero);
+  io.observe(end);
+})();
+</script>
+</body>
+</html>

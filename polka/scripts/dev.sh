@@ -7,12 +7,12 @@ cd "$(dirname "$0")/.."
 
 [ -f .env ] || { cp .env.example .env; echo "Создан .env — впиши хотя бы BOT_TOKEN"; }
 export BOT_MODE=polling
-export DATABASE_URL="${DATABASE_URL:-postgresql+asyncpg://polka:polka@localhost:5432/polka}"
+export DATABASE_URL="${DATABASE_URL:-postgresql+asyncpg://dochitka:dochitka@localhost:5432/dochitka}"
 
-if ! docker ps --format '{{.Names}}' | grep -q '^polka-dev-db$'; then
-  echo "==> Запускаю Postgres в Docker (контейнер polka-dev-db)"
-  docker start polka-dev-db >/dev/null 2>&1 || docker run -d --name polka-dev-db -p 5432:5432 \
-    -e POSTGRES_USER=polka -e POSTGRES_PASSWORD=polka -e POSTGRES_DB=polka postgres:16-alpine >/dev/null
+if ! docker ps --format '{{.Names}}' | grep -q '^dochitka-dev-db$'; then
+  echo "==> Запускаю Postgres в Docker (контейнер dochitka-dev-db)"
+  docker start dochitka-dev-db >/dev/null 2>&1 || docker run -d --name dochitka-dev-db -p 5432:5432 \
+    -e POSTGRES_USER=dochitka -e POSTGRES_PASSWORD=dochitka -e POSTGRES_DB=dochitka postgres:16-alpine >/dev/null
   sleep 5
 fi
 

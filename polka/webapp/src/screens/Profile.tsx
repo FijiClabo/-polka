@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type Achievement, type Me } from "../api";
+import { api, type Achievement, type Billing, type Me } from "../api";
 import { IBook, IChevron } from "../components/Icons";
 import { Avatar, Skeleton, Switch, toast } from "../components/ui";
-import { useApi } from "../hooks";
+import { invalidate, useApi } from "../hooks";
 import { useNav } from "../nav";
-import { closeApp, openTgLink } from "../tg";
+import { closeApp, confirmDialog, openExternal, openTgLink } from "../tg";
+import { dayMonth } from "../format";
 
 const ZONES: [string, string][] = [
   ["Europe/Kaliningrad", "Калининград (МСК−1)"],
@@ -22,10 +23,12 @@ const ZONES: [string, string][] = [
 ];
 
 const FAQ: [string, string][] = [
-  ["Как проверяется пересказ?", "ИИ сверяет твой пересказ с текстом отрезка и проверяет одно: читал ли ты это. Не оценивает стиль и грамотность. Если неясно — задаст один вопрос. Сомнение всегда в твою пользу."],
+  ["Как проверяется пересказ?", "ИИ сверяет твой пересказ с текстом отрезка и проверяет одно: прочитан ли отрезок. Не оценивает стиль и грамотность. Если неясно — задаст один вопрос. Сомнение всегда в твою пользу."],
   ["Что если пропущу день?", "Раз в неделю срабатывает заморозка — стрик не сгорит. Пропущенный отрезок можно догнать на следующий день, а в последние дни и в дни отсрочки — сдавать по два."],
   ["Когда начинается и заканчивается день?", "В 04:00 по твоему времени. Всё, что сдано до четырёх утра, относится к прошедшему дню."],
   ["Кто видит мои пересказы?", "Только ты. Напарник — если вы читаете одну книгу, и только ту часть, которую он уже прочитал сам. Друзья видят книгу, стрик и полку, но не пересказы."],
+  ["Сколько стоит?", "Одна книга — разовая оплата за забег до финиша. Абонемент на месяц или год — книга за книгой без доплат. Первый раз можно попробовать бесплатный спринт на 7 дней."],
+  ["Как вернуть деньги?", "В первые 3 дня после оплаты — кнопкой «Вернуть деньги» здесь, в профиле, или командой /money_back в чате, без вопросов. Позже — заявкой на возврат за неиспользованную часть."],
   ["Бумажная книга?", "Можно. Отрезки — по страницам, проверка мягче: без сверки с текстом, максимум два уточняющих вопроса."],
 ];
 
@@ -129,6 +132,8 @@ export default function Profile() {
         <IChevron size={18} />
       </button>
 
+      <AccessCard />
+
       <div className="section-title" ref={achRef}>
         <span>Значки</span>
         <span className="tiny muted">{ach.data ? `${ach.data.items.filter((a) => a.earned).length} из 9` : ""}</span>
@@ -165,5 +170,89 @@ export default function Profile() {
         <button className="link tiny" onClick={closeApp}>Открыть чат</button>
       </p>
     </div>
+  );
+}
+
+function AccessCard() {
+  const nav = useNav();
+  const { data, reload } = useApi<Billing>("/billing");
+  const [busy, setBusy] = useState(false);
+  if (!data) return <Skeleton h={90} />;
+  const sub = data.subscription;
+  const cancelSub = async () => {
+    if (!(await confirmDialog("Отключить автопродление? Абонемент будет действовать до конца оплаченного срока."))) return;
+    setBusy(true);
+    try {
+      const r = await api.post<{ message: string }>("/billing/cancel");
+      toast(r.message);
+      reload();
+    } catch (e) {
+      toast((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const refund = async () => {
+    const q = data.refund.eligible
+      ? "Вернуть деньги за последнюю оплату? Доступ к забегу закроется."
+      : `${data.refund.reason} Подать заявку?`;
+    if (!(await confirmDialog(q))) return;
+    setBusy(true);
+    try {
+      const r = await api.post<{ result: string }>("/billing/refund");
+      toast(r.result === "ok" ? "Деньги возвращены" : "Заявка принята — ответим в течение 10 дней");
+      invalidate();
+      reload();
+      nav.refreshMe();
+    } catch (e) {
+      toast((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <div className="section-title">Доступ</div>
+      <div className="card sub-card">
+        <div className="row between">
+          <span>Абонемент</span>
+          <b className="small">{sub.active ? `до ${dayMonth(sub.until)}${sub.recurring ? " · автопродление" : ""}` : "нет"}</b>
+        </div>
+        {data.credits > 0 && (
+          <div className="row between">
+            <span>Оплаченные забеги</span>
+            <b className="small">{data.credits}</b>
+          </div>
+        )}
+        {data.purchases.length > 0 && (
+          <div className="tiny muted mt-8">
+            {data.purchases.slice(0, 3).map((p) => (
+              <div key={p.id}>
+                {dayMonth(p.date)} · {p.product === "run" ? "забег" : p.product === "month" ? "месяц" : "год"} · {p.amount}
+                {p.status === "refunded" ? " · возвращено" : p.status === "refund_requested" ? " · возврат в работе" : ""}
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="btn-row mt-12">
+          <button className="btn secondary" onClick={() => nav.push({ name: "pay" })}>{sub.active ? "Тарифы" : "Купить"}</button>
+          {(data.refund.eligible || data.refund.partial) && (
+            <button className="btn ghost" disabled={busy} onClick={refund}>
+              {data.refund.eligible ? "Вернуть деньги" : "Заявка на возврат"}
+            </button>
+          )}
+        </div>
+        {sub.active && sub.recurring && (
+          <button className="link tiny mt-8" disabled={busy} onClick={cancelSub}>Отключить автопродление</button>
+        )}
+        {(data.offer_url || data.privacy_url) && (
+          <div className="tiny muted mt-8">
+            {data.offer_url && <button className="link tiny" onClick={() => openExternal(data.offer_url!)}>Оферта</button>}
+            {data.offer_url && data.privacy_url && " · "}
+            {data.privacy_url && <button className="link tiny" onClick={() => openExternal(data.privacy_url!)}>Политика данных</button>}
+          </div>
+        )}
+      </div>
+    </>
   );
 }
