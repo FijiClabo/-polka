@@ -16,9 +16,9 @@ const ACH: Record<string, [string, string]> = {
   two_weeks: ["⚡", "Две недели"],
   iron: ["🛡", "Железный"],
   duet: ["🤝", "Дуэт"],
-  kept_word: ["💎", "Не подвёл"],
-  comeback: ["🌱", "Вернулся"],
-  brought_friend: ["💌", "Привёл друга"],
+  kept_word: ["💎", "Месяц вдвоём"],
+  comeback: ["🌱", "Возвращение"],
+  brought_friend: ["💌", "Друг в деле"],
   finish: ["🏁", "Финиш"],
 };
 

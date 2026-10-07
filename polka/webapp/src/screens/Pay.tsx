@@ -160,7 +160,7 @@ export default function Pay() {
     <div className="screen no-tabs pay">
       <h1 className="h-title">{data.needs_access && data.plan_days ? "Последний шаг" : "Тарифы"}</h1>
 
-      {data.book && data.plan_days && (
+      {data.book && data.plan_days && data.needs_access && (
         <div className="card row" style={{ gap: 14 }}>
           <Cover title={data.book.title} author={data.book.author} color={data.book.spine_color} small />
           <div className="grow">
