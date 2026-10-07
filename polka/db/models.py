@@ -93,7 +93,7 @@ class Book(Base):
     total_words: Mapped[int | None] = mapped_column(Integer)
     total_chars: Mapped[int | None] = mapped_column(Integer)
     chapters_count: Mapped[int] = mapped_column(Integer, default=0)
-    spine_color: Mapped[str] = mapped_column(String(16), default="#E2553F")
+    spine_color: Mapped[str] = mapped_column(String(16), default="#C9644F")
     file_path: Mapped[str | None] = mapped_column(String(512))
     file_hash: Mapped[str | None] = mapped_column(String(64), index=True)
     file_size: Mapped[int | None] = mapped_column(Integer)

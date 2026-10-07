@@ -1,79 +1,104 @@
-import { useEffect, useRef, useState } from "react";
-import { api, type Billing, type Product } from "../api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api, type Billing, type PriceInfo, type Product } from "../api";
 import { IArrow, ICheck } from "../components/Icons";
+import { OpenBookIll } from "../components/Illustrations";
 import { Cover, ErrorState, ScreenSkeleton, toast } from "../components/ui";
 import { dayMonth, days } from "../format";
 import { invalidate, useApi } from "../hooks";
 import { useNav } from "../nav";
-import { haptic, openExternal, openInvoice } from "../tg";
+import { haptic, openExternal } from "../tg";
 
-export const rub = (n: number) => `${Math.round(n).toLocaleString("ru-RU")} ₽`;
-const stars = (n: number) => `${Math.round(n).toLocaleString("ru-RU")} ⭐`;
-type Unit = "rub" | "stars";
+export const rub = (n: number) => `${Math.round(n).toLocaleString("ru-RU")} ₽`;
 
 const INCLUDED = [
-  "План под твою книгу: 15 минут чтения в день",
-  "ИИ проверяет каждый пересказ — голосом или текстом",
-  "Стрик, заморозки и 3 дня отсрочки в конце",
+  "План под твою книгу: около 15 минут чтения в день",
+  "Проверка каждого пересказа — голосом или текстом",
+  "Стрик, заморозки и три дня отсрочки в конце",
   "Напарник и друзья — вместе дочитывают чаще",
-  "Конспект из твоих пересказов и книга на полке",
+  "Дочитанные книги собираются на полке",
 ];
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+type Order = { id: string; startedAt: number };
+type OrderState = Billing & { status: "pending" | "paid" | "canceled" | "refunded" };
 
 export default function Pay() {
   const nav = useNav();
   const { data, error, loading, reload } = useApi<Billing>("/billing");
   const [product, setProduct] = useState<Product>("run");
   const [busy, setBusy] = useState(false);
-  const [waiting, setWaiting] = useState(false);
-  const [entry, setEntry] = useState<null | "promo" | "code">(null);
-  const [code, setCode] = useState("");
+  const [order, setOrder] = useState<Order | null>(null);
+  const [email, setEmail] = useState("");
+  const [promoOpen, setPromoOpen] = useState(false);
+  const [promo, setPromo] = useState("");
   const alive = useRef(true);
 
   useEffect(() => () => { alive.current = false; }, []);
 
-  if (error && !data) return <ErrorState message={error} onRetry={reload} />;
-  if (loading || !data) return <ScreenSkeleton />;
-
-  const done = () => {
+  const done = useCallback(() => {
     invalidate();
     nav.refreshMe();
     nav.tab("today");
-  };
+  }, [nav]);
 
-  // Telegram сообщает «paid» раньше, чем до сервера доходит подтверждение оплаты: ждём его до ~30 секунд
-  const waitForAccess = async (before: Billing) => {
-    setWaiting(true);
-    for (let i = 0; i < 20 && alive.current; i++) {
-      await new Promise((r) => setTimeout(r, 1500));
-      try {
-        const b = await api.get<Billing>("/billing");
-        const changed = b.credits !== before.credits || b.subscription.until !== before.subscription.until || b.needs_access !== before.needs_access;
-        if (changed) {
-          haptic("success");
-          toast("Оплата прошла — спасибо! 🔥");
-          done();
-          return;
-        }
-      } catch {
-        /* сеть мигнула — пробуем ещё */
+  // После перехода на страницу ЮKassa ждём подтверждения: проверяем заказ сами и при возвращении в приложение
+  const check = useCallback(async (o: Order, quiet = true) => {
+    try {
+      const r = await api.get<OrderState>(`/billing/order/${o.id}`);
+      if (!alive.current) return;
+      if (r.status === "paid") {
+        haptic("success");
+        toast("Оплата прошла — спасибо!");
+        setOrder(null);
+        done();
+      } else if (r.status === "canceled") {
+        haptic("error");
+        toast("Оплата не прошла — деньги не списаны");
+        setOrder(null);
+      } else if (!quiet) {
+        toast("Пока не видим оплату. Если уже оплачено — подождём ещё немного");
       }
+    } catch (e) {
+      if (!quiet) toast((e as Error).message);
     }
-    if (alive.current) {
-      setWaiting(false);
-      toast("Оплата обрабатывается — подтверждение придёт в чат");
-      done();
-    }
-  };
+  }, [done]);
 
-  const pay = async (method: "card" | "stars") => {
+  useEffect(() => {
+    if (!order) return;
+    const timer = window.setInterval(() => {
+      if (Date.now() - order.startedAt > 15 * 60 * 1000) window.clearInterval(timer);
+      else void check(order);
+    }, 3000);
+    const onVisible = () => document.visibilityState === "visible" && void check(order);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [order, check]);
+
+  if (error && !data) return <ErrorState message={error} onRetry={reload} />;
+  if (loading || !data) return <ScreenSkeleton />;
+
+  const p = data.prices;
+  const sel = p[product];
+  const emailOk = !data.needs_email || EMAIL_RE.test(email.trim());
+
+  const pay = async () => {
+    if (!emailOk) {
+      toast("Укажи e-mail — пришлём на него чек");
+      return;
+    }
     setBusy(true);
     haptic("medium");
     try {
-      const { url } = await api.post<{ url: string }>("/billing/invoice", { product, method });
-      const status = await openInvoice(url);
-      if (status === "paid") await waitForAccess(data);
-      else if (status === "failed") toast("Платёж не прошёл. Попробуй другой способ.");
-      else if (status === "pending") toast("Платёж в обработке — напишем в чат, как только он пройдёт");
+      const r = await api.post<{ url: string; order: string }>("/billing/pay", {
+        product,
+        email: data.needs_email ? email.trim() : undefined,
+      });
+      setOrder({ id: r.order, startedAt: Date.now() });
+      openExternal(r.url);
     } catch (e) {
       toast((e as Error).message);
     } finally {
@@ -82,31 +107,15 @@ export default function Pay() {
   };
 
   const applyPromo = async () => {
-    if (!code.trim()) return;
+    if (!promo.trim()) return;
     setBusy(true);
     try {
-      await api.post<Billing>("/billing/promo", { code: code.trim() });
+      await api.post<Billing>("/billing/promo", { code: promo.trim() });
       haptic("success");
       toast("Промокод применён");
-      setEntry(null);
-      setCode("");
+      setPromoOpen(false);
+      setPromo("");
       reload();
-    } catch (e) {
-      haptic("error");
-      toast((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const redeem = async () => {
-    if (!code.trim()) return;
-    setBusy(true);
-    try {
-      await api.post("/billing/redeem", { code: code.trim() });
-      haptic("success");
-      toast("Код активирован 🎉");
-      done();
     } catch (e) {
       haptic("error");
       toast((e as Error).message);
@@ -120,7 +129,7 @@ export default function Pay() {
     try {
       await api.post("/billing/free", { product });
       haptic("success");
-      toast("Доступ открыт 🎉");
+      toast("Доступ открыт");
       done();
     } catch (e) {
       toast((e as Error).message);
@@ -135,26 +144,34 @@ export default function Pay() {
       <div className="screen no-tabs">
         <h1 className="h-title">Абонемент</h1>
         <div className="card book-card center">
-          <div style={{ fontSize: 44 }}>🔥</div>
+          <div className="ill-wrap"><OpenBookIll size={150} /></div>
           <div className="seg-title">Всё открыто</div>
-          <p className="meta">
-            Абонемент действует до {dayMonth(sub.until)}{sub.recurring ? " и продлевается сам — отменить можно в настройках Telegram" : ""}.
-            Книга за книгой без доплат.
-          </p>
+          <p className="meta">Абонемент действует до {dayMonth(sub.until)}. Книга за книгой без доплат.</p>
           <button className="btn primary block mt-12" onClick={done}>К чтению <IArrow size={18} /></button>
         </div>
       </div>
     );
   }
 
-  const p = data.prices;
-  const sel = p[product];
-  // только звёзды — показываем цены в звёздах, иначе в рублях
-  const unit: Unit = !data.methods.card && data.methods.stars ? "stars" : "rub";
-  const val = (x: Billing["prices"]["run"]) => (unit === "rub" ? x.rub : x.stars);
-  const fmt = unit === "rub" ? rub : stars;
-  const perDay = product === "run" && data.plan_days ? val(sel) / data.plan_days : null;
-  const yearMonthly = val(p.year) / 12;
+  if (order) {
+    return (
+      <div className="screen no-tabs">
+        <div className="card book-card center mt-24">
+          <div className="ill-wrap"><OpenBookIll size={150} /></div>
+          <div className="seg-title">Ждём подтверждения оплаты</div>
+          <p className="meta">
+            Страница оплаты открылась отдельно. Как только платёж пройдёт, доступ откроется сам — а бот напишет в чат.
+          </p>
+          <div className="wait-dots" aria-hidden="true"><i /><i /><i /></div>
+          <button className="btn primary block mt-12" onClick={() => check(order, false)}>Проверить оплату</button>
+          <button className="btn ghost block mt-8" onClick={() => setOrder(null)}>Выбрать другой тариф</button>
+        </div>
+      </div>
+    );
+  }
+
+  const perDay = product === "run" && data.plan_days ? sel.rub / data.plan_days : null;
+  const yearMonthly = p.year.rub / 12;
 
   return (
     <div className="screen no-tabs pay">
@@ -171,63 +188,56 @@ export default function Pay() {
         </div>
       )}
 
-      {!data.enabled && !sel.free ? (
-        <div className="card mt-16">
-          <b>Онлайн-оплата скоро появится</b>
-          <p className="small muted" style={{ whiteSpace: "pre-line" }}>{data.manual_info}</p>
+      <div className="section-title">Выбери формат</div>
+      <PlanOption
+        on={product === "run"} onPick={() => setProduct("run")}
+        title="Одна книга" price={p.run} sub="Забег до финиша: план, проверка пересказов, напарник"
+        extra={perDay ? `≈ ${rub(perDay)} в день` : undefined}
+      />
+      <PlanOption
+        on={product === "month"} onPick={() => setProduct("month")}
+        title="Месяц" price={p.month} suffix="за 30 дней" sub="Книга за книгой без доплат и две заморозки в неделю"
+      />
+      <PlanOption
+        on={product === "year"} onPick={() => setProduct("year")}
+        title="Год" price={p.year} suffix="за 365 дней" sub={`≈ ${rub(yearMonthly)} в месяц — дешевле всего`}
+        badge={yearMonthly < p.month.rub ? "выгодно" : undefined}
+      />
+
+      {sel.free ? (
+        <button className="btn primary block mt-16" disabled={busy} onClick={activateFree}>
+          Подключить по промокоду
+        </button>
+      ) : !data.enabled ? (
+        <div className="card mt-16 soon">
+          <b>Оплата скоро появится</b>
+          <p className="small muted" style={{ whiteSpace: "pre-line", margin: "4px 0 0" }}>{data.manual_info}</p>
         </div>
       ) : (
-        <>
-          <div className="section-title">Выбери формат</div>
-          <PlanOption
-            on={product === "run"} onPick={() => setProduct("run")}
-            title="Одна книга" price={p.run} sub="Забег до финиша: план, проверка, напарник, конспект"
-            unit={unit} extra={perDay ? `≈ ${fmt(perDay)} в день` : undefined}
-          />
-          <PlanOption
-            on={product === "month"} onPick={() => setProduct("month")}
-            title="Месяц" price={p.month} unit={unit} suffix="/мес" sub="Книга за книгой без доплат + 2 заморозки в неделю"
-          />
-          <PlanOption
-            on={product === "year"} onPick={() => setProduct("year")}
-            title="Год" price={p.year} unit={unit} suffix="/год" sub={`≈ ${fmt(yearMonthly)} в месяц — дешевле всего`}
-            badge={yearMonthly < val(p.month) ? "выгодно" : undefined}
-          />
-
-          {sel.free ? (
-            <button className="btn primary block mt-16" disabled={busy} onClick={activateFree}>
-              Активировать по промокоду
-            </button>
-          ) : (
-            <div className="col mt-16" style={{ gap: 10 }}>
-              {data.methods.stars && (
-                <button className="btn primary block" disabled={busy || waiting} onClick={() => pay("stars")}>
-                  {waiting ? "Проверяем оплату…" : `Оплатить ${sel.stars} ⭐`}
-                </button>
-              )}
-              {data.methods.card && (
-                <button className="btn secondary block" disabled={busy || waiting} onClick={() => pay("card")}>
-                  {`Оплатить ${rub(sel.rub)}`}
-                </button>
-              )}
-              <div className="tiny muted center">
-                {data.methods.stars && "Оплата звёздами Telegram — купить их можно прямо в окне оплаты."}
-                {product === "month" && data.methods.stars && " Месяц продлевается сам; отключить — в профиле в один клик."}
-              </div>
+        <div className="mt-16">
+          {data.needs_email && (
+            <div className="field" style={{ marginBottom: 12 }}>
+              <label htmlFor="pay-email">E-mail для чека</label>
+              <input
+                id="pay-email"
+                className="input"
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                placeholder="name@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
             </div>
           )}
-        </>
-      )}
-
-      <div className="card mt-16 guarantee">
-        <div className="row" style={{ gap: 10 }}>
-          <span style={{ fontSize: 26 }}>🛡</span>
-          <div>
-            <b>Гарантия {days(data.guarantee_days)}</b>
-            <div className="small muted">Не зашло — вернём деньги без вопросов, кнопкой в профиле.</div>
-          </div>
+          <button className="btn primary block" disabled={busy || !emailOk} onClick={pay}>
+            {busy ? "Открываем оплату…" : `Оплатить ${rub(sel.rub)}`}
+          </button>
+          <p className="tiny muted center mt-8">
+            Оплата разовая, без автопродления. Карта, СБП и другие способы — на защищённой странице ЮKassa.
+          </p>
         </div>
-      </div>
+      )}
 
       <div className="section-title">Что внутри</div>
       <div className="card" style={{ padding: "8px 16px" }}>
@@ -261,31 +271,25 @@ export default function Pay() {
       )}
 
       <div className="mt-16">
-        {entry ? (
-          <>
-            <div className="row" style={{ gap: 8 }}>
-              <input
-                className="input grow"
-                placeholder={entry === "code" ? "Код активации" : "Промокод"}
-                value={code}
-                autoFocus
-                autoCapitalize="characters"
-                onChange={(e) => setCode(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && (entry === "code" ? redeem() : applyPromo())}
-              />
-              <button className="btn secondary" disabled={busy || !code.trim()} onClick={entry === "code" ? redeem : applyPromo}>
-                {entry === "code" ? "Активировать" : "Применить"}
-              </button>
-            </div>
-            {entry === "code" && <p className="tiny muted mt-8">Например, подарочный код или код из письма после покупки.</p>}
-          </>
-        ) : (
-          <div className="row center" style={{ gap: 18, justifyContent: "center" }}>
-            <button className="link" onClick={() => setEntry("code")}>🔑 У меня есть код</button>
-            <button className="link" onClick={() => setEntry("promo")}>
-              {data.promo ? `Промокод ${data.promo} · сменить` : "Промокод"}
+        {promoOpen ? (
+          <div className="row" style={{ gap: 8 }}>
+            <input
+              className="input grow"
+              placeholder="Промокод"
+              value={promo}
+              autoFocus
+              autoCapitalize="characters"
+              onChange={(e) => setPromo(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && applyPromo()}
+            />
+            <button className="btn secondary" disabled={busy || !promo.trim()} onClick={applyPromo}>
+              Применить
             </button>
           </div>
+        ) : (
+          <button className="link block" onClick={() => setPromoOpen(true)}>
+            {data.promo ? `Промокод ${data.promo} · сменить` : "У меня есть промокод"}
+          </button>
         )}
       </div>
 
@@ -304,18 +308,17 @@ export default function Pay() {
   );
 }
 
-function PlanOption({ on, onPick, title, price, unit, suffix = "", sub, extra, badge }: {
+function PlanOption({ on, onPick, title, price, suffix = "", sub, extra, badge }: {
   on: boolean;
-  unit: Unit;
   onPick: () => void;
   title: string;
-  price: Billing["prices"]["run"];
+  price: PriceInfo;
   suffix?: string;
   sub: string;
   extra?: string;
   badge?: string;
 }) {
-  const discounted = unit === "rub" ? price.rub < price.list_rub : price.stars < price.list_stars;
+  const discounted = price.rub < price.list_rub;
   return (
     <button className={`option${on ? " on" : ""}`} onClick={() => { haptic("select"); onPick(); }}>
       <span className="radio" />
@@ -329,8 +332,8 @@ function PlanOption({ on, onPick, title, price, unit, suffix = "", sub, extra, b
         {extra && <div className="tiny" style={{ color: "var(--accent)", marginTop: 2 }}>{extra}</div>}
       </div>
       <div className="price">
-        {discounted && <s className="tiny muted">{unit === "rub" ? rub(price.list_rub) : stars(price.list_stars)}</s>}
-        <b className="num">{price.free ? "0 ₽" : unit === "rub" ? rub(price.rub) : stars(price.stars)}</b>
+        {discounted && <s className="tiny muted">{rub(price.list_rub)}</s>}
+        <b className="num">{price.free ? "0 ₽" : rub(price.rub)}</b>
         {suffix && <span className="tiny muted">{suffix}</span>}
       </div>
     </button>

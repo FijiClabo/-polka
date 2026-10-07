@@ -57,12 +57,12 @@ async def msg_document(message: Message, bot: Bot, state: FSMContext) -> None:
     fmt = detect_format(name)
     if fmt is None:
         text = texts.BOOK_UNSUPPORTED if is_other_book_format(name) else texts.BOOK_NOT_A_BOOK
-        await message.answer(text, reply_markup=kb([[{"text": "📖 Добавить как бумажную", "callback": "book:paper"}]]))
+        await message.answer(text, reply_markup=kb([[{"text": "Добавить как бумажную", "callback": "book:paper"}]]))
         return
     max_mb = get_settings().max_book_mb
     if (doc.file_size or 0) > max_mb * 1024 * 1024:
         await message.answer(texts.BOOK_TOO_BIG.format(mb=max_mb),
-                             reply_markup=kb([[{"text": "📖 Добавить как бумажную", "callback": "book:paper"}]]))
+                             reply_markup=kb([[{"text": "Добавить как бумажную", "callback": "book:paper"}]]))
         return
     async with session_scope() as s:
         user, _ = await load_user(s, message.from_user)
@@ -143,15 +143,15 @@ async def handle_parse(bot: Bot, chat_id: int, user_id: int, book_id: int, name:
     if parsed is not None:
         await bot.send_message(chat_id, text, reply_markup=plan_kb(opts))
     else:
-        await bot.send_message(chat_id, text, reply_markup=kb([[{"text": "📖 Добавить как бумажную", "callback": "book:paper"}]]))
+        await bot.send_message(chat_id, text, reply_markup=kb([[{"text": "Добавить как бумажную", "callback": "book:paper"}]]))
 
 
 def plan_kb(opts) -> object:
     rows = []
     for o in opts or []:
-        star = " ⭐" if o.recommended else ""
+        rec = " · советуем" if o.recommended else ""
         ppd = f"{o.pages_per_day:g}".replace(".", ",")
-        rows.append([{"text": f"{texts.days_word(o.days)} · {ppd} стр. · {o.minutes_per_day} мин{star}",
+        rows.append([{"text": f"{texts.days_word(o.days)} · {ppd} стр. · {o.minutes_per_day} мин{rec}",
                       "callback": f"plan:{o.days}"}])
     rows.append([{"text": "Настроить план в приложении", "webapp": "book"}])
     return kb(rows)

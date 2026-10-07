@@ -19,7 +19,7 @@ from services.social import ensure_pair_code, friend_ids, get_pair_for, nudge, n
 router = Router(name="social")
 
 STATUS_WORD = {
-    "done": "сдано ✓", "reading": "ещё читает", "burned": "стрик сгорел", "idle": "не в забеге",
+    "done": "сдано", "reading": "ещё читает", "burned": "стрик сгорел", "idle": "не в забеге",
     "finished": "книга дочитана", "waiting": "ждёт старта",
 }
 
@@ -38,10 +38,10 @@ async def cmd_pair(message: Message) -> None:
             book = st.book_title or "книга ещё не выбрана"
             text = (f"Твой напарник — <b>{texts.e(partner.display_name)}</b>.\n"
                     f"Читает: {texts.e(book)} · сегодня: {STATUS_WORD.get(st.today, st.today)}\n"
-                    f"Общий стрик: <b>{pair.streak}</b> 🔥")
+                    f"Общий стрик: <b>{pair.streak}</b>")
             rows = []
             if st.today != "done":
-                rows.append([{"text": "👋 Напомнить напарнику", "callback": f"nudge:{partner.id}:p"}])
+                rows.append([{"text": "Напомнить напарнику", "callback": f"nudge:{partner.id}:p"}])
             rows.append([{"text": "Открыть", "webapp": "friends"}])
             await message.answer(text, reply_markup=kb(rows))
             return
@@ -68,9 +68,9 @@ async def cmd_friends(message: Message) -> None:
                 continue
             st = await public_status(s, f)
             book = f" — {texts.e(st.book_title)}" if st.book_title else ""
-            rows_text.append(f"• <b>{texts.e(f.display_name)}</b>{book} · 🔥 {st.streak} · {STATUS_WORD.get(st.today, '')}")
+            rows_text.append(f"• <b>{texts.e(f.display_name)}</b>{book} · стрик {st.streak} · {STATUS_WORD.get(st.today, '')}")
             if st.today in ("reading", "burned") and f.id not in nudged:
-                rows_kb.append([{"text": f"👋 Толкнуть: {f.display_name[:20]}", "callback": f"nudge:{f.id}:f"}])
+                rows_kb.append([{"text": f"Толкнуть: {f.display_name[:20]}", "callback": f"nudge:{f.id}:f"}])
         code, name = user.friend_code, user.display_name
         await log_event(s, "friend_invite_shared", user.id, via="bot")
     link = deep_link(f"f_{code}")
@@ -88,7 +88,7 @@ async def cb_nudge(call: CallbackQuery, bot: Bot) -> None:
         user, _ = await load_user(s, call.from_user)
         target = await s.get(User, int(uid))
         res = await nudge(s, user, target, outbox, kind="partner" if kind == "p" else "friend") if target else "not_found"
-    msg = {"ok": "Отправлено 👋", "already": "Сегодня толчок уже был — хватит одного.", "done": "Там день уже сдан ✓",
+    msg = {"ok": "Отправлено.", "already": "Сегодня толчок уже был — хватит одного.", "done": "Там день уже сдан.",
            "disabled": "Этот человек отключил толчки."}.get(res, "Не получилось.")
     await call.answer(msg, show_alert=False)
     await flush(bot, outbox)
@@ -121,7 +121,7 @@ async def send_finish(bot: Bot, chat_id: int, user_id: int) -> None:
     await bot.send_message(chat_id, text, reply_markup=app_kb("Итоги и полка", "finish"))
     await bot.send_photo(chat_id, BufferedInputFile(png, "finish.png"),
                          caption="Карточка для сторис — перешли друзьям или сохрани.")
-    rows = [[{"text": "📚 Следующая книга", "callback": "next:run"}]]
+    rows = [[{"text": "Следующая книга", "callback": "next:run"}]]
     if not subscribed:
         rows.append([{"text": "Тарифы", "webapp": "pay"}])
     await bot.send_message(chat_id, upsell, reply_markup=kb(rows))

@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type BookState, type PlanOption } from "../api";
 import { IBook, IUpload } from "../components/Icons";
+import { OpenBookIll } from "../components/Illustrations";
 import { Cover, ErrorState, ScreenSkeleton, toast } from "../components/ui";
-import { dayMonth, decimal, hm, pages } from "../format";
+import { dayMonth, days as fmtDays, decimal, hm, pages, plural } from "../format";
 import { invalidate, useApi, usePoll } from "../hooks";
 import { useNav } from "../nav";
 import { closeApp, confirmDialog, haptic } from "../tg";
 
-const COLORS = ["#E2553F", "#3E8E6E", "#E98A6B", "#5B63D6", "#F2C14E", "#8C5BD6", "#2F7FB8", "#C2410C", "#4D7C0F"];
+const COLORS = ["#C9644F", "#7E9C7A", "#4F6F9F", "#E2B84F", "#8A6A85", "#4E6B57", "#B98B6E", "#3D4B66", "#D49A8C"];
 
 export default function AddBook() {
   const nav = useNav();
@@ -64,7 +65,7 @@ export default function AddBook() {
       <div className="screen no-tabs">
         <h1 className="h-display">Книга</h1>
         <div className="card book-card mt-16 center">
-          <div style={{ fontSize: 40 }}>📖</div>
+          <div className="ill-wrap"><OpenBookIll size={140} /></div>
           <div className="seg-title">Разбираю книгу…</div>
           <p className="meta">Делю на главы и отрезки. Обычно меньше минуты — результат продублирую в чат.</p>
           <div className="progress"><div className="bar"><div className="fill" style={{ width: "55%" }} /></div></div>
@@ -156,7 +157,7 @@ function BookMeta({ data, onChange }: { data: BookState; onChange: () => void })
         <Cover title={title || "Без названия"} author={author} color={color} />
         <div className="grow col" style={{ gap: 6 }}>
           <span className="eyebrow">{b.source === "paper" ? "Бумажная книга" : b.source.toUpperCase()}</span>
-          <span className="small muted">{pages(b.pages)}{b.chapters ? ` · ${b.chapters} глав` : ""}</span>
+          <span className="small muted">{pages(b.pages)}{b.chapters ? ` · ${b.chapters} ${plural(b.chapters, "глава", "главы", "глав")}` : ""}</span>
           <span className="small muted">≈ {hm(b.reading_minutes)} чтения</span>
         </div>
       </div>
@@ -198,7 +199,7 @@ function PlanPicker({ onConfirmed }: { onConfirmed: (awaitingPayment: boolean) =
           <span className="radio" />
           <div className="grow">
             <div className="row" style={{ gap: 8 }}>
-              <b className="num" style={{ fontSize: 18 }}>{o.days} дней</b>
+              <b className="num" style={{ fontSize: 18 }}>{fmtDays(o.days)}</b>
               {o.recommended && <span className="badge accent">рекомендуем</span>}
             </div>
             <div className="small muted">{decimal(o.pages_per_day)} стр. · ≈ {o.minutes_per_day} мин в день</div>
@@ -235,7 +236,7 @@ function PlanSummary({ data, onReplan, onReplace }: { data: BookState; onReplan:
   return (
     <div className="card mt-16">
       <div className="eyebrow">План</div>
-      <div className="seg-title" style={{ fontSize: 20, margin: "6px 0" }}>{data.plan_days} дней</div>
+      <div className="seg-title" style={{ fontSize: 20, margin: "6px 0" }}>{fmtDays(data.plan_days || 0)}</div>
       <div className="small muted">{data.start ? `Старт — ${dayMonth(data.start)}` : "Старт — сразу после оплаты"}</div>
       {data.awaiting_payment && (
         <button className="btn primary block mt-16" onClick={() => nav.push({ name: "pay" })}>
@@ -248,7 +249,7 @@ function PlanSummary({ data, onReplan, onReplace }: { data: BookState; onReplan:
           className="btn ghost"
           disabled={busy}
           onClick={async () => {
-            if (!(await confirmDialog(data.has_progress ? "Удалить текст книги? Пересказы и конспект останутся." : "Удалить книгу?"))) return;
+            if (!(await confirmDialog(data.has_progress ? "Удалить текст книги? Прогресс и стрик останутся." : "Удалить книгу?"))) return;
             setBusy(true);
             try {
               await api.del("/book");

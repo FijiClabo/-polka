@@ -22,7 +22,7 @@ class Verdict:
     confidence: float
     reply: str
     question: str | None
-    note_for_summary: str
+    note_for_summary: str = ""  # не используется: пересказы не сохраняются
     verified: bool = True
     provider: str | None = None
     fallback: bool = False  # засчитано автоматически из-за сбоя ИИ

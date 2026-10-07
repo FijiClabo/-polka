@@ -38,9 +38,9 @@ async def award(session: AsyncSession, user: User, ctx: AchievementContext, outb
 
 def all_with_status(codes_with_dates: dict[str, object]) -> list[dict]:
     out = []
-    for code, title, desc, emoji, order in ACHIEVEMENTS:
+    for code, title, desc, order in ACHIEVEMENTS:
         out.append({
-            "code": code, "title": title, "description": desc, "emoji": emoji, "order": order,
+            "code": code, "title": title, "description": desc, "order": order,
             "earned": code in codes_with_dates,
             "awarded_at": codes_with_dates.get(code).isoformat() if code in codes_with_dates else None,  # type: ignore[union-attr]
         })

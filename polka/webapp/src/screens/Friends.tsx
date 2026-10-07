@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api, type FriendStatus, type PairData } from "../api";
-import { IFlameSolid, IHand, ILock, IPlus } from "../components/Icons";
+import { IFlameSolid, IHand, IPlus } from "../components/Icons";
+import { BookStackIll } from "../components/Illustrations";
 import { Avatar, Empty, ErrorState, ScreenSkeleton, Skeleton, toast } from "../components/ui";
 import { firstName, STATUS_TEXT } from "../format";
 import { invalidate, useApi } from "../hooks";
@@ -47,7 +48,7 @@ export default function Friends() {
         <span className="tiny muted" style={{ fontWeight: 500 }}>стрик</span>
       </div>
       {friends.data.count === 0 ? (
-        <Empty icon="👋" title="Пока никого" text="Отправь личную ссылку — друг сразу появится здесь, без подтверждений." action={<button className="btn primary" onClick={invite}>Позвать друга</button>} />
+        <Empty icon={<BookStackIll size={150} />} title="Пока никого" text="Отправь личную ссылку — друг сразу появится здесь, без подтверждений." action={<button className="btn primary" onClick={invite}>Позвать друга</button>} />
       ) : (
         <div className="list">
           {items.map((f) => (
@@ -79,7 +80,7 @@ function FriendRow({ f, onOpen, onNudged }: { f: FriendStatus; onOpen: () => voi
             haptic("light");
             const r = await api.post<{ result: string }>(`/friends/${f.user_id}/nudge`).catch(() => ({ result: "error" }));
             setSent(true);
-            toast(r.result === "ok" ? `${firstName(f.name)} получит толчок 👋` : r.result === "disabled" ? "Толчки отключены" : "Сегодня уже толкали");
+            toast(r.result === "ok" ? `${firstName(f.name)} получит толчок` : r.result === "disabled" ? "Толчки отключены" : "Сегодня уже толкали");
             invalidate("/friends");
             onNudged();
           }}
@@ -122,7 +123,6 @@ function PairBlock({ data, reload }: { data: PairData; reload: () => void }) {
 
   const p = data.partner;
   const pDone = p.today === "done";
-  const feed = data.feed || [];
   return (
     <div className="partner-card">
       <div className="label">НАПАРНИК</div>
@@ -143,14 +143,10 @@ function PairBlock({ data, reload }: { data: PairData; reload: () => void }) {
         </div>
       </div>
       <div className="foot">
-        {p.book_title ? (
-          <>
-            {firstName(p.name)} читает «{p.book_title}»{p.plan_day && p.plan_days ? `, день ${Math.min(p.plan_day, p.plan_days)} из ${p.plan_days}` : ""}.{" "}
-            {data.same_book ? "Книга та же — пересказы открываются по мере твоего продвижения." : "Пересказы скрыты."}
-          </>
-        ) : (
-          "Напарник ещё выбирает книгу."
-        )}
+        {p.plan_day && p.plan_days
+          ? `${firstName(p.name)}: день ${Math.min(p.plan_day, p.plan_days)} из ${p.plan_days}. `
+          : `${firstName(p.name)} ещё настраивает план. `}
+        Каждый читает свою книгу — напарнику виден только прогресс.
       </div>
       {data.can_nudge && (
         <button
@@ -160,28 +156,13 @@ function PairBlock({ data, reload }: { data: PairData; reload: () => void }) {
             setBusy(true);
             haptic("light");
             const r = await api.post<{ result: string }>("/pair/nudge").catch(() => ({ result: "error" }));
-            toast(r.result === "ok" ? "Напоминание отправлено 👋" : "Сегодня уже напоминали");
+            toast(r.result === "ok" ? "Напоминание отправлено" : "Сегодня уже напоминали");
             reload();
             setBusy(false);
           }}
         >
           <IHand size={18} /> Напомнить напарнику
         </button>
-      )}
-      {data.same_book && feed.length > 0 && (
-        <div className="col mt-16">
-          {feed.map((f) => (
-            <div key={f.day_number} className="card soft" style={{ padding: 12, background: "rgba(0,0,0,0.18)" }}>
-              <div className="row between small">
-                <b>День {f.day_number} · {f.title}</b>
-                {f.locked && <ILock size={16} />}
-              </div>
-              <div className="small" style={{ color: "var(--text-2)", marginTop: 4 }}>
-                {f.locked ? "Откроется, когда ты дочитаешь до этого места." : `«${(f.text || "").split("\n— ")[0]}»`}
-              </div>
-            </div>
-          ))}
-        </div>
       )}
     </div>
   );

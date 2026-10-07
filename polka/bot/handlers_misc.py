@@ -71,7 +71,7 @@ async def cmd_book(message: Message) -> None:
         book = await s.get(Book, enr.book_id) if enr and enr.book_id else None
         if book is None:
             text = texts.add_book_prompt()
-            markup = kb([[{"text": "📖 У меня бумажная книга", "callback": "book:paper"}],
+            markup = kb([[{"text": "У меня бумажная книга", "callback": "book:paper"}],
                          [{"text": "Добавить в приложении", "webapp": "book"}]])
         else:
             kind = {"paper": "бумажная", "epub": "epub", "fb2": "fb2"}.get(book.source, book.source)

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, ApiError, track, type Me } from "./api";
+import { BookStackIll } from "./components/Illustrations";
 import { ErrorState, ScreenSkeleton, TabBar, ToastHost, type Tab } from "./components/ui";
 import { NavContext, TABS, type Nav, type Route } from "./nav";
 import AddBook from "./screens/AddBook";
-import Conspect from "./screens/Conspect";
+import Consent from "./screens/Consent";
 import Finish from "./screens/Finish";
 import FriendCard from "./screens/FriendCard";
 import Friends from "./screens/Friends";
@@ -32,7 +33,7 @@ function initialRoute(): Route {
 function applyTheme(): void {
   const t = themeName();
   document.documentElement.dataset.theme = t;
-  paintChrome(t === "dark" ? "#0e0e10" : "#f5f2ed");
+  paintChrome(t === "dark" ? "#1d1a17" : "#f3eee6");
 }
 
 export default function App() {
@@ -94,7 +95,7 @@ export default function App() {
     return (
       <div className="app">
         <div className="state" style={{ paddingTop: 120 }}>
-          <div className="ill">📚</div>
+          <div className="ill"><BookStackIll /></div>
           <h3>Открой приложение в Telegram</h3>
           <p>Приложение работает внутри Telegram: открой бота и нажми кнопку внизу чата.</p>
         </div>
@@ -118,6 +119,15 @@ export default function App() {
     );
   }
 
+  if (!me.consent) {
+    return (
+      <div className="app">
+        <Consent me={me} onDone={loadMe} />
+        <ToastHost />
+      </div>
+    );
+  }
+
   const showTabs = TABS.has(route.name);
   let screen;
   switch (route.name) {
@@ -130,7 +140,6 @@ export default function App() {
     case "profile": screen = <Profile />; break;
     case "book": screen = <AddBook />; break;
     case "friend": screen = <FriendCard id={Number(route.params?.id)} />; break;
-    case "conspect": screen = <Conspect bookId={Number(route.params?.book)} />; break;
     case "finish": screen = <Finish />; break;
     case "pay": screen = <Pay />; break;
     default: screen = <Today />;

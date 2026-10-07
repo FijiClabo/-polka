@@ -1,7 +1,8 @@
 """Карточки для шеринга: стрик, финиш, пара. Размеры 1080×1920 (сторис) и 1080×1350 (пост).
 
-Стиль повторяет макет v3: тёмный фон, тёплое свечение, Unbounded для цифр,
-Cormorant для названий книг, Onest для подписей, полка с цветными корешками.
+Спокойный «книжный» стиль, как в мини-приложении: кремовая бумага, тёплый графит, приглушённые
+терракота, горчица, шалфей и пыльно-синий. Без свечения и градиентов. Cormorant — для цифр и названий,
+Onest — для подписей, полка с цветными корешками.
 """
 
 from __future__ import annotations
@@ -13,19 +14,24 @@ from datetime import date
 from functools import lru_cache
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFont
 
 from settings import get_settings
 
 FONTS = Path(__file__).parent / "fonts"
 SIZES = {"story": (1080, 1920), "post": (1080, 1350)}
-BG = (17, 17, 19)
-CARD = (30, 30, 34)
-TEXT = (245, 241, 234)
-MUTED = (150, 145, 138)
-ORANGE = (255, 122, 61)
-AMBER = (255, 180, 67)
-VIOLET = (184, 168, 255)
+BG = (243, 238, 230)
+PAPER = (251, 248, 243)
+CARD = PAPER
+LINE = (222, 214, 203)
+TEXT = (42, 38, 35)
+TEXT_2 = (74, 67, 61)
+MUTED = (120, 111, 103)
+TERRACOTTA = (201, 100, 79)
+MUSTARD = (226, 184, 79)
+SAGE = (126, 156, 122)
+BLUE = (79, 111, 159)
+SOFT = {TERRACOTTA: (244, 227, 220), SAGE: (227, 236, 224), BLUE: (228, 234, 243)}
 MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября",
           "ноября", "декабря"]
 
@@ -36,7 +42,7 @@ def font(name: str, size: int) -> ImageFont.FreeTypeFont:
 
 
 def F_NUM(size):  # noqa: N802
-    return font("Unbounded-Bold.ttf", size)
+    return font("Cormorant-SemiBold.ttf", size)
 
 
 def F_TITLE(size):  # noqa: N802
@@ -47,7 +53,7 @@ def F_UI(size, bold=False):  # noqa: N802
     return font("Onest-SemiBold.ttf" if bold else "Onest-Regular.ttf", size)
 
 
-def hex_rgb(h: str | None, default=(226, 85, 63)) -> tuple[int, int, int]:
+def hex_rgb(h: str | None, default=TERRACOTTA) -> tuple[int, int, int]:
     try:
         h = (h or "").lstrip("#")
         if len(h) == 3:
@@ -60,14 +66,17 @@ def hex_rgb(h: str | None, default=(226, 85, 63)) -> tuple[int, int, int]:
 # --------------------------------------------------------------------------- примитивы
 
 
-def _background(w: int, h: int, glow=(120, 52, 22), glow_y: float = 0.28) -> Image.Image:
+def _background(w: int, h: int, arch_top: float = 0.08, arch_bottom: float = 0.9) -> Image.Image:
+    """Кремовый лист и светлая «арка» — как страница в книжном переплёте."""
     img = Image.new("RGB", (w, h), BG)
-    glow_layer = Image.new("RGB", (w, h), BG)
-    d = ImageDraw.Draw(glow_layer)
-    cx, cy, r = w // 2, int(h * glow_y), int(w * 0.48)
-    d.ellipse((cx - r, cy - int(r * 0.9), cx + r, cy + int(r * 0.9)), fill=glow)
-    glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(radius=w // 5))
-    return Image.blend(img, glow_layer, 0.75)
+    d = ImageDraw.Draw(img)
+    m = int(w * 0.07)
+    top, bottom = int(h * arch_top), int(h * arch_bottom)
+    r = (w - 2 * m) // 2
+    d.rounded_rectangle((m, top, w - m, bottom), radius=r, fill=PAPER)
+    d.rectangle((m, top + r, w - m, bottom), fill=PAPER)
+    d.line((m, bottom, w - m, bottom), fill=LINE, width=3)
+    return img
 
 
 def _wrap(draw: ImageDraw.ImageDraw, text: str, fnt, max_w: int, max_lines: int) -> list[str]:
@@ -95,10 +104,13 @@ def _wrap(draw: ImageDraw.ImageDraw, text: str, fnt, max_w: int, max_lines: int)
     return lines
 
 
-def _center(draw, y: int, text: str, fnt, fill, w: int) -> int:
-    tw = draw.textlength(text, font=fnt)
-    draw.text(((w - tw) / 2, y), text, font=fnt, fill=fill)
-    bbox = fnt.getbbox(text)
+LNUM = ["lnum"]  # цифры одной высоты: у Cormorant по умолчанию «старинные» с выносными элементами
+
+
+def _center(draw, y: int, text: str, fnt, fill, w: int, features: list[str] | None = None) -> int:
+    tw = draw.textlength(text, font=fnt, features=features)
+    draw.text(((w - tw) / 2, y), text, font=fnt, fill=fill, features=features)
+    bbox = fnt.getbbox(text, features=features)
     return y + bbox[3]
 
 
@@ -109,9 +121,8 @@ def _center_lines(draw, y: int, lines: list[str], fnt, fill, w: int, gap: int) -
 
 
 def _flame(img: Image.Image, cx: int, cy: int, size: int) -> None:
-    """Пламя: два вложенных «капли» с градиентом."""
-    layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    d = ImageDraw.Draw(layer)
+    """Пламя: три вложенные «капли» спокойных тонов, без свечения."""
+    d = ImageDraw.Draw(img)
 
     def drop(scale: float, color):
         pts = []
@@ -124,15 +135,9 @@ def _flame(img: Image.Image, cx: int, cy: int, size: int) -> None:
             pts.append((cx + x * size * scale, cy + y * size * scale * 1.15))
         d.polygon(pts, fill=color)
 
-    glow = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    gd = ImageDraw.Draw(glow)
-    gd.ellipse((cx - size * 1.6, cy - size * 1.8, cx + size * 1.6, cy + size * 1.2), fill=(255, 110, 40, 90))
-    glow = glow.filter(ImageFilter.GaussianBlur(size // 2))
-    img.paste(glow, (0, 0), glow)
-    drop(1.0, (255, 106, 61, 255))
-    drop(0.62, (255, 180, 67, 255))
-    drop(0.3, (255, 236, 190, 255))
-    img.paste(layer, (0, 0), layer)
+    drop(1.0, TERRACOTTA)
+    drop(0.62, MUSTARD)
+    drop(0.3, PAPER)
 
 
 def _shelf(img: Image.Image, x0: int, base_y: int, width: int, spines: list[tuple[tuple[int, int, int], float]],
@@ -148,18 +153,19 @@ def _shelf(img: Image.Image, x0: int, base_y: int, width: int, spines: list[tupl
         h = int(max_h * hfrac)
         r = 10
         d.rounded_rectangle((x, base_y - h, x + sw, base_y), radius=r, fill=color)
-        # блик и полоски на корешке
-        d.rectangle((x + 8, base_y - h + 30, x + sw - 8, base_y - h + 36), fill=tuple(min(255, c + 30) for c in color))
-        d.rectangle((x + 8, base_y - 40, x + sw - 8, base_y - 34), fill=tuple(max(0, c - 30) for c in color))
+        # тонкие полоски на корешке, как тиснение
+        stripe = tuple(min(255, c + 40) for c in color)
+        d.rectangle((x + 12, base_y - h + 30, x + sw - 12, base_y - h + 33), fill=stripe)
+        d.rectangle((x + 12, base_y - 38, x + sw - 12, base_y - 35), fill=stripe)
         if new_last and i == len(spines) - 1:
-            pill_w, pill_h = 92, 54
+            pill_w, pill_h = 96, 56
             px, py = x + sw // 2 - pill_w // 2, base_y - h - pill_h - 18
-            d.rounded_rectangle((px, py, px + pill_w, py + pill_h), radius=27, fill=ORANGE)
+            d.rounded_rectangle((px, py, px + pill_w, py + pill_h), radius=28, fill=PAPER, outline=LINE, width=3)
             f = F_UI(30, bold=True)
             tw = d.textlength("+1", font=f)
-            d.text((px + (pill_w - tw) / 2, py + 8), "+1", font=f, fill=(20, 16, 14))
+            d.text((px + (pill_w - tw) / 2, py + 9), "+1", font=f, fill=TERRACOTTA)
         x += sw + gap
-    d.rectangle((x0, base_y + 2, x0 + width, base_y + 6), fill=(235, 230, 222))
+    d.rectangle((x0, base_y + 2, x0 + width, base_y + 5), fill=TEXT)
 
 
 def _stat_boxes(img: Image.Image, y: int, w: int, stats: list[tuple[str, str, tuple]]) -> int:
@@ -170,10 +176,10 @@ def _stat_boxes(img: Image.Image, y: int, w: int, stats: list[tuple[str, str, tu
     bh = 190
     x = margin
     for value, label, color in stats:
-        d.rounded_rectangle((x, y, x + bw, y + bh), radius=34, fill=CARD)
-        fv = F_NUM(58 if len(value) <= 4 else 44)
-        tw = d.textlength(value, font=fv)
-        d.text((x + (bw - tw) / 2, y + 36), value, font=fv, fill=color)
+        d.rounded_rectangle((x, y, x + bw, y + bh), radius=30, fill=BG, outline=LINE, width=3)
+        fv = F_NUM(76 if len(value) <= 4 else 52)
+        tw = d.textlength(value, font=fv, features=LNUM)
+        d.text((x + (bw - tw) / 2, y + 22), value, font=fv, fill=color, features=LNUM)
         fl = F_UI(30)
         lines = _wrap(d, label, fl, bw - 30, 2)
         ly = y + 120
@@ -189,14 +195,14 @@ def _confetti(img: Image.Image, seed: int = 7) -> None:
     ImageDraw.Draw(img)
     rnd = random.Random(seed)
     w, h = img.size
-    colors = [AMBER, ORANGE, VIOLET, (110, 220, 160), (120, 160, 255), (255, 140, 120)]
-    for _ in range(40):
+    colors = [TERRACOTTA, MUSTARD, SAGE, BLUE, (212, 154, 140)]
+    for _ in range(28):
         x, y = rnd.randint(30, w - 30), rnd.randint(40, int(h * 0.6))
         if w * 0.08 < x < w * 0.92 and h * 0.07 < y < h * 0.27:
             continue  # не закрываем заголовок
         cw, ch = rnd.randint(10, 18), rnd.randint(22, 34)
         piece = Image.new("RGBA", (cw * 3, ch * 3), (0, 0, 0, 0))
-        ImageDraw.Draw(piece).rounded_rectangle((cw, ch, cw * 2, ch * 2), radius=4, fill=rnd.choice(colors) + (230,))
+        ImageDraw.Draw(piece).rounded_rectangle((cw, ch, cw * 2, ch * 2), radius=4, fill=rnd.choice(colors) + (200,))
         piece = piece.rotate(rnd.randint(0, 180), expand=False, resample=Image.BICUBIC)
         img.paste(piece, (x - cw, y - ch), piece)
 
@@ -204,19 +210,19 @@ def _confetti(img: Image.Image, seed: int = 7) -> None:
 def _footer(img: Image.Image, text: str) -> None:
     d = ImageDraw.Draw(img)
     w, h = img.size
-    f = F_UI(32, bold=True)
-    _center(d, h - 110, text, f, MUTED, w)
+    f = F_UI(32)
+    _center(d, h - 100, text, f, MUTED, w)
 
 
 def _avatar(img: Image.Image, cx: int, cy: int, r: int, name: str, color, ring) -> None:
     d = ImageDraw.Draw(img)
-    d.ellipse((cx - r - 8, cy - r - 8, cx + r + 8, cy + r + 8), outline=ring, width=6)
+    d.ellipse((cx - r - 10, cy - r - 10, cx + r + 10, cy + r + 10), outline=ring, width=4)
     d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=color)
     letter = (name or "?").strip()[:1].upper()
     f = F_UI(int(r * 0.9), bold=True)
     tw = d.textlength(letter, font=f)
     bbox = f.getbbox(letter)
-    d.text((cx - tw / 2, cy - (bbox[3] + bbox[1]) / 2), letter, font=f, fill=(20, 20, 22))
+    d.text((cx - tw / 2, cy - (bbox[3] + bbox[1]) / 2), letter, font=f, fill=PAPER)
 
 
 def _fmt_range(start: date | None, end: date | None) -> str:
@@ -236,17 +242,17 @@ def _png(img: Image.Image) -> bytes:
 
 def card_streak(*, name: str, streak: int, book_title: str, spine: str | None, size: str = "story") -> bytes:
     w, h = SIZES[size]
-    img = _background(w, h, glow=(110, 46, 16), glow_y=0.3)
-    d = ImageDraw.Draw(img)
     story = size == "story"
+    img = _background(w, h, arch_bottom=0.76 if story else 0.88)
+    d = ImageDraw.Draw(img)
     top = int(h * (0.16 if story else 0.1))
     _flame(img, w // 2, top + 150, 120)
     d = ImageDraw.Draw(img)
     y = top + 330
     num = str(streak)
-    fnum = F_NUM(300 if len(num) < 3 else 230)
-    y = _center(d, y, num, fnum, TEXT, w) + 50
-    y = _center(d, y, _days_label(streak), F_UI(56, bold=True), AMBER, w) + 90
+    fnum = F_NUM(340 if len(num) < 3 else 260)
+    y = _center(d, y - 30, num, fnum, TEXT, w, LNUM) + 40
+    y = _center(d, y, _days_label(streak), F_TITLE(72), TERRACOTTA, w) + 90
     if book_title:
         y = _center(d, y, "читаю каждый день", F_UI(40), MUTED, w) + 30
         lines = _wrap(d, f"«{book_title}»", F_TITLE(84), w - 160, 3)
@@ -273,32 +279,32 @@ def card_finish(*, name: str, book_title: str, plan_days: int, start: date | Non
                 best_streak: int, retells: int, partner: str | None, shelf: list[tuple[str, int]],
                 size: str = "story") -> bytes:
     w, h = SIZES[size]
-    img = _background(w, h, glow=(100, 40, 20), glow_y=0.22)
+    story = size == "story"
+    base = int(h * (0.63 if story else 0.66))
+    img = _background(w, h, arch_top=0.05, arch_bottom=(base + 4) / h)
     _confetti(img)
     d = ImageDraw.Draw(img)
-    story = size == "story"
     y = int(h * (0.13 if story else 0.07))
     rng = _fmt_range(start, end)
     if rng:
         y = _center(d, y, rng, F_UI(34, bold=True), MUTED, w) + 40
-    y = _center(d, y, "Дочитано!", F_NUM(112), TEXT, w) + 44
+    y = _center(d, y, "Дочитано!", F_NUM(140), TEXT, w) + 44
     lines = _wrap(d, f"«{book_title}» за {plan_days} {_days_word(plan_days)}", F_UI(44), w - 160, 2)
-    y = _center_lines(d, y, lines, F_UI(44), (205, 200, 192), w, 14)
+    y = _center_lines(d, y, lines, F_UI(44), TEXT_2, w, 14)
     # полка: прошлые книги + новая
     spines = []
     rnd = random.Random(len(shelf))
     for color, pages in shelf[-5:]:
         spines.append((hex_rgb(color), min(1.0, 0.55 + min(pages, 700) / 1600 + rnd.random() * 0.1)))
-    base = int(h * (0.63 if story else 0.66))
-    _shelf(img, 90, base, w - 180, spines or [((226, 85, 63), 0.8)], new_last=True)
-    stats = [(str(best_streak), "дней подряд", AMBER), (str(retells), "пересказов", TEXT)]
+    _shelf(img, 90, base, w - 180, spines or [(TERRACOTTA, 0.8)], new_last=True)
+    stats = [(str(best_streak), "дней подряд", TERRACOTTA), (str(retells), "пересказов", TEXT)]
     if partner:
-        stats.append((partner[:8], "напарник", VIOLET))
+        stats.append((partner[:8], "напарник", BLUE))
     y = _stat_boxes(img, base + 70, w, stats)
     if story:
         d = ImageDraw.Draw(img)
         lines = _wrap(d, "Пятнадцать минут в день — и книга дочитана", F_TITLE(56), w - 200, 2)
-        _center_lines(d, y + 90, lines, F_TITLE(56), (205, 200, 192), w, 10)
+        _center_lines(d, y + 90, lines, F_TITLE(56), TEXT_2, w, 10)
     _footer(img, f"{name} · {get_settings().project_name}")
     return _png(img)
 
@@ -309,19 +315,19 @@ def _days_word(n: int) -> str:
 
 def card_pair(*, name: str, partner: str, pair_streak: int, size: str = "story") -> bytes:
     w, h = SIZES[size]
-    img = _background(w, h, glow=(64, 44, 120), glow_y=0.38)
-    d = ImageDraw.Draw(img)
     story = size == "story"
+    img = _background(w, h, arch_bottom=0.7 if story else 0.88)
+    d = ImageDraw.Draw(img)
     y0 = int(h * (0.18 if story else 0.12))
-    _center(d, y0, "НАПАРНИКИ", F_UI(38, bold=True), VIOLET, w)
+    _center(d, y0, "НАПАРНИКИ", F_UI(36, bold=True), BLUE, w)
     cy = y0 + 330
-    _avatar(img, w // 2 - 290, cy, 120, name, (62, 116, 96), (120, 116, 112))
-    _avatar(img, w // 2 + 290, cy, 120, partner, (184, 168, 255), (110, 220, 160))
-    _flame(img, w // 2, cy - 140, 60)
+    _avatar(img, w // 2 - 290, cy, 120, name, SAGE, LINE)
+    _avatar(img, w // 2 + 290, cy, 120, partner, BLUE, LINE)
+    _flame(img, w // 2, cy - 150, 52)
     d = ImageDraw.Draw(img)
     num = str(pair_streak)
-    _center(d, cy - 70, num, F_NUM(200 if len(num) < 3 else 150), TEXT, w)
-    _center(d, cy + 150, "общий стрик", F_UI(40), MUTED, w)
+    _center(d, cy - 100, num, F_NUM(210 if len(num) < 3 else 160), TEXT, w, LNUM)
+    _center(d, cy + 110, "общий стрик", F_UI(36), MUTED, w)
     f = F_UI(44, bold=True)
     for nm, cx in ((name, w // 2 - 290), (partner, w // 2 + 290)):
         nm = nm[:14]
@@ -329,7 +335,7 @@ def card_pair(*, name: str, partner: str, pair_streak: int, size: str = "story")
         d.text((cx - tw / 2, cy + 160), nm, font=f, fill=TEXT)
     y = cy + 300
     lines = _wrap(d, "Читаем каждый свою книгу. Стрик растёт, только если сдали оба.", F_TITLE(64), w - 180, 3)
-    _center_lines(d, y, lines, F_TITLE(64), (225, 220, 212), w, 14)
+    _center_lines(d, y, lines, F_TITLE(64), TEXT_2, w, 14)
     _footer(img, get_settings().project_name)
     return _png(img)
 

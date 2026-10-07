@@ -36,7 +36,7 @@ export default function Finish() {
     setBusy(true);
     try {
       const r = await api.get<{ url: string }>("/share/finish/link?size=story");
-      shareStory(r.url, `Дочитано: «${data.book?.title ?? ""}» 🏁`);
+      shareStory(r.url, `Дочитано: «${data.book?.title ?? ""}»`);
       setShare(false);
     } catch (e) {
       toast((e as Error).message);
@@ -48,7 +48,7 @@ export default function Finish() {
   return (
     <div className="finish">
       <Confetti />
-      <div className="tiny muted" style={{ letterSpacing: 1.6, fontWeight: 700, textTransform: "uppercase" }}>{range}</div>
+      <div className="eyebrow">{range}</div>
       <h1>Дочитано!</h1>
       <div className="muted">«{data.book?.title}» за {days(data.plan_days)}</div>
       <div style={{ margin: "56px 20px 0" }}>
@@ -64,14 +64,14 @@ export default function Finish() {
           <div className="l">пересказов</div>
         </div>
         <div className="stat">
-          <div className="v" style={{ color: "var(--violet)", fontSize: data.partner ? 20 : 24 }}>{data.partner ? firstName(data.partner.name) : "соло"}</div>
+          <div className="v" style={{ color: "var(--blue)", fontSize: data.partner ? 22 : 26 }}>{data.partner ? firstName(data.partner.name) : "соло"}</div>
           <div className="l">{data.partner ? "напарник" : "без напарника"}</div>
         </div>
       </div>
       <div style={{ flex: 1, minHeight: 24 }} />
       <button className="btn primary block" onClick={() => { haptic("medium"); setShare(true); }}>Поделиться</button>
       <div className="btn-row mt-12">
-        <button className="btn secondary" onClick={() => data.book && nav.push({ name: "conspect", params: { book: data.book.id } })}>Конспект</button>
+        <button className="btn secondary" onClick={() => nav.tab("shelf")}>Полка</button>
         <button
           className="btn secondary"
           disabled={busy}

@@ -1,26 +1,18 @@
-/* Дизайн-токены по макету v3. Тёмная тема — основная, светлая — «бумажная». */
+/* Дизайн-токены: спокойный «книжный» стиль. Кремовая бумага, тёплый графит, книжная антиква,
+   приглушённые акценты — терракота, горчица, шалфей, пыльно-синий. Без неона и свечения.
+   Светлая тема — основная; тёмная — тёплый «вечерний» вариант для тех, у кого Telegram в тёмной теме. */
 
 :root {
   --font-ui: "Onest Variable", "Onest", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-num: "Unbounded Variable", "Unbounded", var(--font-ui);
+  --font-num: "Cormorant", "Georgia", serif;
   --font-title: "Cormorant", "Georgia", serif;
   --font-read: "Literata", "Georgia", serif;
 
-  --accent-1: #ffb547;
-  --accent-2: #ff6b3d;
-  --accent: #ff7a3d;
-  --accent-grad: linear-gradient(100deg, var(--accent-1) 0%, var(--accent-2) 100%);
-  --accent-glow: 0 10px 30px -8px rgba(255, 110, 50, 0.55);
-  --violet: #b8a8ff;
-  --green: #6ee7a7;
-  --blue: #8ea2ff;
-  --danger: #ff6b6b;
-
   --r-s: 12px;
-  --r-m: 18px;
-  --r-l: 26px;
-  --r-xl: 32px;
-  --pad: 16px;
+  --r-m: 16px;
+  --r-l: 22px;
+  --r-xl: 28px;
+  --pad: 20px;
   --tabbar-h: 64px;
   --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-safe-area-inset-bottom, 0px));
   --safe-top: var(--tg-content-safe-area-inset-top, 0px);
@@ -28,64 +20,105 @@
 }
 
 :root,
-[data-theme="dark"] {
-  --bg: #0e0e10;
-  --bg-2: #141417;
-  --surface: #1a1a1d;
-  --surface-2: #232327;
-  --surface-3: #2c2c31;
-  --line: rgba(255, 255, 255, 0.07);
-  --text: #f4f1ec;
-  --text-2: #c9c4bd;
-  --muted: #8f8b85;
-  --faint: #55524f;
-  --chip: #26262a;
-  --done-text: #2a1608;
-  --frozen-bg: #26315c;
-  --frozen-text: #9db0ff;
-  --missed-bg: #2a1d1d;
-  --missed-text: #8a5a55;
-  --future-bg: #1f1f23;
-  --future-text: #4f4c49;
-  --success-bg: rgba(110, 231, 167, 0.12);
-  --streak-pill-bg: #2a1a10;
-  --streak-pill-border: rgba(255, 122, 61, 0.35);
-  --partner-grad: radial-gradient(120% 120% at 85% 0%, #4b3a8f 0%, #2a2150 45%, #1b1730 100%);
-  --reader-bg: #18140f;
-  --reader-text: #e9e1d4;
-  --shadow: 0 12px 40px -12px rgba(0, 0, 0, 0.6);
-  --cover-shadow: 0 18px 30px -10px rgba(0, 0, 0, 0.7);
-  color-scheme: dark;
+[data-theme="light"] {
+  --bg: #f3eee6;
+  --bg-2: #ede6da;
+  --surface: #fbf8f3;
+  --surface-2: #f1ebe1;
+  --surface-3: #e6ddcf;
+  --line: rgba(42, 38, 35, 0.1);
+  --line-strong: rgba(42, 38, 35, 0.24);
+  --text: #2a2623;
+  --text-2: #4a433d;
+  --muted: #857b71;
+  --faint: #bdb2a5;
+  --chip: #ece5d9;
+
+  /* кнопки и главные действия — тёплый графит; акценты — приглушённые */
+  --ink: #2a2623;
+  --on-ink: #fbf8f3;
+  --accent: #c9644f; /* терракота: стрик, ссылки, мелкие акценты */
+  --accent-1: #c9644f;
+  --accent-2: #b5573f;
+  --accent-soft: #f4e3dc;
+  --accent-grad: var(--ink);
+  --accent-glow: none;
+  --mustard: #e2b84f;
+  --mustard-soft: #f6ebc8;
+  --green: #6f9469;
+  --sage-soft: #e3ece0;
+  --blue: #4f6f9f;
+  --blue-soft: #e4eaf3;
+  --violet: #4f6f9f;
+  --danger: #b5573f;
+
+  --done-bg: #7e9c7a;
+  --done-text: #fbf8f3;
+  --frozen-bg: #dfe7f1;
+  --frozen-text: #4f6f9f;
+  --missed-bg: #f2e1da;
+  --missed-text: #b5573f;
+  --future-bg: transparent;
+  --future-text: #a89d90;
+  --success-bg: #e3ece0;
+  --streak-pill-bg: #f4e3dc;
+  --streak-pill-border: transparent;
+  --partner-grad: #e4eaf3;
+  --partner-text: #2a2623;
+  --reader-bg: #fbf7ef;
+  --reader-text: #2a2623;
+  --shadow: 0 10px 30px -20px rgba(42, 38, 35, 0.35);
+  --cover-shadow: 0 10px 22px -12px rgba(42, 38, 35, 0.45);
+  color-scheme: light;
 }
 
-[data-theme="light"] {
-  --bg: #f5f2ed;
-  --bg-2: #efebe4;
-  --surface: #ffffff;
-  --surface-2: #f2eee8;
-  --surface-3: #e8e2d9;
-  --line: rgba(40, 30, 20, 0.08);
-  --text: #1b1714;
-  --text-2: #3d3630;
-  --muted: #7b746c;
-  --faint: #b5ada3;
-  --chip: #f0ebe4;
-  --done-text: #3a1a06;
-  --frozen-bg: #dfe5ff;
-  --frozen-text: #4459c9;
-  --missed-bg: #f6e3e0;
-  --missed-text: #b0665c;
-  --future-bg: #efebe4;
-  --future-text: #b9b1a6;
-  --success-bg: rgba(46, 160, 100, 0.12);
-  --green: #1f9d5c;
-  --violet: #6b56d6;
-  --streak-pill-bg: #fff1e8;
-  --streak-pill-border: rgba(255, 107, 61, 0.35);
-  --partner-grad: radial-gradient(120% 120% at 85% 0%, #cfc4ff 0%, #e6e0ff 50%, #f3f0ff 100%);
-  --reader-bg: #fbf7f0;
-  --reader-text: #2a241d;
-  --shadow: 0 12px 30px -16px rgba(60, 40, 20, 0.35);
-  --cover-shadow: 0 16px 26px -12px rgba(60, 30, 10, 0.45);
-  color-scheme: light;
+[data-theme="dark"] {
+  --bg: #1d1a17;
+  --bg-2: #23201c;
+  --surface: #29251f;
+  --surface-2: #312c26;
+  --surface-3: #3a342d;
+  --line: rgba(243, 238, 230, 0.09);
+  --line-strong: rgba(243, 238, 230, 0.22);
+  --text: #f1eadf;
+  --text-2: #d8cfc2;
+  --muted: #a3988a;
+  --faint: #6b6258;
+  --chip: #312c26;
+
+  --ink: #f1eadf;
+  --on-ink: #23201c;
+  --accent: #dc8a73;
+  --accent-1: #dc8a73;
+  --accent-2: #c9644f;
+  --accent-soft: #3d2d26;
+  --accent-grad: var(--ink);
+  --accent-glow: none;
+  --mustard: #e8c66a;
+  --mustard-soft: #3a3322;
+  --green: #9cba97;
+  --sage-soft: #2c3529;
+  --blue: #96acd2;
+  --blue-soft: #2a313d;
+  --violet: #96acd2;
+  --danger: #dc8a73;
+
+  --done-bg: #8eae89;
+  --done-text: #1d1a17;
+  --frozen-bg: #2a313d;
+  --frozen-text: #96acd2;
+  --missed-bg: #3d2d26;
+  --missed-text: #dc8a73;
+  --future-bg: transparent;
+  --future-text: #6b6258;
+  --success-bg: #2c3529;
+  --streak-pill-bg: #3d2d26;
+  --streak-pill-border: transparent;
+  --partner-grad: #2a313d;
+  --partner-text: #f1eadf;
+  --reader-bg: #221e19;
+  --reader-text: #ece4d6;
+  --shadow: 0 10px 30px -18px rgba(0, 0, 0, 0.6);
+  --cover-shadow: 0 10px 22px -12px rgba(0, 0, 0, 0.7);
+  color-scheme: dark;
 }

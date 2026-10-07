@@ -86,7 +86,7 @@ def app_kb(text: str = "Открыть приложение", screen: str = "tod
 
 def location_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="📍 Отправить геопозицию", request_location=True)]],
+        keyboard=[[KeyboardButton(text="Отправить геопозицию", request_location=True)]],
         resize_keyboard=True, one_time_keyboard=True,
     )
 

@@ -1,9 +1,18 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { IBooks, ICalendar, IFlame, IPeople } from "./Icons";
+import { OpenBookIll } from "./Illustrations";
 
 // ------------------------------------------------------------------ аватар
 
-const AVATAR_COLORS = ["#3E7460", "#B8A8FF", "#2F55D4", "#F2C14E", "#E98A6B", "#5BB5A2", "#C46FD6", "#7B8C9C"];
+const AVATAR_COLORS = ["#7E9C7A", "#4F6F9F", "#C9644F", "#B98B6E", "#8A6A85", "#4E6B57", "#D49A8C", "#3D4B66"];
+
+// старые яркие цвета корешков (книги, добавленные до смены дизайна) → спокойная палитра
+const CALM: Record<string, string> = {
+  "#e2553f": "#C9644F", "#3e8e6e": "#7E9C7A", "#e98a6b": "#D49A8C", "#5b63d6": "#4F6F9F", "#f2c14e": "#E2B84F",
+  "#8c5bd6": "#8A6A85", "#2f7fb8": "#3D4B66", "#c2410c": "#B98B6E", "#4d7c0f": "#4E6B57",
+};
+
+export const calmColor = (c: string): string => CALM[(c || "").toLowerCase()] || c || "#B98B6E";
 
 export function Avatar({ name, url, size = 44, ring, seed }: { name: string; url?: string | null; size?: number; ring?: "accent" | "green" | "grey"; seed?: number }) {
   const [broken, setBroken] = useState(false);
@@ -32,7 +41,7 @@ export function Cover({ title, author, color, small }: { title: string; author: 
   const right = -(h % (small ? 14 : 22));
   const surname = (author || "").split(/[ ,]/).filter(Boolean).slice(-1)[0] || author;
   return (
-    <div className={`cover${small ? " small" : ""}`} style={{ background: `linear-gradient(160deg, ${color} 0%, ${shade(color, -18)} 100%)` }}>
+    <div className={`cover${small ? " small" : ""}`} style={{ background: calmColor(color) }}>
       <div className="c-author">{surname}</div>
       <div className="c-sun" style={{ width: size, height: size, top, right }} />
       <div className="c-title">{title}</div>
@@ -69,7 +78,7 @@ export function Shelf({ items, active, onPick, slot = true, height = 200 }: { it
         const hgt = Math.round(maxH * Math.min(1, 0.55 + Math.min(it.pages, 800) / 1800 + ((hash(String(it.id)) % 10) / 100)));
         const cls = ["spine", it.reading ? "reading" : "", active === it.id ? "active" : ""].join(" ");
         return (
-          <button key={it.id} className={cls} style={{ height: hgt, background: it.color, animationDelay: `${i * 70}ms` }} onClick={() => onPick?.(it.id)} aria-label="книга">
+          <button key={it.id} className={cls} style={{ height: hgt, background: calmColor(it.color), animationDelay: `${i * 70}ms` }} onClick={() => onPick?.(it.id)} aria-label="книга">
             {it.reading && <span className="fill" style={{ height: `${Math.round((it.progress || 0) * 100)}%` }} />}
             {it.isNew && <span className="plus-one">+1</span>}
           </button>
@@ -129,7 +138,7 @@ export function ScreenSkeleton() {
 export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
     <div className="state">
-      <div className="ill">🫥</div>
+      <div className="ill"><OpenBookIll size={140} /></div>
       <h3>Не получилось загрузить</h3>
       <p>{message}</p>
       {onRetry && (
@@ -141,7 +150,7 @@ export function ErrorState({ message, onRetry }: { message: string; onRetry?: ()
   );
 }
 
-export function Empty({ icon, title, text, action }: { icon: string; title: string; text?: string; action?: ReactNode }) {
+export function Empty({ icon, title, text, action }: { icon: ReactNode; title: string; text?: string; action?: ReactNode }) {
   return (
     <div className="state">
       <div className="ill">{icon}</div>
@@ -191,7 +200,7 @@ export function Sheet({ open, onClose, children }: { open: boolean; onClose: () 
 
 // ------------------------------------------------------------------ конфетти
 
-export function Confetti({ count = 70 }: { count?: number }) {
+export function Confetti({ count = 46 }: { count?: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const c = ref.current;
@@ -203,7 +212,7 @@ export function Confetti({ count = 70 }: { count?: number }) {
     c.width = w * dpr;
     c.height = h * dpr;
     ctx.scale(dpr, dpr);
-    const colors = ["#FFB547", "#FF6B3D", "#B8A8FF", "#6EE7A7", "#7FA0FF", "#FF8C78"];
+    const colors = ["#C9644F", "#E2B84F", "#7E9C7A", "#4F6F9F", "#D49A8C"];
     // по краям экрана, чтобы не закрывать заголовок
     const edgeX = () => (Math.random() < 0.5 ? Math.random() * w * 0.26 : w * 0.74 + Math.random() * w * 0.26);
     const parts = Array.from({ length: count }, () => ({
@@ -230,7 +239,7 @@ export function Confetti({ count = 70 }: { count?: number }) {
         ctx.translate(p.x, p.y);
         ctx.rotate(p.r);
         ctx.fillStyle = p.c;
-        ctx.globalAlpha = 0.9;
+        ctx.globalAlpha = 0.75;
         ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
         ctx.restore();
       }

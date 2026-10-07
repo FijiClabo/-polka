@@ -349,3 +349,22 @@ async def test_sales_reminders_once(db, monkeypatch):
     out3 = Outbox()
     await _sales(out3)
     assert [m.kind for m in out3.messages if m.kind in ("paywall", "sub")] == ["sub"]  # второе — за день до конца
+
+
+async def test_delete_me_keeps_payment_anonymous(db, monkeypatch):
+    from db.models import Consent
+    from services.consent import give_consent
+    from services.users import delete_user_data
+
+    yk = FakeYooKassa(monkeypatch)
+    async with session_scope() as s:
+        user = await _user(s)
+        await give_consent(s, user, "bot")
+        await _with_plan(s, user)
+        p = await _paid(s, yk, user)
+        p.email, p.source = "olya@example.com", "ad_vk"
+        await delete_user_data(s, user)
+    async with session_scope() as s:
+        p = await s.scalar(select(Purchase))
+        assert p.status == "paid" and p.user_id is None and p.email is None and p.source is None
+        assert await s.scalar(select(func.count(Consent.id))) == 0

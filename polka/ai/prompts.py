@@ -9,9 +9,8 @@ VERDICT_SCHEMA: dict = {
         "confidence": {"type": "number"},
         "reply": {"type": "string"},
         "question": {"type": ["string", "null"]},
-        "note_for_summary": {"type": "string"},
     },
-    "required": ["verdict", "confidence", "reply", "question", "note_for_summary"],
+    "required": ["verdict", "confidence", "reply", "question"],
     "additionalProperties": False,
 }
 
@@ -22,13 +21,6 @@ SUMMARY_SCHEMA: dict = {
         "retell_prompt": {"type": "string"},
     },
     "required": ["summary", "retell_prompt"],
-    "additionalProperties": False,
-}
-
-CONSPECT_SCHEMA: dict = {
-    "type": "object",
-    "properties": {"intro": {"type": "string"}},
-    "required": ["intro"],
     "additionalProperties": False,
 }
 
@@ -56,8 +48,7 @@ def verdict_system(project: str) -> str:
 - verdict: "accepted" | "clarify" | "rejected"
 - confidence: от 0 до 1 — насколько ты уверен, что человек читал отрезок
 - reply: 1–3 предложения человеку на «ты». Для accepted — живая реплика по существу прочитанного (зацепись за деталь из его пересказа). Для clarify — короткая подводка к вопросу. Для rejected — мягко объясни, что пересказ не похож на этот отрезок, и предложи попробовать ещё раз.
-- question: для clarify — один вопрос; для accepted — по желанию один вопрос для размышления без спойлеров (или null); для rejected — null.
-- note_for_summary: всегда пустая строка (пересказы не сохраняются)."""
+- question: для clarify — один вопрос; для accepted — по желанию один вопрос для размышления без спойлеров (или null); для rejected — null."""
 
 
 def verdict_context(

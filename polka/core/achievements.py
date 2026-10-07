@@ -4,17 +4,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-# code, title, description, emoji, sort_order
-ACHIEVEMENTS: list[tuple[str, str, str, str, int]] = [
-    ("first_page", "Первая страница", "Первый засчитанный пересказ", "📖", 1),
-    ("week", "Неделя", "Стрик 7 дней", "🔥", 2),
-    ("two_weeks", "Две недели", "Стрик 14 дней", "⚡", 3),
-    ("iron", "Железный", "Весь план без единой заморозки и пропуска", "🛡", 4),
-    ("duet", "Дуэт", "Общий стрик пары 7 дней", "🤝", 5),
-    ("kept_word", "Месяц вдвоём", "Общий стрик пары 30 дней", "💎", 6),
-    ("comeback", "Возвращение", "Пересказ на следующий день после сгоревшего стрика", "🌱", 7),
-    ("brought_friend", "Друг в деле", "Друг по твоей ссылке сдал первый пересказ", "💌", 8),
-    ("finish", "Финиш", "Первая дочитанная книга", "🏁", 9),
+# code, title, description, sort_order
+ACHIEVEMENTS: list[tuple[str, str, str, int]] = [
+    ("first_page", "Первая страница", "Первый засчитанный пересказ", 1),
+    ("week", "Неделя", "Стрик 7 дней", 2),
+    ("two_weeks", "Две недели", "Стрик 14 дней", 3),
+    ("iron", "Железный", "Весь план без единой заморозки и пропуска", 4),
+    ("duet", "Дуэт", "Общий стрик пары 7 дней", 5),
+    ("kept_word", "Месяц вдвоём", "Общий стрик пары 30 дней", 6),
+    ("comeback", "Возвращение", "Пересказ на следующий день после сгоревшего стрика", 7),
+    ("brought_friend", "Друг в деле", "Друг по твоей ссылке сдал первый пересказ", 8),
+    ("finish", "Финиш", "Первая дочитанная книга", 9),
 ]
 
 ACH_BY_CODE = {a[0]: a for a in ACHIEVEMENTS}
@@ -71,5 +71,5 @@ def check_achievements(ctx: AchievementContext, already: set[str]) -> list[str]:
     if ctx.trigger == TRIGGER_FRIEND_FIRST and ctx.invited_friend_first_accept:
         give("brought_friend")
 
-    order = {a[0]: a[4] for a in ACHIEVEMENTS}
+    order = {a[0]: a[3] for a in ACHIEVEMENTS}
     return sorted(new, key=lambda c: order.get(c, 99))

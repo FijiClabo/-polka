@@ -11,11 +11,11 @@ const SLIDES = [
       <div style={{ width: 260 }}>
         <Shelf
           items={[
-            { id: 1, color: "#F2C14E", pages: 260 },
-            { id: 2, color: "#3E8E6E", pages: 420 },
-            { id: 3, color: "#E98A6B", pages: 520 },
-            { id: 4, color: "#5B63D6", pages: 380 },
-            { id: 5, color: "#E2553F", pages: 300, reading: true, progress: 0.4 },
+            { id: 1, color: "#E2B84F", pages: 260 },
+            { id: 2, color: "#7E9C7A", pages: 420 },
+            { id: 3, color: "#D49A8C", pages: 520 },
+            { id: 4, color: "#4F6F9F", pages: 380 },
+            { id: 5, color: "#C9644F", pages: 300, reading: true, progress: 0.4 },
           ]}
           height={210}
         />
@@ -24,12 +24,12 @@ const SLIDES = [
   },
   {
     title: "Перескажи\nза минуту",
-    text: "Прочитал отрезок — расскажи голосом или текстом, что там было. День засчитывается только после пересказа.",
+    text: "Прочитай отрезок и расскажи голосом или текстом, что там было. День засчитывается только после пересказа.",
     ill: () => (
       <div className="col" style={{ alignItems: "center" }}>
         <div className="rec-btn on" style={{ width: 120, height: 120 }}>
-          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#1b0f08" strokeWidth="2" strokeLinecap="round">
-            <rect x="9" y="3" width="6" height="11" rx="3" fill="#1b0f08" />
+          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor" />
             <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" />
           </svg>
         </div>

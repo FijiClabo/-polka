@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { RunData, RunDay } from "../api";
 import { ICheck, IFlameSolid, ISnow } from "../components/Icons";
+import { OpenBookIll } from "../components/Illustrations";
 import { Empty, ErrorState, ScreenSkeleton, Skeleton } from "../components/ui";
 import { dayMonth, plural } from "../format";
 import { useApi } from "../hooks";
@@ -33,7 +34,7 @@ export default function Run() {
       <div className="screen">
         <h1 className="h-display">Забег</h1>
         <Empty
-          icon="🗓"
+          icon={<OpenBookIll />}
           title="План ещё не построен"
           text="Добавь книгу и выбери срок — здесь появится календарь на каждый день."
           action={<button className="btn primary" onClick={() => nav.push({ name: "book" })}>Книга и план</button>}
@@ -49,14 +50,7 @@ export default function Run() {
         {data.book?.title}
         {data.finish ? ` · до ${dayMonth(data.finish, true)}` : ""}
       </div>
-      <div className="row between" style={{ marginTop: 4 }}>
-        <h1 className="h-display">Забег</h1>
-        {data.book && (
-          <button className="btn secondary small" onClick={() => nav.push({ name: "conspect", params: { book: data.book!.id } })}>
-            Конспект
-          </button>
-        )}
-      </div>
+      <h1 className="h-display" style={{ marginTop: 4 }}>Забег</h1>
 
       <div className="stats3 mt-16">
         <div className="stat">
@@ -117,19 +111,28 @@ function DayDetail({ n }: { n: number }) {
       <div className="tiny muted" style={{ marginTop: 4 }}>{dayMonth(data.date)}</div>
       {r ? (
         <>
-          <p className="quote">«{r.text.split("\n— ")[0]}»</p>
-          {r.reply && (
+          <div className="row mt-12 small" style={{ gap: 8 }}>
+            {r.verdict === "accepted" ? <span className="check-mini"><ICheck size={14} /></span> : <span className="flame-avatar" style={{ width: 22, height: 22 }}><IFlameSolid size={12} /></span>}
+            <span>
+              {r.verdict === "accepted"
+                ? `Пересказ засчитан${r.source === "voice" ? " · голосом" : " · текстом"}`
+                : r.verdict === "clarify"
+                  ? "Ждём ответ на уточняющий вопрос"
+                  : r.verdict === "rejected"
+                    ? "Пересказ не засчитан — можно сдать заново"
+                    : "Пересказ на проверке"}
+            </span>
+          </div>
+          {r.verdict === "clarify" && r.question && (
             <div className="ai-bubble">
               <span className="flame-avatar">
                 <IFlameSolid size={16} />
               </span>
-              <div className="bubble">
-                {r.reply}
-                {r.question && <> {r.question}</>}
-              </div>
+              <div className="bubble">{r.question}</div>
             </div>
           )}
           {!r.verified && r.verdict === "accepted" && <p className="tiny muted mt-8">засчитано без сверки с текстом</p>}
+          <p className="tiny muted mt-8">Тексты пересказов не храним — только отметку о сдаче.</p>
         </>
       ) : (
         <p className="small muted mt-8">

@@ -1,4 +1,4 @@
-import type { SVGProps } from "react";
+import type { ReactElement, SVGProps } from "react";
 
 type P = SVGProps<SVGSVGElement> & { size?: number };
 
@@ -22,17 +22,11 @@ export const IFlame = ({ size, ...p }: P) => (
 
 export const IFlameSolid = ({ size = 18, ...p }: P) => (
   <svg width={size} height={size} viewBox="0 0 24 24" {...p}>
-    <defs>
-      <linearGradient id="fl" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0" stopColor="#FFC15A" />
-        <stop offset="1" stopColor="#FF5F33" />
-      </linearGradient>
-    </defs>
     <path
-      fill="url(#fl)"
+      style={{ fill: "var(--accent)" }}
       d="M12 22c-4.2 0-7-2.8-7-6.6 0-2.8 1.6-4.8 3.2-6.5 1-1.1 2-2.3 2.5-4.2.1-.6.8-.7 1.1-.2 3 3.6 7.2 6 7.2 10.9 0 3.8-2.8 6.6-7 6.6Z"
     />
-    <path fill="#FFE2A8" d="M12 22c-1.8 0-3.1-1.2-3.1-3 0-2 1.5-3 2.6-4.4.2-.3.7-.2.8.1.8 1.6 2.8 2.5 2.8 4.3 0 1.8-1.3 3-3.1 3Z" />
+    <path style={{ fill: "var(--accent-soft)" }} d="M12 22c-1.8 0-3.1-1.2-3.1-3 0-2 1.5-3 2.6-4.4.2-.3.7-.2.8.1.8 1.6 2.8 2.5 2.8 4.3 0 1.8-1.3 3-3.1 3Z" />
   </svg>
 );
 
@@ -161,3 +155,77 @@ export const IText = ({ size, ...p }: P) => (
     <path d="M4 7V5h16v2M12 5v14M9 19h6" />
   </svg>
 );
+
+// ------------------------------------------------------------------ значки (линейные, без эмодзи)
+
+export const IShield = ({ size, ...p }: P) => (
+  <svg {...base(size)} {...p}>
+    <path d="M12 3.5 5 6v5.5c0 4.3 2.9 7.6 7 9 4.1-1.4 7-4.7 7-9V6Z" />
+    <path d="m9 12 2.2 2.2L15.5 10" />
+  </svg>
+);
+
+export const IBolt = ({ size, ...p }: P) => (
+  <svg {...base(size)} {...p}>
+    <path d="M13 3 5.5 13.5H12L11 21l7.5-10.5H12Z" />
+  </svg>
+);
+
+export const IBookmark = ({ size, ...p }: P) => (
+  <svg {...base(size)} {...p}>
+    <path d="M7 3.5h10a1 1 0 0 1 1 1V21l-6-4-6 4V4.5a1 1 0 0 1 1-1Z" />
+  </svg>
+);
+
+export const ISprout = ({ size, ...p }: P) => (
+  <svg {...base(size)} {...p}>
+    <path d="M12 21v-9" />
+    <path d="M12 12c0-4 2.6-6.5 7-6.5 0 4.2-2.6 6.5-7 6.5Z" />
+    <path d="M12 14.5c0-3.3-2.2-5.5-6-5.5 0 3.5 2.2 5.5 6 5.5Z" />
+  </svg>
+);
+
+export const IEnvelope = ({ size, ...p }: P) => (
+  <svg {...base(size)} {...p}>
+    <rect x="3.5" y="5.5" width="17" height="13" rx="2.5" />
+    <path d="m4.5 7 7.5 6 7.5-6" />
+  </svg>
+);
+
+export const IFlag = ({ size, ...p }: P) => (
+  <svg {...base(size)} {...p}>
+    <path d="M5.5 21V4" />
+    <path d="M5.5 4.5c4-2 7 2 13 0v9c-6 2-9-2-13 0" />
+  </svg>
+);
+
+export const ITwo = ({ size, ...p }: P) => (
+  <svg {...base(size)} {...p}>
+    <circle cx="9" cy="12" r="5.5" />
+    <circle cx="15" cy="12" r="5.5" />
+  </svg>
+);
+
+export const IAward = ({ size, ...p }: P) => (
+  <svg {...base(size)} {...p}>
+    <circle cx="12" cy="9" r="5.5" />
+    <path d="m8.5 13.5-1.5 7 5-2.5 5 2.5-1.5-7" />
+  </svg>
+);
+
+const ACH_ICONS: Record<string, (p: P) => ReactElement> = {
+  first_page: IBook,
+  week: IFlame,
+  two_weeks: IBolt,
+  iron: IShield,
+  duet: ITwo,
+  kept_word: IBookmark,
+  comeback: ISprout,
+  brought_friend: IEnvelope,
+  finish: IFlag,
+};
+
+export function AchIcon({ code, size = 28 }: { code: string; size?: number }) {
+  const I = ACH_ICONS[code] || IAward;
+  return <I size={size} />;
+}

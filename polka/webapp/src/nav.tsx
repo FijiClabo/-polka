@@ -11,7 +11,6 @@ export type RouteName =
   | "profile"
   | "book"
   | "friend"
-  | "conspect"
   | "finish"
   | "pay";
 

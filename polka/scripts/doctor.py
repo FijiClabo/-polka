@@ -15,7 +15,7 @@ from sqlalchemy import text
 
 from settings import get_settings
 
-OK, BAD, WARN = "✅", "❌", "⚠️ "
+OK, BAD, WARN = "[ок]    ", "[ошибка]", "[совет] "
 problems = 0
 
 
@@ -181,7 +181,7 @@ async def main() -> None:
     if s.dev_auth_bypass:
         say(BAD, "DEV_AUTH_BYPASS=true — проверка подписи отключена!", "Только для локального просмотра. На сервере — false")
     print()
-    print("Всё готово к работе 🎉" if problems == 0 else f"Нужно исправить пунктов: {problems}")
+    print("Всё готово к работе." if problems == 0 else f"Нужно исправить пунктов: {problems}")
     sys.exit(1 if problems else 0)
 
 

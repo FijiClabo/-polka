@@ -255,7 +255,7 @@ async def notify_admins_payment(session: AsyncSession, user: User | None, p: Pur
     src = (user.source if user and user.source else p.source) or ""
     src = f", источник: {src}" if src else ""
     for admin in get_settings().admin_ids:
-        outbox.add(OutMsg(admin, f"💳 Оплата: {texts.e(who)} — {product_title(p.product).lower()}, "
+        outbox.add(OutMsg(admin, f"Оплата: {texts.e(who)} — {product_title(p.product).lower()}, "
                                  f"{format_amount(p)} ({via}{extra}{src})", kind="admin"))
 
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type Achievement, type ShelfData } from "../api";
-import { IChevron } from "../components/Icons";
+import { IAward, IChevron } from "../components/Icons";
 import { ErrorState, ScreenSkeleton, Shelf as ShelfViz, toast, type SpineItem } from "../components/ui";
 import { dayMonth, plural } from "../format";
 import { useApi } from "../hooks";
@@ -57,12 +57,9 @@ export default function Shelf() {
               .join(" · ")}
           </div>
           <div className="btn-row mt-16">
-            <button className="btn primary" onClick={() => nav.push({ name: "conspect", params: { book: sel.book_id } })}>
-              Конспект
-            </button>
             {sel.status === "finished" ? (
               <button
-                className="btn secondary"
+                className="btn primary"
                 onClick={async () => {
                   try {
                     await api.post("/share/finish/send");
@@ -84,7 +81,7 @@ export default function Shelf() {
       )}
 
       <button className="card row mt-12" style={{ width: "100%", textAlign: "left" }} onClick={() => nav.push({ name: "profile", params: { focus: "ach" } })}>
-        <span style={{ fontSize: 26 }}>🏅</span>
+        <span className="ach-mark"><IAward size={22} /></span>
         <div className="grow">
           <b>Значки</b>
           <div className="small muted">{earned} из 9 · за реальные действия, а не за вход в приложение</div>

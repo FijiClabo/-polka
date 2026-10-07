@@ -163,7 +163,7 @@ async def cmd_run_info(message: Message) -> None:
         st = await stats(s, run)
     clock_note = ""
     if clock.is_fast() or clock.offset_seconds():
-        clock_note = f"\n🕐 Часы бота (тестовый режим): {clock.now():%d.%m %H:%M} UTC"
+        clock_note = f"\nЧасы бота (тестовый режим): {clock.now():%d.%m %H:%M} UTC"
     await message.answer(f"Забег #{run.id}, старт {texts.d(run.start_date)}, цена {run.price_rub} ₽{clock_note}\n\n{stats_text(st)}")
 
 
@@ -266,10 +266,9 @@ async def cmd_promos(message: Message) -> None:
         for c in codes:
             rows = list(await s.scalars(select(Purchase).where(Purchase.promo_code == c.code, Purchase.status == "paid")))
             rub = sum(p.amount for p in rows if p.currency == "RUB") / 100
-            stars = sum(p.amount for p in rows if p.currency == "XTR")
             users = await s.scalar(select(func.count(User.id)).where(User.source == f"promo:{c.code}"))
-            lines.append(f"{'✅' if c.active else '⛔'} {c.code} −{c.discount_percent}% · пришли {users or 0} · оплат {c.used}"
-                         f" · {rub:.0f} ₽ + {stars} ⭐{f' · {texts.e(c.owner)}' if c.owner else ''}")
+            lines.append(f"{c.code}{'' if c.active else ' (выключен)'} −{c.discount_percent}% · пришли {users or 0} · оплат {c.used}"
+                         f" · {rub:.0f} ₽{f' · {texts.e(c.owner)}' if c.owner else ''}")
     await message.answer("\n".join(lines) if codes else "Промокодов пока нет. Создать: /promo_new КОД 20")
 
 

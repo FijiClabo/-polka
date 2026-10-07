@@ -110,6 +110,8 @@ export interface Me {
   project_name: string;
   bot_username: string;
   features: { ai: boolean; voice: boolean };
+  docs: { consent: string | null; privacy: string | null; offer: string | null };
+  consent: boolean;
 }
 
 export interface RunBrief {
@@ -126,7 +128,6 @@ export interface PartnerBlock extends UserBrief {
   done_at: string | null;
   pair_streak: number;
   best_pair_streak: number;
-  book_title: string | null;
   plan_day: number | null;
   plan_days: number | null;
 }
@@ -207,7 +208,7 @@ export interface RunDay {
   date: string;
   state: string | null;
   segment: SegBrief | null;
-  retelling: { text: string; verdict: string; reply: string | null; question: string | null; verified: boolean; source: string } | null;
+  retelling: { verdict: string; question: string | null; verified: boolean; source: string } | null;
 }
 
 export interface FriendStatus {
@@ -234,16 +235,12 @@ export interface PairData {
   partner?: UserBrief & {
     today: string;
     done_at: string | null;
-    book_title: string | null;
-    book_author: string | null;
     plan_day: number | null;
     plan_days: number | null;
     streak: number;
   };
   pair_streak?: number;
   best_pair_streak?: number;
-  same_book?: boolean;
-  feed?: { day_number: number; title: string; locked: boolean; text: string | null; source: string }[];
   can_nudge?: boolean;
   nudged?: boolean;
 }
@@ -275,7 +272,6 @@ export interface Achievement {
   code: string;
   title: string;
   description: string;
-  emoji: string;
   earned: boolean;
   awarded_at: string | null;
 }
@@ -302,13 +298,6 @@ export interface BookState {
   awaiting_payment?: boolean;
 }
 
-export interface Conspect {
-  book: { id: number; title: string; author: string; spine_color: string; pages: number; source: string };
-  intro: string | null;
-  items: { day_number: number; title: string; note: string; retelling: string; ai_reply: string | null; date: string }[];
-  status?: string;
-}
-
 export interface FinishData {
   book: BookBrief | null;
   plan_days: number;
@@ -322,9 +311,7 @@ export interface FinishData {
 
 export interface PriceInfo {
   rub: number;
-  stars: number;
   list_rub: number;
-  list_stars: number;
   promo: string | null;
   discount: number;
   free: boolean;
@@ -334,13 +321,12 @@ export type Product = "run" | "month" | "year";
 
 export interface Billing {
   enabled: boolean;
-  methods: { card: boolean; stars: boolean };
+  needs_email: boolean;
   prices: Record<Product, PriceInfo>;
   promo: string | null;
-  subscription: { active: boolean; until: string | null; kind: string | null; recurring: boolean };
+  subscription: { active: boolean; until: string | null; kind: string | null };
   credits: number;
-  refund: { eligible: boolean; partial: boolean; reason: string; until: string | null };
-  guarantee_days: number;
+  freezes_sub: number;
   offer_url: string | null;
   privacy_url: string | null;
   manual_info: string;

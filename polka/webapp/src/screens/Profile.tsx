@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type Achievement, type Billing, type Me } from "../api";
-import { IBook, IChevron } from "../components/Icons";
+import { AchIcon, IBook, IChevron, IEnvelope } from "../components/Icons";
 import { Avatar, Skeleton, Switch, toast } from "../components/ui";
-import { invalidate, useApi } from "../hooks";
+import { useApi } from "../hooks";
 import { useNav } from "../nav";
-import { closeApp, confirmDialog, openExternal, openTgLink } from "../tg";
+import { closeApp, openExternal, openTgLink } from "../tg";
 import { dayMonth } from "../format";
 
 const ZONES: [string, string][] = [
@@ -26,9 +26,8 @@ const FAQ: [string, string][] = [
   ["Как проверяется пересказ?", "ИИ сверяет твой пересказ с текстом отрезка и проверяет одно: прочитан ли отрезок. Не оценивает стиль и грамотность. Если неясно — задаст один вопрос. Сомнение всегда в твою пользу."],
   ["Что если пропущу день?", "Раз в неделю срабатывает заморозка — стрик не сгорит. Пропущенный отрезок можно догнать на следующий день, а в последние дни и в дни отсрочки — сдавать по два."],
   ["Когда начинается и заканчивается день?", "В 04:00 по твоему времени. Всё, что сдано до четырёх утра, относится к прошедшему дню."],
-  ["Кто видит мои пересказы?", "Только ты. Напарник — если вы читаете одну книгу, и только ту часть, которую он уже прочитал сам. Друзья видят книгу, стрик и полку, но не пересказы."],
-  ["Сколько стоит?", "Одна книга — разовая оплата за забег до финиша. Абонемент на месяц или год — книга за книгой без доплат. Первый раз можно попробовать бесплатный спринт на 7 дней."],
-  ["Как вернуть деньги?", "В первые 3 дня после оплаты — кнопкой «Вернуть деньги» здесь, в профиле, или командой /money_back в чате, без вопросов. Позже — заявкой на возврат за неиспользованную часть."],
+  ["Кто видит мои пересказы?", "Никто из людей. Пересказ проходит только автоматическую проверку и сразу удаляется — остаётся лишь отметка, что день сдан. Напарник видит твой прогресс, друзья — книгу, стрик, значки и полку."],
+  ["Сколько стоит?", "Одна книга — разовая оплата за забег до финиша. Абонемент на месяц или год — книга за книгой без доплат. Оплата разовая, без автопродления. Первый раз можно попробовать бесплатный спринт на 7 дней."],
   ["Бумажная книга?", "Можно. Отрезки — по страницам, проверка мягче: без сверки с текстом, максимум два уточняющих вопроса."],
 ];
 
@@ -124,7 +123,7 @@ export default function Profile() {
           }
         }}
       >
-        <span style={{ fontSize: 20 }}>💌</span>
+        <IEnvelope size={22} />
         <div className="grow">
           <b>Позвать друга</b>
           <div className="small muted">По личной ссылке — сразу в друзья, а новичку — бесплатный спринт</div>
@@ -142,7 +141,7 @@ export default function Profile() {
         <div className="ach-grid">
           {ach.data.items.map((a) => (
             <div key={a.code} className={`ach${a.earned ? " on" : ""}`}>
-              <div className="e">{a.emoji}</div>
+              <div className="e"><AchIcon code={a.code} /></div>
               <div className="t">{a.title}</div>
               <div className="d">{a.description}</div>
             </div>
@@ -175,48 +174,16 @@ export default function Profile() {
 
 function AccessCard() {
   const nav = useNav();
-  const { data, reload } = useApi<Billing>("/billing");
-  const [busy, setBusy] = useState(false);
+  const { data } = useApi<Billing>("/billing");
   if (!data) return <Skeleton h={90} />;
   const sub = data.subscription;
-  const cancelSub = async () => {
-    if (!(await confirmDialog("Отключить автопродление? Абонемент будет действовать до конца оплаченного срока."))) return;
-    setBusy(true);
-    try {
-      const r = await api.post<{ message: string }>("/billing/cancel");
-      toast(r.message);
-      reload();
-    } catch (e) {
-      toast((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const refund = async () => {
-    const q = data.refund.eligible
-      ? "Вернуть деньги за последнюю оплату? Доступ к забегу закроется."
-      : `${data.refund.reason} Подать заявку?`;
-    if (!(await confirmDialog(q))) return;
-    setBusy(true);
-    try {
-      const r = await api.post<{ result: string }>("/billing/refund");
-      toast(r.result === "ok" ? "Деньги возвращены" : "Заявка принята — ответим в течение 10 дней");
-      invalidate();
-      reload();
-      nav.refreshMe();
-    } catch (e) {
-      toast((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
   return (
     <>
       <div className="section-title">Доступ</div>
       <div className="card sub-card">
         <div className="row between">
           <span>Абонемент</span>
-          <b className="small">{sub.active ? `до ${dayMonth(sub.until)}${sub.recurring ? " · автопродление" : ""}` : "нет"}</b>
+          <b className="small">{sub.active ? `до ${dayMonth(sub.until)}` : "нет"}</b>
         </div>
         {data.credits > 0 && (
           <div className="row between">
@@ -228,23 +195,14 @@ function AccessCard() {
           <div className="tiny muted mt-8">
             {data.purchases.slice(0, 3).map((p) => (
               <div key={p.id}>
-                {dayMonth(p.date)} · {p.product === "run" ? "забег" : p.product === "month" ? "месяц" : "год"} · {p.amount}
-                {p.status === "refunded" ? " · возвращено" : p.status === "refund_requested" ? " · возврат в работе" : ""}
+                {dayMonth(p.date)} · {p.product === "run" ? "одна книга" : p.product === "month" ? "месяц" : "год"} · {p.amount}
               </div>
             ))}
           </div>
         )}
         <div className="btn-row mt-12">
-          <button className="btn secondary" onClick={() => nav.push({ name: "pay" })}>{sub.active ? "Тарифы" : "Купить"}</button>
-          {(data.refund.eligible || data.refund.partial) && (
-            <button className="btn ghost" disabled={busy} onClick={refund}>
-              {data.refund.eligible ? "Вернуть деньги" : "Заявка на возврат"}
-            </button>
-          )}
+          <button className="btn secondary" onClick={() => nav.push({ name: "pay" })}>{sub.active ? "Тарифы" : "Открыть доступ"}</button>
         </div>
-        {sub.active && sub.recurring && (
-          <button className="link tiny mt-8" disabled={busy} onClick={cancelSub}>Отключить автопродление</button>
-        )}
         {(data.offer_url || data.privacy_url) && (
           <div className="tiny muted mt-8">
             {data.offer_url && <button className="link tiny" onClick={() => openExternal(data.offer_url!)}>Оферта</button>}

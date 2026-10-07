@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{{PROJECT}} — дочитай свою книгу в Telegram</title>
-<meta name="description" content="{{PROJECT}} — сервис чтения в Telegram. Добавь свою книгу и читай по 15 минут в день, а потом за минуту перескажи прочитанное. Стрик, напарник и спокойный план до последней страницы. Первые 7 дней — бесплатно.">
+<meta name="description" content="{{PROJECT}} — сервис чтения в Telegram. Добавь свою книгу и читай по 15 минут в день, а потом за минуту перескажи прочитанное. Стрик, напарник и спокойный план до последней страницы. Пробный спринт на 7 дней — бесплатно.">
 <meta name="theme-color" content="#F3EEE6">
 <meta name="color-scheme" content="light">
 <meta name="format-detection" content="telephone=no">
@@ -60,7 +60,7 @@ em{font-style:italic}
 .btn-main:hover{background:var(--ink-hover);border-color:var(--ink-hover)}
 .btn-line{background:transparent;color:var(--ink);border:1px solid rgba(42,38,35,.7)}
 .btn-line:hover{background:rgba(42,38,35,.05);border-color:var(--ink)}
-.btn-sm{min-height:40px;padding:0 15px;border-radius:12px;font-size:14px}
+.btn-sm{min-height:40px;padding:0 15px;border-radius:12px;font-size:14px;white-space:nowrap;gap:0}
 @media (prefers-reduced-motion:reduce){.btn,.btn svg{transition:none}.btn:hover svg{transform:none}}
 
 .eyebrow{font:500 12.5px/1.4 var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--terra-ink)}
@@ -74,6 +74,8 @@ em{font-style:italic}
 .nav{display:none;gap:30px}
 .nav a{color:var(--muted);text-decoration:none;font-size:15px}
 .nav a:hover{color:var(--ink)}
+@media (max-width:374px){.btn-sm{padding:0 12px;font-size:13.5px}.top-in{gap:10px}.top-in .logo{font-size:25px}}
+@media (max-width:339px){.xs-hide{display:none}}
 
 /* герой */
 .hero{padding:36px 0 24px}
@@ -244,7 +246,7 @@ em{font-style:italic}
       <a href="#pricing">Тарифы</a>
       <a href="#faq">Вопросы</a>
     </nav>
-    <a class="btn btn-line btn-sm" href="{{BOT_URL}}" rel="noopener">Открыть в Telegram</a>
+    <a class="btn btn-line btn-sm" href="{{BOT_URL}}" rel="noopener"><span class="xs-hide">Открыть в&nbsp;</span>Telegram</a>
   </div>
 </header>
 
@@ -259,7 +261,7 @@ em{font-style:italic}
       <div class="cta">
         <a class="btn btn-main" href="{{BOT_URL}}" rel="noopener">Начать в Telegram
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
-        <p class="cta-note">Первые 7&nbsp;дней&nbsp;— бесплатно</p>
+        <p class="cta-note">Пробный спринт на&nbsp;7&nbsp;дней&nbsp;— бесплатно</p>
       </div>
     </div>
 
@@ -353,7 +355,7 @@ em{font-style:italic}
         <span class="step-n" aria-hidden="true">2</span>
         <div>
           <h3>Выбери срок</h3>
-          <p>От&nbsp;21 до&nbsp;60&nbsp;дней&nbsp;— бот подскажет, что подойдёт под объём книги, и&nbsp;разделит её на&nbsp;отрезки минут по&nbsp;15.</p>
+          <p>От&nbsp;21 до&nbsp;60&nbsp;дней&nbsp;— бот подскажет, что подойдёт под объём книги, и&nbsp;разделит её на&nbsp;отрезки примерно по&nbsp;15&nbsp;минут.</p>
         </div>
       </li>
       <li class="step">
@@ -414,11 +416,11 @@ em{font-style:italic}
         <h2 id="pair-title">Читать с&nbsp;напарником проще</h2>
       </div>
       <p>Позови друга по&nbsp;ссылке из&nbsp;бота. Книги у&nbsp;вас могут быть разными, а&nbsp;стрик&nbsp;— общий: он растёт, только когда день сдали оба.</p>
-      <p>Напарник видит только прогресс: день плана, стрик и&nbsp;сдан&nbsp;ли сегодняшний отрезок. Тексты пересказов не&nbsp;видит никто.</p>
+      <p>Напарник видит только прогресс: день плана, стрик и&nbsp;сдан&nbsp;ли сегодняшний отрезок. Тексты пересказов он не&nbsp;видит&nbsp;— они вообще не&nbsp;хранятся.</p>
       <a class="btn btn-line" href="{{BOT_URL}}" rel="noopener">Начать и&nbsp;позвать друга</a>
     </div>
 
-    <div class="duo" role="img" aria-label="Пример карточки напарников: общий стрик 9 дней; ты&nbsp;— день 12 из 30, сдано; напарник&nbsp;— день 9 из 21, ещё читает">
+    <div class="duo" role="img" aria-label="Пример карточки напарников: общий стрик 9 дней; ты&nbsp;— день 12 из 30, сдано; напарник&nbsp;— день 11 из 21, ещё читает">
       <div class="duo-top">
         <div>
           <p class="duo-label">Общий стрик</p>
@@ -439,7 +441,7 @@ em{font-style:italic}
       </div>
       <div class="duo-row">
         <span class="ava ava-2" aria-hidden="true">А</span>
-        <div class="duo-who"><b>Аня</b><span>день 9 из 21</span></div>
+        <div class="duo-who"><b>Аня</b><span>день 11 из 21</span></div>
         <span class="state state-wait">ещё читает</span>
       </div>
       <p class="duo-foot"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></svg>Видно только прогресс. Пересказы не&nbsp;хранятся и&nbsp;никому не&nbsp;показываются.</p>
@@ -501,8 +503,8 @@ em{font-style:italic}
       <article class="plan">
         <p class="plan-tag">Чтобы читать постоянно</p>
         <h3>Абонемент</h3>
-        <p class="price">{{PRICE_MONTH}}<small>в&nbsp;месяц</small></p>
-        <p class="price-sub">или {{PRICE_YEAR}} в&nbsp;год</p>
+        <p class="price">{{PRICE_MONTH}}<small>за&nbsp;месяц</small></p>
+        <p class="price-sub">или {{PRICE_YEAR}} за&nbsp;год</p>
         <ul>
           <li><svg class="tick" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.3 4.3L19 7.2"/></svg>Забеги без доплат&nbsp;— книга за&nbsp;книгой</li>
           <li><svg class="tick" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.3 4.3L19 7.2"/></svg>Вторая заморозка в&nbsp;неделю</li>
@@ -511,7 +513,7 @@ em{font-style:italic}
         <a class="btn btn-line" href="{{BOT_URL}}" rel="noopener">Оформить абонемент</a>
       </article>
     </div>
-    <p class="pay"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 9.5h19M6 15h4"/></svg><span>Оплата внутри бота&nbsp;— картой или через СБП, через ЮKassa. Нажимаешь «Оплатить», и&nbsp;открывается платёжная страница. Без подписок и&nbsp;автопродления.</span></p>
+    <p class="pay"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 9.5h19M6 15h4"/></svg><span>Оплата&nbsp;— внутри бота: выбираешь тариф, нажимаешь «Оплатить», и&nbsp;открывается платёжная страница ЮKassa&nbsp;— банковская карта, СБП и&nbsp;другие способы. Оплата разовая, без автопродления.</span></p>
   </div>
 </section>
 
@@ -548,7 +550,7 @@ em{font-style:italic}
       <details name="faq">
         <summary>Кто видит мои пересказы?<span class="plus" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M6 1v10M1 6h10"/></svg></span></summary>
         <div class="ans">
-          <p>Никто. Пересказ&nbsp;— текстом или голосом&nbsp;— нужен только для проверки и&nbsp;удаляется сразу после неё. Сохраняется лишь отметка, что день сдан.</p>
+          <p>Никто из&nbsp;людей. Пересказ&nbsp;— текстом или голосом&nbsp;— проходит только автоматическую проверку и&nbsp;удаляется сразу после неё. Сохраняется лишь отметка, что день сдан.</p>
           <p>Напарник видит только прогресс: день плана, стрик и&nbsp;сдан&nbsp;ли день. Друзья&nbsp;— твою книгу, стрик и&nbsp;полку дочитанных книг. Удалить все свои данные можно командой <code>/delete_me</code>.</p>
         </div>
       </details>
@@ -562,7 +564,7 @@ em{font-style:italic}
       <details name="faq">
         <summary>Что, если не&nbsp;успею к&nbsp;концу плана?<span class="plus" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M6 1v10M1 6h10"/></svg></span></summary>
         <div class="ans">
-          <p>В&nbsp;конце плана есть ещё три дня отсрочки&nbsp;— их&nbsp;хватит, чтобы спокойно догнать последние отрезки.</p>
+          <p>В&nbsp;конце плана есть ещё три дня отсрочки&nbsp;— чтобы спокойно догнать последние отрезки.</p>
         </div>
       </details>
       <details name="faq">
@@ -607,7 +609,7 @@ em{font-style:italic}
     <div class="cta">
       <a class="btn btn-main" href="{{BOT_URL}}" rel="noopener">Начать в Telegram
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
-      <p class="cta-note">Первые 7&nbsp;дней&nbsp;— бесплатно</p>
+      <p class="cta-note">Пробный спринт на&nbsp;7&nbsp;дней&nbsp;— бесплатно</p>
     </div>
   </div>
 </section>

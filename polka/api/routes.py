@@ -178,7 +178,14 @@ def _me(u: User, enr: Enrollment | None, view: DayView | None) -> dict:
         "project_name": s.project_name,
         "bot_username": bot_username(),
         "features": {"ai": get_llm().available, "voice": bool(build_stt())},
+        "docs": _docs(),
     }
+
+
+def _docs() -> dict:
+    base = get_settings().public_url
+    base = base.rstrip("/") if base.startswith("http") else ""
+    return {k: (f"{base}/{k}" if base else None) for k in ("consent", "privacy", "offer")}
 
 
 @router.get("/me")
@@ -258,7 +265,7 @@ async def _partner_block(s: AsyncSession, enr: Enrollment | None) -> dict | None
         return None
     st = await public_status(s, partner)
     return {**user_brief(partner), "today": st.today, "done_at": st.done_at, "pair_streak": pair.streak,
-            "best_pair_streak": pair.best_streak, "book_title": st.book_title, "plan_day": st.plan_day,
+            "best_pair_streak": pair.best_streak, "plan_day": st.plan_day,
             "plan_days": st.plan_days}
 
 
@@ -395,7 +402,6 @@ async def get_pair(user: User = Depends(current_user), s: AsyncSession = Depends
     nudged = partner.id in await nudged_today(s, user)
     return {
         "has_pair": True, "partner": {**user_brief(partner), "today": st.today, "done_at": st.done_at,
-                                      "book_title": st.book_title, "book_author": st.book_author,
                                       "plan_day": st.plan_day, "plan_days": st.plan_days, "streak": st.streak},
         "pair_streak": pair.streak, "best_pair_streak": pair.best_streak, "can_nudge": st.today in ("reading", "burned") and not nudged, "nudged": nudged,
     }
@@ -515,7 +521,7 @@ async def _billing_state(s: AsyncSession, user: User) -> dict:
     enr = await current_enrollment(s, user.id)
     book = await s.get(Book, enr.book_id) if enr and enr.book_id else None
     purchases = list(await s.scalars(
-        select(Purchase).where(Purchase.user_id == user.id, Purchase.status.in_(("paid", "refunded")))
+        select(Purchase).where(Purchase.user_id == user.id, Purchase.status == "paid")
         .order_by(Purchase.id.desc()).limit(10)
     ))
     return {

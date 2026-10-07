@@ -20,7 +20,7 @@ from settings import get_settings
 
 log = logging.getLogger(__name__)
 
-SPINE_COLORS = ["#E2553F", "#3E8E6E", "#E98A6B", "#5B63D6", "#F2C14E", "#8C5BD6", "#2F7FB8", "#C2410C", "#4D7C0F"]
+SPINE_COLORS = ["#C9644F", "#7E9C7A", "#4F6F9F", "#E2B84F", "#8A6A85", "#4E6B57", "#B98B6E", "#3D4B66", "#D49A8C"]  # спокойные «книжные» корешки
 
 
 def pick_spine_color(seed: int) -> str:

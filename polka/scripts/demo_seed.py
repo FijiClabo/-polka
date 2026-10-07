@@ -52,7 +52,7 @@ class DemoLLM:
         DemoLLM.n += 1
         reply = REPLIES[DemoLLM.n % len(REPLIES)]
         return LLMResult(json.dumps({"verdict": "accepted", "confidence": 0.9, "reply": reply,
-                                     "question": None, "note_for_summary": "Герой принимает решение и меняет привычный ход дня."},
+                                     "question": None},
                                     ensure_ascii=False), "demo", "demo")
 
 
@@ -80,7 +80,7 @@ async def main() -> None:
     start = today - timedelta(days=11)
     async with session_scope() as s:
         if not await s.scalar(select(Achievement.code).limit(1)):
-            for code, title, desc, _e, order in ACHIEVEMENTS:
+            for code, title, desc, order in ACHIEVEMENTS:
                 s.add(Achievement(code=code, title=title, description=desc, sort_order=order))
         await s.execute(delete(Run).where(Run.title.like("%(демо)%")))
         for tg in (1001, 1002, 1003, 1004, 1005):

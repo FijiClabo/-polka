@@ -243,6 +243,7 @@ async def forget_texts(session: AsyncSession, r: Retelling) -> None:
     Остаётся только факт сдачи — день, результат, время — для стрика и прогресса.
     """
     r.raw_text = ""
+    r.voice_file_id = None  # по идентификатору голосовое можно было бы скачать из Telegram снова
     r.ai_reply = None
     r.ai_question = None
     r.note_for_summary = None

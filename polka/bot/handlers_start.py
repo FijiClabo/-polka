@@ -127,7 +127,7 @@ async def cb_consent(call: CallbackQuery) -> None:
         await give_consent(s, user, "bot")
         onboarded = user.onboarding_step == "done"
     if onboarded:
-        await call.message.answer("Спасибо! Можно продолжать 📖")
+        await call.message.answer("Спасибо! Можно продолжать.")
         return
     await ask_tz(call.message)
 
@@ -327,7 +327,7 @@ async def trial_answer(message: Message, state: FSMContext, text: str) -> None:
         await message.answer(texts.rejected(v.reply), reply_markup=kb([[{"text": texts.TRIAL_SKIP, "callback": "trial:skip"}]]))
         return
     if v.verdict == "accepted":
-        await message.answer(f"✅ <b>Засчитано.</b> {texts.e(v.reply)}")
+        await message.answer(f"<b>Засчитано.</b> {texts.e(v.reply)}")
     else:
         await message.answer(texts.e(v.reply))
     await finish_trial(message, state)
@@ -377,7 +377,7 @@ async def after_onboarding(bot: Bot, chat_id: int, user_id: int, inviter_name: s
 async def send_book_prompt(bot: Bot, chat_id: int) -> None:
     await bot.send_message(
         chat_id, texts.add_book_prompt(),
-        reply_markup=kb([[{"text": "📖 У меня бумажная книга", "callback": "book:paper"}],
+        reply_markup=kb([[{"text": "У меня бумажная книга", "callback": "book:paper"}],
                          [{"text": "Добавить в приложении", "webapp": "book"}]]),
     )
 

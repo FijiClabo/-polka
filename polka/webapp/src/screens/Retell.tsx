@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { api, type RetellResult, type Today } from "../api";
-import { ICheck, IClose, IFlameSolid, IRefresh } from "../components/Icons";
+import { AchIcon, ICheck, IClose, IFlameSolid, IMic, IRefresh } from "../components/Icons";
+import { BookStackIll, CupIll, OpenBookIll } from "../components/Illustrations";
 import { BARS, fmtTime, useRecorder } from "../components/recorder";
 import { ErrorState, ScreenSkeleton } from "../components/ui";
+import { plural } from "../format";
 import { invalidate, useApi } from "../hooks";
 import { useNav } from "../nav";
 import { closeApp, haptic } from "../tg";
@@ -10,16 +12,16 @@ import { closeApp, haptic } from "../tg";
 const MAX_SEC = 180;
 const MIN_CHARS = 51; // «длиннее 50 знаков», как в правилах бота
 
-const ACH: Record<string, [string, string]> = {
-  first_page: ["📖", "Первая страница"],
-  week: ["🔥", "Неделя"],
-  two_weeks: ["⚡", "Две недели"],
-  iron: ["🛡", "Железный"],
-  duet: ["🤝", "Дуэт"],
-  kept_word: ["💎", "Месяц вдвоём"],
-  comeback: ["🌱", "Возвращение"],
-  brought_friend: ["💌", "Друг в деле"],
-  finish: ["🏁", "Финиш"],
+const ACH: Record<string, string> = {
+  first_page: "Первая страница",
+  week: "Неделя",
+  two_weeks: "Две недели",
+  iron: "Железный",
+  duet: "Дуэт",
+  kept_word: "Месяц вдвоём",
+  comeback: "Возвращение",
+  brought_friend: "Друг в деле",
+  finish: "Финиш",
 };
 
 type Phase = "compose" | "sending" | "result";
@@ -104,9 +106,9 @@ export default function Retell() {
       <div className="retell">
         <TopBar />
         <div className="state">
-          <div className="ill">{t.state === "done_today" ? "✅" : "📚"}</div>
+          <div className="ill">{t.state === "done_today" ? <CupIll /> : <BookStackIll />}</div>
           <h3>{t.state === "done_today" ? "На сегодня всё сдано" : "Сейчас пересказывать нечего"}</h3>
-          <p>{t.state === "done_today" ? (t.next_segment ? `Завтра: «${t.next_segment.title}».` : "Отличная работа.") : "Загляни на главный экран — там видно, что дальше."}</p>
+          <p>{t.state === "done_today" ? (t.next_segment ? `Завтра: «${t.next_segment.title}».` : "Можно отдыхать.") : "Загляни на главный экран — там видно, что дальше."}</p>
           <button className="btn secondary" onClick={nav.back}>Назад</button>
         </div>
       </div>
@@ -204,7 +206,9 @@ export default function Retell() {
             autoFocus
           />
           <div className={`counter${text.trim().length >= minChars ? " ok" : ""}`}>
-            {text.trim().length < minChars ? `ещё ${minChars - text.trim().length} знаков` : "можно отправлять"}
+            {text.trim().length < minChars
+              ? `ещё ${minChars - text.trim().length} ${plural(minChars - text.trim().length, "знак", "знака", "знаков")}`
+              : "можно отправлять"}
           </div>
           <div style={{ flex: 1 }} />
           <button className="btn primary block mt-16" disabled={text.trim().length < minChars} onClick={sendText}>
@@ -244,10 +248,19 @@ function TopBar() {
 
 function MicGlyph() {
   return (
-    <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#1b0f08" strokeWidth="2" strokeLinecap="round">
-      <rect x="9" y="3" width="6" height="11" rx="3" fill="#1b0f08" />
+    <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor" />
       <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" />
     </svg>
+  );
+}
+
+function Heard({ text }: { text: string }) {
+  return (
+    <p className="small muted mt-24 row" style={{ gap: 8, alignItems: "flex-start" }}>
+      <IMic size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+      <span>{text}</span>
+    </p>
   );
 }
 
@@ -278,7 +291,7 @@ function ResultView({ r, onAgain }: { r: RetellResult; onAgain: () => void }) {
             </div>
           )}
         </div>
-        {r.heard && <p className="small muted mt-24">🎙 {r.heard}</p>}
+        {r.heard && <Heard text={r.heard} />}
         <div className="ai-bubble">
           <span className="flame-avatar"><IFlameSolid size={16} /></span>
           <div className="bubble">
@@ -289,21 +302,21 @@ function ResultView({ r, onAgain }: { r: RetellResult; onAgain: () => void }) {
         {!r.verified && <p className="tiny muted mt-12">Засчитано без сверки с текстом.</p>}
         {r.achievements.length > 0 && (
           <div className="card soft mt-16 row">
-            <span style={{ fontSize: 30 }}>{ACH[r.achievements[0]]?.[0] ?? "🏅"}</span>
+            <span className="ach-mark"><AchIcon code={r.achievements[0]} size={24} /></span>
             <div>
-              <b>Новый значок{r.achievements.length > 1 ? "и" : ""}</b>
-              <div className="small muted">{r.achievements.map((c) => ACH[c]?.[1] ?? c).join(", ")}</div>
+              <b>{r.achievements.length > 1 ? "Новые значки" : "Новый значок"}</b>
+              <div className="small muted">{r.achievements.map((c) => ACH[c] ?? c).join(", ")}</div>
             </div>
           </div>
         )}
         {r.partner_name && (
           <p className="small muted mt-16 center">
-            {r.partner_done ? `${r.partner_name}: день тоже сдан — общий стрик растёт 🤝` : `${r.partner_name} получит весточку: теперь очередь напарника.`}
+            {r.partner_done ? `${r.partner_name}: день тоже сдан — общий стрик растёт.` : `${r.partner_name} получит весточку: теперь очередь напарника.`}
           </p>
         )}
         <div style={{ flex: 1 }} />
         {r.finished ? (
-          <p className="center muted">Это был последний отрезок… 🎉</p>
+          <p className="center muted">Это был последний отрезок книги.</p>
         ) : (
           <div className="col mt-16">
             {r.can_submit_more && (
@@ -324,7 +337,7 @@ function ResultView({ r, onAgain }: { r: RetellResult; onAgain: () => void }) {
           <div className="mark q"><span style={{ fontSize: 44, fontWeight: 700 }}>?</span></div>
           <h2 className="h-display" style={{ marginTop: 22, fontSize: 28 }}>Уточню</h2>
         </div>
-        {r.heard && <p className="small muted mt-24">🎙 {r.heard}</p>}
+        {r.heard && <Heard text={r.heard} />}
         <div className="ai-bubble">
           <span className="flame-avatar"><IFlameSolid size={16} /></span>
           <div className="bubble">{r.reply}</div>
@@ -340,7 +353,7 @@ function ResultView({ r, onAgain }: { r: RetellResult; onAgain: () => void }) {
     return (
       <div className="retell">
         <div className="verdict">
-          <div className="mark q"><span style={{ fontSize: 40 }}>🤔</span></div>
+          <div className="mark q"><IRefresh size={36} /></div>
           <h2 className="h-display" style={{ marginTop: 22, fontSize: 28 }}>Не похоже</h2>
         </div>
         <div className="ai-bubble">
@@ -357,8 +370,8 @@ function ResultView({ r, onAgain }: { r: RetellResult; onAgain: () => void }) {
   return (
     <div className="retell">
       <div className="state" style={{ paddingTop: 80 }}>
-        <div className="ill">{r.status === "queued" ? "⏳" : "📚"}</div>
-        <h3>{r.status === "queued" ? "Принял" : r.status === "too_short" ? "Чуть подробнее" : "Готово"}</h3>
+        <div className="ill">{r.status === "too_short" ? <OpenBookIll /> : <BookStackIll />}</div>
+        <h3>{r.status === "queued" ? "Пересказ получен" : r.status === "too_short" ? "Чуть подробнее" : "Готово"}</h3>
         <p>{r.message}</p>
         <button className="btn primary" onClick={r.status === "too_short" ? onAgain : () => nav.tab("today")}>
           {r.status === "too_short" ? "Дописать" : "Хорошо"}

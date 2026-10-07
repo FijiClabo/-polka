@@ -54,7 +54,7 @@ def welcome() -> list[str]:
         "Каждый день читаешь свой отрезок — в приложении, в любой читалке или на бумаге — "
         "и за 30–60 секунд <b>пересказываешь</b> его мне голосом или текстом.\n\n"
         "Я не экзаменатор: просто убеждаюсь, что отрезок прочитан. Если что-то неясно — задам один вопрос.",
-        "День засчитывается только после пересказа. Дни подряд — это <b>стрик</b> 🔥\n\n"
+        "День засчитывается только после пересказа. Дни подряд — это <b>стрик</b>.\n\n"
         "Раз в неделю есть заморозка: если пропустишь день, стрик не сгорит. "
         "А с напарником стрик общий — подводить друг друга не хочется.",
     ]
@@ -96,7 +96,7 @@ def add_book_prompt() -> str:
     )
 
 
-BOOK_RECEIVED = "Файл получен, разбираю. Это займёт до минуты ⏳"
+BOOK_RECEIVED = "Файл получен, разбираю. Это займёт до минуты."
 BOOK_TOO_BIG = "Файл больше {mb} МБ — Telegram не даст мне его скачать. Попробуй другой файл или добавь книгу как бумажную."
 BOOK_UNSUPPORTED = "Пока умею только epub и fb2. Можно найти книгу в другом формате или добавить её как бумажную."
 BOOK_NOT_A_BOOK = "Это не похоже на книгу. Я жду файл epub или fb2."
@@ -150,11 +150,11 @@ PAPER_BAD_PAGES = "Нужно число от 20 до 3000."
 
 def status_waiting_payment() -> str:
     s = get_settings()
-    return f"Ты в списке забега. Ожидаем оплату 💳\n\n{e(s.payment_info)}"
+    return f"Ты в списке забега. Ожидаем оплату.\n\n{e(s.payment_info)}"
 
 
 def status_in_list(start: date | None) -> str:
-    return f"Забег стартует {d(start)}. Ты в списке ✓" if start else "Ты в списке ✓ Дату старта сообщу отдельно."
+    return f"Забег стартует {d(start)}. Ты в списке." if start else "Ты в списке. Дату старта сообщу отдельно."
 
 
 STATUS_NO_RUN = "Забег ещё не начат: пришли книгу — и соберём план."
@@ -168,9 +168,9 @@ def sprint_offer(inviter: str | None) -> str:
 
 SPRINT_STARTED = ("Спринт открыт. Пришли файл короткой книги или рассказа (epub/fb2, до 140 страниц) — "
                   "или выбери бумажную.")
-SPRINT_BUSY = "Сейчас идёт твой забег — спринт можно начать после финиша. Читаем дальше 🔥"
+SPRINT_BUSY = "Сейчас идёт твой забег — спринт можно начать после финиша. Читаем дальше."
 COHORT_JOIN = {
-    "ok": "Ты в групповом забеге 🎉 Добавь книгу и выбери срок — старт вместе со всеми.",
+    "ok": "Ты в групповом забеге. Добавь книгу и выбери срок — старт вместе со всеми.",
     "already": "Ты уже в этом групповом забеге.",
     "busy": "Сейчас идёт твой забег — в группу можно будет вступить со следующей книгой.",
     "none": "Сейчас нет открытого группового забега — можно начать свой в любой день.",
@@ -188,7 +188,7 @@ def morning(name: str, day_n: int, plan_days: int, title: str, pages: str, minut
             yesterday: str | None, streak: int, partner: str | None, run_started: bool) -> str:
     lines = []
     if run_started:
-        lines.append("Забег начался 🏁")
+        lines.append("Забег начался.")
     if yesterday == "frozen":
         lines.append("Вчера сработала заморозка — стрик цел.")
     elif yesterday == "missed":
@@ -199,7 +199,7 @@ def morning(name: str, day_n: int, plan_days: int, title: str, pages: str, minut
     lines.append(f"{head}\n{_seg_line(title, pages, minutes)}")
     tail = []
     if streak:
-        tail.append(f"Стрик: {streak} 🔥")
+        tail.append(f"Стрик: {streak}")
     if partner:
         tail.append(f"Напарник: {e(partner)}")
     if tail:
@@ -216,15 +216,15 @@ def evening(partner_name: str | None, partner_done: bool) -> str:
 
 
 def partner_done(name: str) -> str:
-    return f"{e(name)}: день сдан ✓ Теперь твоя очередь."
+    return f"{e(name)}: день сдан. Теперь твоя очередь."
 
 
 def nudge_received(name: str) -> str:
-    return f"👋 {e(name)} ждёт твой пересказ."
+    return f"{e(name)} ждёт твой пересказ."
 
 
 def friend_joined(name: str) -> str:
-    return f"{e(name)} теперь с тобой 🙌"
+    return f"{e(name)} теперь с тобой."
 
 
 def friends_now(name: str) -> str:
@@ -242,20 +242,20 @@ NO_BOOK_REMINDER = "Забег уже идёт, а книги у тебя пок
 
 def heard(text: str) -> str:
     short = text if len(text) <= 300 else text[:300] + "…"
-    return f"🎙 Распознано: <i>{e(short)}</i>"
+    return f"Распознано: <i>{e(short)}</i>"
 
 
 def accepted(reply: str, question: str | None, streak: int, streak_grew: bool, *, verified: bool,
              partner_name: str | None, partner_done: bool | None, pair_streak: int | None,
              can_more: bool, next_title: str | None) -> str:
-    parts = [f"✅ <b>Засчитано.</b> {e(reply)}"]
+    parts = [f"<b>Засчитано.</b> {e(reply)}"]
     if question:
         parts.append(f"<i>Подумать:</i> {e(question)}")
     if streak_grew:
-        parts.append(f"Стрик: <b>{streak}</b> 🔥")
+        parts.append(f"Стрик: <b>{streak}</b>")
     if partner_name is not None:
         if partner_done:
-            parts.append(f"{e(partner_name)}: день тоже сдан — общий стрик растёт 🤝")
+            parts.append(f"{e(partner_name)}: день тоже сдан — общий стрик растёт.")
         else:
             parts.append(f"{e(partner_name)} получит весточку — теперь очередь напарника.")
     if can_more and next_title:
@@ -266,12 +266,12 @@ def accepted(reply: str, question: str | None, streak: int, streak_grew: bool, *
 
 
 def clarify(reply: str, question: str | None) -> str:
-    q = f"\n\n❓ <b>{e(question)}</b>" if question else ""
+    q = f"\n\n<b>{e(question)}</b>" if question else ""
     return f"{e(reply)}{q}\n\nОтветь одним сообщением — можно голосом."
 
 
 def rejected(reply: str) -> str:
-    return f"🤔 {e(reply)}\n\nПопробуй ещё раз — расскажи пару конкретных моментов из отрезка."
+    return f"{e(reply)}\n\nПопробуй ещё раз — расскажи пару конкретных моментов из отрезка."
 
 
 QUEUED = "Принял. Проверю чуть позже — день не сгорит, пришлю ответ сюда."
@@ -283,11 +283,11 @@ STT_OFF = "Голосовые пока не настроены — напиши,
 
 
 def pending_resolved(out) -> str:
-    return "Твой пересказ проверен повторно: засчитано ✅ День на месте."
+    return "Твой пересказ проверен повторно: засчитано. День на месте."
 
 
 def override_notice() -> str:
-    return "Ведущий пересмотрел твой пересказ: засчитано ✅ Стрик пересчитан."
+    return "Ведущий пересмотрел твой пересказ: засчитано. Стрик пересчитан."
 
 
 def too_short_hint(seg_title: str | None) -> str:
@@ -306,7 +306,7 @@ def state_message(state: str, *, next_title: str | None = None, start: date | No
         "plan_needed": "Книга есть, осталось выбрать срок. Нажми «Настроить план».",
         "waiting_start": status_in_list(start),
         "not_started": f"План стартует {d(start)}. Пересказы — с первого дня.",
-        "finished": "Книга дочитана 🎉 Она уже на полке.",
+        "finished": "Книга дочитана. Она уже на полке.",
         "expired": "Срок забега вышел. Дочитать можно в следующем забеге — с этой же книгой или с другой.",
         "refunded": "Участие отменено. Будем рады видеть снова.",
         "done_today": (f"На сегодня хватит — завтра следующий: «{e(next_title)}»." if next_title
@@ -319,14 +319,14 @@ def state_message(state: str, *, next_title: str | None = None, start: date | No
 def achievements_message(codes: list[str]) -> str:
     if len(codes) == 1:
         c = ACH_BY_CODE[codes[0]]
-        return f"{c[3]} Новый значок: <b>{e(c[1])}</b> — {e(c[2].lower())}."
-    items = ", ".join(f"{ACH_BY_CODE[c][3]} {e(ACH_BY_CODE[c][1])}" for c in codes)
+        return f"Новый значок: <b>{e(c[1])}</b> — {e(c[2].lower())}."
+    items = ", ".join(e(ACH_BY_CODE[c][1]) for c in codes)
     return f"Новые значки: {items}."
 
 
 def finished(title: str, days: int, streak: int, retells: int, partner: str | None) -> str:
     who = f" Вместе с {e(partner)}." if partner else ""
-    return (f"🏁 <b>Дочитано!</b>\n«{e(title)}» за {days_word(days)}. Лучший стрик — {streak}, "
+    return (f"<b>Дочитано!</b>\n«{e(title)}» за {days_word(days)}. Лучший стрик — {streak}, "
             f"пересказов — {retells}.{who}\n\nКнига встала на твою полку.")
 
 
@@ -391,11 +391,11 @@ def paywall(book_title: str | None, plan_days: int | None, prices: dict) -> str:
             f"придёт сразу, а если уже вечер — завтра утром.") if book_title and plan_days else \
         "Чтобы начать забег, открой доступ:"
     lines = [head, "",
-             f"📖 <b>Одна книга — {_price(run)}</b>\nЗабег до финиша: план, проверка пересказов, напарник.",
-             f"📚 <b>Абонемент — {_price(m)} в месяц или {_price(y)} в год</b>\nКнига за книгой без доплат "
+             f"<b>Одна книга — {_price(run)}</b>\nЗабег до финиша: план, проверка пересказов, напарник.",
+             f"<b>Абонемент — {_price(m)} в месяц или {_price(y)} в год</b>\nКнига за книгой без доплат "
              "и вторая заморозка в неделю."]
     if run.promo and run.discount:
-        lines += ["", f"🎟 Промокод {e(run.promo)}: −{run.discount}%"]
+        lines += ["", f"Промокод {e(run.promo)}: −{run.discount}%"]
     return "\n".join(lines)
 
 
@@ -405,7 +405,7 @@ def paywall_buttons(prices: dict, *, in_chat: bool = True) -> list[list[dict]]:
     rows = []
     for pr, label in ((run, "Одна книга"), (m, "Месяц"), (y, "Год")):
         if pr.free and pr.promo:
-            rows.append([{"text": f"🎟 {label} по промокоду — бесплатно", "callback": f"pay:free:{pr.product}"}])
+            rows.append([{"text": f"{label} по промокоду — бесплатно", "callback": f"pay:free:{pr.product}"}])
     if in_chat:
         rows.append([{"text": f"Оплатить книгу — {rub(run.rub)}", "callback": "pay:run"}])
         rows.append([{"text": f"Месяц — {rub(m.rub)}", "callback": "pay:month"},
@@ -460,7 +460,7 @@ def pay_ok_subscription(until) -> str:
 
 def promo_applied(code: str, discount: int) -> str:
     if discount >= 100:
-        return f"Промокод {e(code)} принят: доступ бесплатно 🎉"
+        return f"Промокод {e(code)} принят: доступ бесплатно."
     return f"Промокод {e(code)} принят: скидка {discount}%."
 
 
@@ -495,7 +495,7 @@ def paysupport_text() -> str:
 
 def paywall_nudge(book_title: str | None) -> str:
     book = f"«{e(book_title)}» " if book_title else ""
-    return (f"План для {book}готов и ждёт старта 📖\n\n"
+    return (f"План для {book}готов и ждёт старта.\n\n"
             "15 минут чтения и минута пересказа в день — и через месяц книга дочитана.")
 
 
@@ -506,9 +506,9 @@ def sub_expiring(until) -> str:
 
 def after_finish(kind: str, has_sub: bool, credits: int = 0) -> str:
     if has_sub:
-        return "Что дальше? Абонемент действует — следующая книга без доплат. Выбирай 📚"
+        return "Что дальше? Абонемент действует — следующая книга без доплат. Выбирай."
     if credits:
-        return "Что дальше? Следующий забег уже оплачен — выбирай книгу 📚"
+        return "Что дальше? Следующий забег уже оплачен — выбирай книгу."
     if kind == "sprint":
         return ("Спринт пройден — значит, привычка работает. Дальше — забег на целую книгу: свой план на 21–60 дней "
                 "и напарник.")

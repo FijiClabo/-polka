@@ -29,7 +29,7 @@ async def setup_db(tmp_path) -> None:
             await conn.execute(text("CREATE SCHEMA public"))
         await conn.run_sync(Base.metadata.create_all)
     async with dbs.session_scope() as s:
-        for code, title, desc, _emoji, order in ACHIEVEMENTS:
+        for code, title, desc, order in ACHIEVEMENTS:
             s.add(Achievement(code=code, title=title, description=desc, sort_order=order))
 
 

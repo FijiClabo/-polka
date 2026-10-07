@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { IArrow, IBack } from "../components/Icons";
+import { IArrow, IBack, ICheck } from "../components/Icons";
 import { ErrorState, Sheet, Skeleton } from "../components/ui";
 import { useApi, useLocal } from "../hooks";
 import { useNav } from "../nav";
@@ -95,7 +95,7 @@ export default function Read({ day }: { day: number }) {
         <div className="reader-cta">
           {data.accepted ? (
             <button className="btn secondary block" onClick={nav.back}>
-              Этот отрезок уже сдан ✓
+              <ICheck size={18} /> Этот отрезок уже сдан
             </button>
           ) : (
             <button className="btn primary block" onClick={() => nav.replace({ name: "retell" })}>

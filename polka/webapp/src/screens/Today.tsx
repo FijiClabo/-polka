@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type Today as TodayData } from "../api";
 import { IArrow, ICheck, IFlameSolid, IHand, ISnow } from "../components/Icons";
+import { OpenBookIll } from "../components/Illustrations";
 import { Avatar, Cover, ErrorState, ScreenSkeleton, toast } from "../components/ui";
 import { dayMonth, days, daysUntil, firstName, greeting, longDate, plural } from "../format";
 import { invalidate, useApi, usePoll } from "../hooks";
@@ -114,9 +115,9 @@ function MainCard({ data }: { data: TodayData }) {
   if (s === "finished") {
     return (
       <div className="card book-card center">
-        <div style={{ fontSize: 44 }}>🏁</div>
+        <div className="ill-wrap"><OpenBookIll size={150} /></div>
         <div className="seg-title">Книга дочитана</div>
-        <p className="meta">Она уже на полке, конспект собран из твоих пересказов.</p>
+        <p className="meta">Она уже на полке. Можно подвести итоги или взять следующую.</p>
         <div className="btn-row mt-12">
           <button className="btn primary" onClick={() => nav.push({ name: "finish" })}>Итоги</button>
           <button className="btn secondary" onClick={() => nav.tab("shelf")}>Полка</button>
@@ -129,7 +130,7 @@ function MainCard({ data }: { data: TodayData }) {
       <div className="card book-card">
         <div className="eyebrow">Срок вышел</div>
         <div className="seg-title">Забег закончился</div>
-        <p className="meta">Пересказы и конспект сохранились. Можно начать новый забег — с этой же книгой или с другой.</p>
+        <p className="meta">Прогресс и полка сохранились. Можно начать новый забег — с этой же книгой или с другой.</p>
         <NewRunButton label="Новый забег" />
       </div>
     );
@@ -258,7 +259,7 @@ function ShareStreak({ streak }: { streak: number }) {
         setBusy(true);
         try {
           await api.post("/share/streak/send");
-          toast("Карточка в чате — перешли её друзьям 🔥");
+          toast("Карточка в чате — перешли её друзьям");
         } catch (e) {
           toast((e as Error).message);
         } finally {
@@ -362,7 +363,7 @@ function AwaitingPayment({ data }: { data: TodayData }) {
         Осталось открыть доступ — первый отрезок придёт сразу, а если уже вечер — завтра утром.
       </p>
       <button className="btn primary block mt-12" onClick={() => nav.push({ name: "pay" })}>
-        Открыть забег <IArrow size={18} />
+        Открыть доступ <IArrow size={18} />
       </button>
       {data.sprint_available && <SprintButton />}
     </div>
@@ -442,7 +443,7 @@ function PartnerCard({ data, reload }: { data: TodayData; reload: () => void }) 
             haptic("light");
             const r = await api.post<{ result: string }>("/pair/nudge").catch(() => ({ result: "error" }));
             setNudged(true);
-            toast(r.result === "ok" ? "Напоминание отправлено 👋" : r.result === "already" ? "Сегодня уже напоминали" : "Не получилось");
+            toast(r.result === "ok" ? "Напоминание отправлено" : r.result === "already" ? "Сегодня уже напоминали" : "Не получилось");
             reload();
           }}
         >

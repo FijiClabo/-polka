@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api, type Achievement, type FriendStatus, type ShelfData } from "../api";
-import { IFlameSolid, IHand } from "../components/Icons";
+import { AchIcon, IFlameSolid, IHand } from "../components/Icons";
 import { Avatar, ErrorState, ScreenSkeleton, Shelf, toast } from "../components/ui";
 import { STATUS_TEXT, firstName, plural } from "../format";
 import { useApi } from "../hooks";
@@ -60,7 +60,7 @@ export default function FriendCard({ id }: { id: number }) {
             haptic("light");
             const r = await api.post<{ result: string }>(`/friends/${id}/nudge`).catch(() => ({ result: "error" }));
             setSent(true);
-            toast(r.result === "ok" ? `${firstName(s.name)} получит толчок 👋` : r.result === "disabled" ? "Толчки отключены" : "Сегодня уже толкали");
+            toast(r.result === "ok" ? `${firstName(s.name)} получит толчок` : r.result === "disabled" ? "Толчки отключены" : "Сегодня уже толкали");
           }}
         >
           <IHand size={18} /> Толкнуть
@@ -78,12 +78,12 @@ export default function FriendCard({ id }: { id: number }) {
       <div className="ach-grid">
         {data.achievements.map((a) => (
           <div key={a.code} className={`ach${a.earned ? " on" : ""}`}>
-            <div className="e">{a.emoji}</div>
+            <div className="e"><AchIcon code={a.code} /></div>
             <div className="t">{a.title}</div>
           </div>
         ))}
       </div>
-      <p className="tiny muted center mt-16">Пересказы и конспекты друзьям не видны — только книга, стрик и полка.</p>
+      <p className="tiny muted center mt-16">Пересказы не хранятся и никому не видны. Друзьям видны книга, стрик, значки и полка.</p>
     </div>
   );
 }
