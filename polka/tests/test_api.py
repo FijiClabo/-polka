@@ -167,6 +167,10 @@ async def test_retell_via_api(client):
     start, ids, (ta, tb, tc) = await _two_readers_same_book()
     set_now(start, 10)
     r = await client.post("/api/retell", json={"text": "коротко"}, headers=H(ta))
+    assert r.status_code == 403  # без согласия на обработку данных пересказ не принимается
+    assert (await client.post("/api/consent", headers=H(ta))).status_code == 200
+    assert (await client.get("/api/me", headers=H(ta))).json()["consent"] is True
+    r = await client.post("/api/retell", json={"text": "коротко"}, headers=H(ta))
     assert r.json()["status"] == "too_short"
     r = await client.post("/api/retell", json={"text": RETELL_OK}, headers=H(ta))
     j = r.json()
@@ -185,6 +189,7 @@ async def test_paper_book_and_plan_options(client):
         s.add(Run(title="T", kind="main", start_date=clock.now().date() + timedelta(days=3), status="open"))
     h = H(777, "Бумага")
     await client.get("/api/me", headers=h)
+    await client.post("/api/consent", headers=h)
     r = await client.post("/api/book/paper", json={"title": "Война и мир", "author": "Толстой", "pages": 1300}, headers=h)
     assert r.status_code == 200
     r = await client.get("/api/book/plan-options", headers=h)
@@ -212,6 +217,7 @@ async def test_billing_api_paywall_promo_invoice(client):
     set_now(clock.real_now().date(), 10)
     h = H(888, "Покупатель")
     await client.get("/api/me", headers=h)
+    await client.post("/api/consent", headers=h)
     r = await client.post("/api/book/paper", json={"title": "Идиот", "author": "Достоевский", "pages": 640}, headers=h)
     assert r.status_code == 200
     days = (await client.get("/api/book/plan-options", headers=h)).json()["options"][0]["days"]

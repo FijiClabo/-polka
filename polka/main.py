@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -62,6 +63,9 @@ async def lifespan(app: FastAPI):
         if s.bot_mode == "webhook":
             if not s.public_url.startswith("https://"):
                 raise RuntimeError("Для BOT_MODE=webhook нужен PUBLIC_URL с https://")
+            if not s.webhook_secret_ok:
+                # без секрета любой может прислать «оплату» на адрес вебхука
+                raise RuntimeError("Для BOT_MODE=webhook нужен WEBHOOK_SECRET: 32+ случайных символа (deploy.sh создаёт сам)")
             await bot.set_webhook(
                 f"{s.public_url}{s.webhook_path}", secret_token=s.webhook_secret or None,
                 allowed_updates=dp.resolve_used_update_types(), drop_pending_updates=False,
@@ -100,7 +104,7 @@ app.include_router(pages_router)
 @app.post(get_settings().webhook_path)
 async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: str | None = Header(default=None)):
     s = get_settings()
-    if s.webhook_secret and x_telegram_bot_api_secret_token != s.webhook_secret:
+    if not s.webhook_secret or not hmac.compare_digest(x_telegram_bot_api_secret_token or "", s.webhook_secret):
         raise HTTPException(status_code=403)
     bot, dp = request.app.state.bot, request.app.state.dp
     update = Update.model_validate(await request.json(), context={"bot": bot})

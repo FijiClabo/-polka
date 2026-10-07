@@ -19,13 +19,7 @@ from db.models import User
 from db.session import session_scope
 from services.common import Outbox, log_event, now
 from services.progress import load_view
-from services.runs import (
-    current_enrollment,
-    current_main_run,
-    ensure_main_enrollment,
-    sprint_used,
-    start_sprint,
-)
+from services.runs import current_enrollment, join_cohort, sprint_block, start_sprint
 from services.social import add_friend_by_code, join_pair_by_code
 from settings import get_settings
 
@@ -69,6 +63,10 @@ async def cmd_start(message: Message, command: CommandObject, state: FSMContext,
                 user.source = payload[4:36]
         elif payload.startswith("act_"):
             act_code = payload[4:]
+        elif payload == "group":
+            # групповой забег ведущего — только по его ссылке
+            status, _enr = await join_cohort(s, user)
+            outbox.add(_reply(user, texts.COHORT_JOIN[status]))
         elif payload.startswith("p_"):
             status, inviter = await join_pair_by_code(s, user, payload[2:], outbox)
             if status == "ok" and inviter:
@@ -130,18 +128,35 @@ async def ask_consent(message: Message) -> None:
 
 @router.callback_query(F.data == "consent:pd")
 async def cb_consent(call: CallbackQuery) -> None:
-    from db.models import Consent
-    from services.site_orders import doc_sha256
+    from services.consent import give_consent
 
     await call.answer()
     await call.message.edit_reply_markup(reply_markup=None)
-    s_ = get_settings()
     async with session_scope() as s:
         user, _ = await load_user(s, call.from_user)
-        s.add(Consent(user_id=user.id, doc_type="pd", doc_version=s_.offer_version, doc_sha256=doc_sha256("consent.html"),
-                      channel="bot"))
-        await log_event(s, "consent_pd", user.id)
+        await give_consent(s, user, "bot")
+        onboarded = user.onboarding_step == "done"
+    if onboarded:
+        await call.message.answer("Спасибо! Можно продолжать 📖")
+        return
     await ask_tz(call.message)
+
+
+async def consent_gate(message: Message, tg_user) -> bool:
+    """Проверка согласия в отдельной сессии — для обработчиков книг, пересказов и оплаты."""
+    async with session_scope() as s:
+        user, _ = await load_user(s, tg_user)
+        return await require_consent(message, user, s)
+
+
+async def require_consent(message: Message, user: User, session) -> bool:
+    """Книги, пересказы и оплата — только после согласия на обработку данных. False — показали экран согласия."""
+    from services.consent import has_consent
+
+    if await has_consent(session, user):
+        return True
+    await ask_consent(message)
+    return False
 
 
 # --------------------------------------------------------------------------- часовой пояс и время
@@ -362,10 +377,7 @@ async def after_onboarding(bot: Bot, chat_id: int, user_id: int, inviter_name: s
     s_ = get_settings()
     async with session_scope() as s:
         user = await s.get(User, user_id)
-        cohort = await current_main_run(s)
-        if cohort is not None:
-            await ensure_main_enrollment(s, user)
-        sprint_ok = not await sprint_used(s, user.id) and (bool(user.invited_by_id) or s_.sprint_for_everyone)
+        sprint_ok = not await sprint_block(s, user.id) and (bool(user.invited_by_id) or s_.sprint_for_everyone)
     await send_book_prompt(bot, chat_id)
     if sprint_ok:
         await bot.send_message(chat_id, texts.sprint_offer(inviter_name),
@@ -386,9 +398,10 @@ async def cb_sprint(call: CallbackQuery, bot: Bot) -> None:
     await call.message.edit_reply_markup(reply_markup=None)
     async with session_scope() as s:
         user, _ = await load_user(s, call.from_user)
+        block = await sprint_block(s, user.id)
         enr = await start_sprint(s, user)
     if enr is None:
-        await call.message.answer(texts.SPRINT_USED)
+        await call.message.answer(texts.SPRINT_BUSY if block == "running" else texts.SPRINT_USED)
         return
     await call.message.answer(texts.SPRINT_STARTED)
     await send_book_prompt(bot, call.message.chat.id)
@@ -400,6 +413,9 @@ async def cb_sprint(call: CallbackQuery, bot: Bot) -> None:
 async def send_status(bot: Bot, chat_id: int, user_id: int) -> None:
     async with session_scope() as s:
         user = await s.get(User, user_id)
+        from services.billing import activate_pending
+
+        await activate_pending(s, user)  # оплачено заранее (кредит, абонемент) — стартуем ждущий план
         enr = await current_enrollment(s, user.id)
         view = await load_view(s, user, enr)
     st = view.state
@@ -408,7 +424,7 @@ async def send_status(bot: Bot, chat_id: int, user_id: int) -> None:
 
         await send_paywall(bot, chat_id, user_id)
         return
-    if st == "no_run":
+    if st in ("no_run", "no_book"):
         await send_book_prompt(bot, chat_id)
         return
     elif st == "waiting_start":

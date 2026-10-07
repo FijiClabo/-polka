@@ -117,7 +117,7 @@ async def send_finish(bot: Bot, chat_id: int, user_id: int) -> None:
         from services.billing import subscription_active
 
         subscribed = subscription_active(user) or user.run_credits > 0
-        upsell = texts.after_finish(enr.run.kind, subscribed)
+        upsell = texts.after_finish(enr.run.kind, subscription_active(user), user.run_credits)
     await bot.send_message(chat_id, text, reply_markup=app_kb("Полка и конспект", "finish"))
     await bot.send_photo(chat_id, BufferedInputFile(png, "finish.png"),
                          caption="Карточка для сторис — перешли друзьям или сохрани.")

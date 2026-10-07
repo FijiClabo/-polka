@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import texts
@@ -193,7 +193,8 @@ async def try_activate(session: AsyncSession, user: User, enr: Enrollment | None
         user.run_credits -= 1
         if purchase is None or purchase.product != "run":
             purchase = await session.scalar(
-                select(Purchase).where(Purchase.user_id == user.id, Purchase.product == "run", Purchase.status == "paid")
+                select(Purchase).where(Purchase.user_id == user.id, Purchase.product == "run",
+                                       Purchase.status.in_(("paid", "refund_requested")))
                 .order_by(Purchase.id.desc()).limit(1)
             )
         await activate(session, user, enr, "credit", purchase)
@@ -202,20 +203,54 @@ async def try_activate(session: AsyncSession, user: User, enr: Enrollment | None
 
 
 async def grant_entitlement(session: AsyncSession, user: User, p: Purchase, *,
-                            subscription_expiration: datetime | None = None) -> None:
-    """Выдать права по покупке и сразу стартовать забег, если план уже готов."""
+                            subscription_expiration: datetime | None = None) -> str | None:
+    """Выдать права по покупке и сразу стартовать забег, если план уже готов.
+
+    Сроки абонементов складываются: новая покупка прибавляет свой срок к оставшемуся.
+    Возвращает способ доступа, если забег стартовал прямо сейчас.
+    """
     if p.product == "run":
         user.run_credits += 1
     else:
         base = max(now(), _aware(user.subscription_until)) if user.subscription_until else now()
-        until = subscription_expiration or (base + timedelta(days=SUB_DAYS[p.product]))
+        until = base + timedelta(days=SUB_DAYS[p.product])
+        if subscription_expiration is not None and _aware(subscription_expiration) > until:
+            until = _aware(subscription_expiration)
         user.subscription_until = until
         user.subscription_kind = p.product
-        user.subscription_recurring = p.is_recurring
+        # живая звёздная подписка не отменяется оттого, что докупили год или активировали код
+        user.subscription_recurring = bool(user.subscription_recurring or p.is_recurring)
         user.sub_reminded_at = None
         p.valid_until = until
     await session.flush()
-    await try_activate(session, user, await current_enrollment(session, user.id), p)
+    access = await try_activate(session, user, await current_enrollment(session, user.id), p)
+    p.activated_now = access  # type: ignore[attr-defined]  # для текста после оплаты, в базу не пишется
+    return access
+
+
+async def activate_pending(session: AsyncSession, user: User) -> str | None:
+    """Оплаченный кредит или абонемент → стартовать текущий забег, который ждёт оплаты (например, после спринта)."""
+    if not has_access(user):
+        return None
+    return await try_activate(session, user, await current_enrollment(session, user.id))
+
+
+async def promo_take(session: AsyncSession, code: str, *, enforce_limit: bool = True) -> bool:
+    """Атомарно учесть использование промокода; с лимитом — только если он ещё не исчерпан."""
+    q = update(PromoCode).where(PromoCode.code == code).values(used=PromoCode.used + 1)
+    if enforce_limit:
+        q = q.where((PromoCode.max_uses.is_(None)) | (PromoCode.used < PromoCode.max_uses))
+    res = await session.execute(q.execution_options(synchronize_session=False))
+    await session.flush()
+    obj = await session.get(PromoCode, code)
+    if obj is not None:
+        await session.refresh(obj, ["used"])
+    return bool(res.rowcount)
+
+
+async def promo_release(session: AsyncSession, code: str) -> None:
+    await session.execute(update(PromoCode).where(PromoCode.code == code, PromoCode.used > 0)
+                          .values(used=PromoCode.used - 1).execution_options(synchronize_session=False))
 
 
 # --------------------------------------------------------------------------- счёт в звёздах
@@ -300,9 +335,33 @@ async def check_pre_checkout(session: AsyncSession, tg_user_id: int, payload: st
         expected, expected_promo = price.rub * 100, price.promo
     if (promo or None) != (expected_promo or None) or total != expected:
         return "Цена изменилась (например, закончился промокод). Открой оплату заново."
-    if product in ("month", "year") and user.subscription_recurring and subscription_active(user):
+    if product == "month" and currency == "XTR" and user.subscription_recurring and subscription_active(user):
         return "У тебя уже есть абонемент с автопродлением."
     return None
+
+
+def expected_amount(price: Price, currency: str) -> int:
+    return price.stars if currency == "XTR" else price.rub * 100
+
+
+async def payment_amount_ok(session: AsyncSession, user: User, product: str, currency: str, amount: int,
+                            promo: str | None, renewal: bool) -> bool:
+    """Сумма из successful_payment не меньше цены тарифа (с учётом промокода из счёта).
+
+    Защита от подделанных апдейтов: даже если кто-то узнал адрес вебхука, «оплата» за 1 звезду ничего не даст.
+    Продление подписки списывается по цене на момент оформления — его проверяем только по валюте.
+    """
+    if currency not in ("XTR", "RUB") or amount <= 0:
+        return False
+    if renewal:
+        return currency == "XTR" and bool(user.star_sub_charge_id)
+    rub, stars = list_prices()[product]
+    base = stars if currency == "XTR" else rub * 100
+    if promo and not (currency == "XTR" and product == "month"):
+        code = await session.get(PromoCode, normalize_code(promo))
+        if code is not None:
+            base = _discounted(base, code.discount_percent)
+    return amount >= base
 
 
 async def record_payment(
@@ -325,12 +384,10 @@ async def record_payment(
         email=email, offer_version=get_settings().offer_version,
     )
     session.add(p)
-    if recurring and not renewal and telegram_charge_id:
+    if recurring and telegram_charge_id and (not renewal or not user.star_sub_charge_id):
         user.star_sub_charge_id = telegram_charge_id  # отмена автопродления — по первому платежу подписки
     if promo and not renewal:  # автопродление идёт по тому же счёту — промокод не считаем повторно
-        code = await session.get(PromoCode, promo)
-        if code is not None:
-            code.used += 1
+        await promo_take(session, promo, enforce_limit=False)  # деньги уже списаны — учитываем в любом случае
     if user.promo_code and normalize_code(user.promo_code) == (promo or ""):
         user.promo_code = None
     await session.flush()
@@ -357,12 +414,11 @@ async def apply_free_promo(session: AsyncSession, user: User, product: str = "ru
     price = (await prices_with_promo(session, user.promo_code))[product]
     if not price.free or not price.promo:
         return None
+    if not await promo_take(session, price.promo):
+        return None  # лимит исчерпан, пока человек думал
     p = Purchase(user_id=user.id, product=product, provider="promo", currency="RUB", amount=0,
                  list_amount=list_prices()[product][0] * 100, promo_code=price.promo, status="paid")
     session.add(p)
-    code = await session.get(PromoCode, price.promo)
-    if code:
-        code.used += 1
     user.promo_code = None
     await session.flush()
     await log_event(session, "purchase", user.id, product=product, provider="promo", currency="RUB", amount=0,
@@ -417,6 +473,8 @@ async def redeem_code(session: AsyncSession, user: User, code: str, outbox: Outb
         return "not_found", None
     if p.user_id is not None:
         return ("already" if p.user_id == user.id else "used"), p
+    if p.activated_at is not None:  # активирован аккаунтом, который потом удалили, — повторно нельзя
+        return "used", p
     if now() > _aware(p.created_at) + timedelta(days=get_settings().code_valid_days):
         return "expired", p
     p.user_id = user.id
@@ -434,13 +492,15 @@ async def redeem_code(session: AsyncSession, user: User, code: str, outbox: Outb
 
 async def cancel_subscription(session: AsyncSession, user: User, bot) -> str:
     """Отключить автопродление (376-ФЗ: отказ в электронной форме). Доступ остаётся до конца оплаченного срока."""
+    charge = user.star_sub_charge_id
     if not user.subscription_recurring:
         return "not_recurring"
-    charge = user.star_sub_charge_id
-    if bot is not None and charge:
-        try:
-            await bot.edit_user_star_subscription(user_id=user.tg_id, telegram_payment_charge_id=charge, is_canceled=True)
-        except Exception as e:
+    if bot is None or not charge:
+        return "error"  # отменить можно только в Telegram: Настройки → Звёзды → Подписки
+    try:
+        await bot.edit_user_star_subscription(user_id=user.tg_id, telegram_payment_charge_id=charge, is_canceled=True)
+    except Exception as e:
+        if "SUBSCRIPTION" not in str(e).upper() and "NOT_FOUND" not in str(e).upper():
             log.warning("cancel star subscription failed: %s", e)
             return "error"
     user.subscription_recurring = False
@@ -477,11 +537,20 @@ async def _last_purchase(session: AsyncSession, user: User) -> Purchase | None:
     )
 
 
+async def guarantee_available(session: AsyncSession, user: User) -> bool:
+    """Гарантия «без вопросов» действует один раз: после возврата её больше не обещаем."""
+    used = await session.scalar(
+        select(func.count(Purchase.id)).where(Purchase.user_id == user.id, Purchase.status.in_(("refunded", "refund_requested")))
+    )
+    return not used
+
+
 async def refund_check(session: AsyncSession, user: User) -> RefundCheck:
     s = get_settings()
     p = await _last_purchase(session, user)
     if p is None:
-        return RefundCheck(None, False, "Нет оплат, которые можно вернуть.")
+        return RefundCheck(None, False, "Нет оплат, которые можно вернуть. Если оплата была по коду — сначала "
+                                        "активируй его (/code), а если что-то не так — напиши в /paysupport.")
     paid_at = _aware(p.activated_at or p.created_at)
     until = paid_at + timedelta(days=s.refund_days)
     refunded_before = await session.scalar(
@@ -529,14 +598,20 @@ async def revoke(session: AsyncSession, user: User, p: Purchase) -> None:
         elif enr is None and user.run_credits > 0:
             user.run_credits -= 1
     else:
-        user.subscription_until = now()
-        user.subscription_recurring = False
-        active = await session.scalar(
-            select(Enrollment).where(Enrollment.user_id == user.id, Enrollment.access == "subscription",
-                                     Enrollment.status.in_(("paid", "active"))).order_by(Enrollment.id.desc()).limit(1)
-        )
-        if active is not None and active.plan_start_date and plan_day_number(active.plan_start_date, today_for(user)) <= get_settings().refund_days:
-            active.status = "refunded"
+        # снимаем только срок этой покупки: ранее оплаченные периоды остаются
+        until = _aware(user.subscription_until) if user.subscription_until else now()
+        user.subscription_until = max(now(), until - timedelta(days=SUB_DAYS[p.product]))
+        if p.is_recurring:
+            user.subscription_recurring = False
+        if not subscription_active(user):
+            user.subscription_recurring = False
+            # возврат прекращает услугу: забег, открытый по абонементу, закрывается
+            active = list(await session.scalars(
+                select(Enrollment).where(Enrollment.user_id == user.id, Enrollment.access == "subscription",
+                                         Enrollment.status.in_(("paid", "active")))
+            ))
+            for e in active:
+                e.status = "refunded"
 
 
 async def _star_refund(bot, user: User, p: Purchase) -> bool:
@@ -605,7 +680,7 @@ async def request_refund(session: AsyncSession, user: User, bot=None, outbox: Ou
                     quote=quote, guarantee=chk.eligible)
     if outbox is not None:
         who = user.display_name + (f" (@{user.tg_username})" if user.tg_username else "")
-        unit = (lambda v: f"{v} ⭐") if p.currency == "XTR" else (lambda v: texts.rub(v / 100))
+        unit = (lambda v: f"{v} ⭐") if p.currency == "XTR" else (lambda v: texts.rub(v / 100))  # noqa: E731
         kind = "по гарантии (полностью)" if chk.eligible else "за неиспользованную часть"
         stars_note = " Звёзды возвращаются только целиком." if p.currency == "XTR" and not chk.eligible else ""
         for admin in get_settings().admin_ids:
@@ -613,7 +688,7 @@ async def request_refund(session: AsyncSession, user: User, bot=None, outbox: Ou
                                      f"({p.provider}). К возврату по расчёту: {unit(quote)}.{stars_note}\n"
                                      f"Вернуть: /refund_ok {p.id} [сумма]. Отметить ручной возврат: /refund_done {p.id}",
                               kind="admin"))
-    return "requested"
+    return "requested" if chk.eligible else "requested_partial"
 
 
 async def approve_refund(session: AsyncSession, purchase_id: int, bot=None, amount: int | None = None) -> str:
@@ -631,6 +706,8 @@ async def approve_refund(session: AsyncSession, purchase_id: int, bot=None, amou
         ok = await _star_refund(bot, user, p)
     elif p.provider == "yookassa":
         kop = None if amount is None else amount * 100
+        if kop is not None and not (0 < kop <= p.amount):
+            return f"Сумма должна быть от 1 до {p.amount // 100} ₽."
         ok = await yookassa_refund(p, kop)
     else:
         return "Этот платёж не через провайдера — отметь возврат вручную: /refund_done ID."

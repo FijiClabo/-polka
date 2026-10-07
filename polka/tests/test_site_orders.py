@@ -192,7 +192,7 @@ async def test_partial_refund_request_and_approval(db, monkeypatch):
         user = await _user(s)
         chk = await billing.refund_check(s, user)
         assert not chk.eligible and chk.partial
-        assert await billing.request_refund(s, user, None, out) == "requested"
+        assert await billing.request_refund(s, user, None, out) == "requested_partial"
         p = await s.scalar(select(Purchase))
         assert p.status == "refund_requested"
         quote = await billing.refund_quote(s, user, p)

@@ -116,8 +116,9 @@ async def test_full_flow(env):
     await send_text(bot, dp, ADMIN, f"/run_new Осенний забег | {start.isoformat()} | 990", "Ведущий")
     assert any("создан" in t for t in session.texts())
 
-    # онбординг участника
-    await send_text(bot, dp, U, "/start")
+    # онбординг участника — по ссылке ведущего в групповой забег
+    await send_text(bot, dp, U, "/start group")
+    assert any("групповом забеге" in t for t in session.texts())
     assert "Привет" in session.texts()[-1]
     await press(bot, dp, U, "ob:1")
     await press(bot, dp, U, "ob:2")
@@ -159,7 +160,7 @@ async def test_full_flow(env):
     await send_text(bot, dp, U, "/today")
     assert any("День 1 из 21" in t for t in session.texts())
     await send_text(bot, dp, U, "коротко")
-    assert "от 50 знаков" in session.texts()[-1]
+    assert "длиннее 50 знаков" in session.texts()[-1]
     await send_text(bot, dp, U, RETELL_OK)
     assert any("Засчитано" in t and "Стрик: <b>1</b>" in t for t in session.texts())
     await send_text(bot, dp, U, RETELL_OK)
@@ -199,6 +200,9 @@ async def test_paper_book_flow(env):
     async with session_scope() as s:
         s.add(Run(title="T", kind="main", start_date=datetime.now().date() + timedelta(days=3), status="open"))
     await send_text(bot, dp, 601, "/start")
+    await press(bot, dp, 601, "book:paper")
+    assert "согласие на обработку данных" in session.texts()[-1]  # без согласия книгу не добавить
+    await press(bot, dp, 601, "consent:pd")
     await press(bot, dp, 601, "book:paper")
     await send_text(bot, dp, 601, "Мастер и Маргарита")
     await send_text(bot, dp, 601, "Михаил Булгаков")

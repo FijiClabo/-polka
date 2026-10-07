@@ -14,7 +14,7 @@ from books.plan import PlanError, PlanOption, build_paper_plan, build_plan, plan
 from books.types import BookParseError, ParsedBook, ParsedChapter
 from core.rules import normalize_author, normalize_text
 from db.models import Book, Chapter, Enrollment, Retelling, Segment, User
-from services.common import log_event, now
+from services.common import log_event, now, today_for
 from services.runs import can_start_plan, plan_start_for
 from settings import get_settings
 
@@ -154,6 +154,11 @@ async def confirm_plan(session: AsyncSession, user: User, enr: Enrollment, plan_
     book = await session.get(Book, enr.book_id) if enr.book_id else None
     if book is None or book.parse_status != "ok":
         raise PlanError("Нет книги")
+    if enr.status not in ("invited", "paid", "active"):
+        raise PlanError("Этот забег уже закончен — начни новый с этой или другой книгой")
+    if enr.plan_start_date is not None and (today_for(user) > enr.plan_start_date or await has_progress(session, enr)):
+        # старая кнопка в чате не должна пересобрать идущий план и обнулить прогресс
+        raise PlanError("План уже идёт — срок поменять нельзя. Чтобы начать заново, замени книгу")
     allowed = {o.days for o in options_for(book, enr)}
     if plan_days not in allowed:
         raise PlanError("Такой срок для этой книги недоступен")

@@ -186,6 +186,9 @@ async def main() -> None:
     await check_payments(s)
     if s.fast_day_minutes:
         say(WARN, f"Включено ускоренное время: сутки = {s.fast_day_minutes} мин", "Для настоящего забега: FAST_DAY_MINUTES=0")
+    if s.bot_mode == "webhook" and not s.webhook_secret_ok:
+        say(BAD, "WEBHOOK_SECRET пустой или из примера — можно подделать запросы Telegram, в том числе «оплату»",
+            "Удали строку WEBHOOK_SECRET из .env и запусти bash scripts/deploy.sh — он создаст случайный")
     if s.dev_auth_bypass:
         say(BAD, "DEV_AUTH_BYPASS=true — проверка подписи отключена!", "Только для локального просмотра. На сервере — false")
     print()

@@ -86,19 +86,48 @@ async def new_personal_run(session: AsyncSession) -> Run:
 
 
 async def ensure_enrollment(session: AsyncSession, user: User) -> Enrollment:
-    """Текущее открытое участие, а если его нет — групповой забег ведущего или новый личный забег."""
+    """Текущее открытое участие, а если его нет — новый личный забег.
+
+    В групповой забег ведущего попадают только по его ссылке (t.me/<бот>?start=group) — см. join_cohort.
+    """
     enr = await current_enrollment(session, user.id)
     if enr is not None and enr.status in OPEN_STATUSES:
         return enr
-    cohort = await current_main_run(session)
-    if cohort is not None:
-        existing = await session.scalar(select(Enrollment).where(Enrollment.run_id == cohort.id, Enrollment.user_id == user.id))
-        if existing is None:
-            return await enroll(session, user, cohort, "invited")
     run = await new_personal_run(session)
     enr = await enroll(session, user, run, "invited")
     await log_event(session, "run_created", user.id, run.id)
     return enr
+
+
+async def join_cohort(session: AsyncSession, user: User) -> tuple[str, Enrollment | None]:
+    """Вступить в открытый групповой забег по ссылке ведущего. ok | none | busy | already."""
+    cohort = await current_main_run(session)
+    if cohort is None:
+        return "none", None
+    existing = await session.scalar(select(Enrollment).where(Enrollment.run_id == cohort.id, Enrollment.user_id == user.id))
+    if existing is not None:
+        return "already", existing
+    cur = await current_enrollment(session, user.id)
+    if cur is not None and cur.status in ACTIVE_STATUSES and cur.plan_start_date is not None:
+        return "busy", cur  # уже идёт свой забег — группа подождёт следующей книги
+    enr = await enroll(session, user, cohort, "invited")
+    if cur is not None and cur.status == "invited" and cur.run.kind == "solo" and cur.book_id and not cur.plan_start_date:
+        # книга, добавленная до перехода по ссылке, переезжает в группу
+        enr.book_id, enr.plan_days, enr.plan_confirmed_at = cur.book_id, cur.plan_days, cur.plan_confirmed_at
+        cur.status = "dropped"
+    await log_event(session, "cohort_joined", user.id, cohort.id)
+    return "ok", enr
+
+
+async def sprint_block(session: AsyncSession, user_id: int) -> str | None:
+    """Почему нельзя начать спринт: used — уже был, running — идёт оплаченный забег."""
+    if await sprint_used(session, user_id):
+        return "used"
+    running = await session.scalar(
+        select(Enrollment.id).where(Enrollment.user_id == user_id, Enrollment.status.in_(ACTIVE_STATUSES),
+                                    Enrollment.plan_start_date.is_not(None)).limit(1)
+    )
+    return "running" if running else None
 
 
 async def sprint_used(session: AsyncSession, user_id: int) -> bool:
@@ -117,6 +146,8 @@ async def start_sprint(session: AsyncSession, user: User) -> Enrollment | None:
     existing = await session.scalar(select(Enrollment).where(Enrollment.run_id == run.id, Enrollment.user_id == user.id))
     if existing is not None:
         return existing if existing.status in OPEN_STATUSES else None
+    if await sprint_block(session, user.id):
+        return None
     enr = await enroll(session, user, run, "active")
     enr.access = "free"
     await log_event(session, "sprint_started", user.id, run.id)
@@ -163,7 +194,8 @@ def plan_start_for(run: Run, user: User, confirmed_at: datetime | None = None) -
         return None
     if today < run.start_date:
         return run.start_date
-    return today + timedelta(days=1)
+    hour = local_now(at, user.timezone).hour
+    return today if 4 <= hour < 18 else today + timedelta(days=1)
 
 
 def can_start_plan(enr: Enrollment) -> bool:

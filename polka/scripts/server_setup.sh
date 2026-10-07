@@ -36,6 +36,9 @@ mkdir -p backups data
 
 if [ ! -f .env ]; then
   cp .env.example .env
+  # случайные пароль базы и секрет вебхука — сразу, чтобы не остались значения из примера
+  sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(openssl rand -hex 24)/" .env
+  sed -i "s/^WEBHOOK_SECRET=.*/WEBHOOK_SECRET=$(openssl rand -hex 32)/" .env
   echo
   echo "==> Создан файл .env — заполни его:  nano .env"
 fi

@@ -134,6 +134,11 @@ class Settings(BaseSettings):
         return f"{self.public_url}/app" if self.public_url else ""
 
     @property
+    def webhook_secret_ok(self) -> bool:
+        weak = {"change-me-random-string", "change-me", "secret"}
+        return len(self.webhook_secret) >= 16 and self.webhook_secret not in weak
+
+    @property
     def payments_yookassa(self) -> bool:
         """Рубли прямо в боте — только при явном аварийном флаге."""
         return bool(self.yookassa_provider_token) and self.payments_rub_in_bot

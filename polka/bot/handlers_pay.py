@@ -19,7 +19,7 @@ from bot.ui import flush, kb
 from db.models import Book, User
 from db.session import session_scope
 from services import billing
-from services.common import Outbox, log_event
+from services.common import Outbox, OutMsg, log_event
 from services.progress import load_view
 from services.runs import current_enrollment, ensure_enrollment
 from settings import get_settings
@@ -42,11 +42,12 @@ async def send_paywall(bot: Bot, chat_id: int, user_id: int) -> None:
         prices = await billing.prices_for(ses, user)
         await log_event(ses, "paywall_shown", user.id, via="bot")
         plan_days = enr.plan_days if enr else None
+        guarantee = await billing.guarantee_available(ses, user)
     if not s.payments_enabled and not prices["run"].free:
         await bot.send_message(chat_id, texts.PAY_DISABLED + "\n\n" + texts.e(s.payment_info))
         return
     text = texts.paywall(book.title if book else None, plan_days, prices, card=s.payments_yookassa, stars=s.payments_stars,
-                         guarantee_days=s.refund_days)
+                         guarantee_days=s.refund_days, guarantee=guarantee)
     await bot.send_message(chat_id, text, reply_markup=kb(texts.paywall_buttons(prices, card=s.payments_yookassa,
                                                                                 stars=s.payments_stars)))
 
@@ -80,7 +81,12 @@ async def send_invoice(bot: Bot, chat_id: int, inv: billing.Invoice) -> None:
 
 @router.callback_query(F.data.startswith("pay:"))
 async def cb_pay(call: CallbackQuery, bot: Bot) -> None:
+    from bot.handlers_start import consent_gate
+
     _, product, method = call.data.split(":", 2)
+    if not await consent_gate(call.message, call.from_user):
+        await call.answer()
+        return
     outbox = Outbox()
     if product == "free":
         async with session_scope() as s:
@@ -91,16 +97,23 @@ async def cb_pay(call: CallbackQuery, bot: Bot) -> None:
         if p is None:
             await call.message.answer(texts.PROMO_BAD)
             return
-        await after_payment_message(bot, call.message.chat.id, uid, p.product)
+        await after_payment_message(bot, call.message.chat.id, uid, p.product, bool(getattr(p, "activated_now", None)))
         return
     async with session_scope() as s:
         user, _ = await load_user(s, call.from_user)
+        free = None
         try:
             inv = await billing.build_invoice(s, user, product, method)
-        except ValueError:
+        except ValueError as e:
             inv = None
+            if str(e) == "free":  # промокод на 100% — сразу активируем, без счёта
+                free = await billing.apply_free_promo(s, user, product)
+        uid = user.id
         await log_event(s, "invoice_opened", user.id, product=product, method=method, via="bot")
     await call.answer()
+    if free is not None:
+        await after_payment_message(bot, call.message.chat.id, uid, free.product, bool(getattr(free, "activated_now", None)))
+        return
     if inv is None:
         await call.message.answer(texts.PAY_DISABLED)
         return
@@ -138,47 +151,70 @@ async def successful_payment(message: Message, bot: Bot) -> None:
         exp = None
         if sp.subscription_expiration_date:
             exp = datetime.fromtimestamp(sp.subscription_expiration_date, tz=UTC)
-        await billing.record_payment(
+        renewal = bool(sp.is_recurring) and not sp.is_first_recurring
+        if parsed is None or not await billing.payment_amount_ok(s, user, product, sp.currency, sp.total_amount, promo,
+                                                                  renewal):
+            log.error("payment check failed: payload=%s amount=%s %s user=%s", sp.invoice_payload, sp.total_amount,
+                      sp.currency, user.id)
+            for admin in get_settings().admin_ids:
+                outbox.add(OutMsg(admin, f"⚠️ Платёж не прошёл проверку суммы: user {user.id}, {sp.total_amount} {sp.currency}, "
+                                         f"payload {texts.e(sp.invoice_payload)}, charge {sp.telegram_payment_charge_id}. "
+                                         f"Проверь и при необходимости выдай доступ /grant.", kind="admin"))
+            await message.answer("Оплата получена, но сумма не совпала с тарифом — администратор проверит и откроет доступ. "
+                                 "Вопросы: /paysupport")
+            uid = None
+        else:
+            uid = user.id
+    if uid is None:
+        await flush(bot, outbox)
+        return
+    async with session_scope() as s:
+        user, _ = await load_user(s, message.from_user)
+        p = await billing.record_payment(
             s, user, product=product, provider="stars" if sp.currency == "XTR" else "yookassa", currency=sp.currency,
             amount=sp.total_amount, telegram_charge_id=sp.telegram_payment_charge_id,
             provider_charge_id=sp.provider_payment_charge_id or None, promo=promo,
-            is_recurring=bool(sp.is_recurring), renewal=bool(sp.is_recurring) and not sp.is_first_recurring,
-            subscription_expiration=exp,
+            is_recurring=bool(sp.is_recurring), renewal=renewal, subscription_expiration=exp,
             email=sp.order_info.email if sp.order_info else None, outbox=outbox,
         )
-        uid = user.id
     if sp.is_recurring and not sp.is_first_recurring:
         await message.answer(texts.pay_ok_subscription(exp, True) if exp else "Абонемент продлён ✅")
     else:
-        await after_payment_message(bot, message.chat.id, uid, product)
+        await after_payment_message(bot, message.chat.id, uid, product, bool(getattr(p, "activated_now", None)))
     await flush(bot, outbox)
 
 
-async def after_payment_message(bot: Bot, chat_id: int, user_id: int, product: str) -> None:
+async def after_payment_message(bot: Bot, chat_id: int, user_id: int, product: str, activated: bool = False) -> None:
+    """Что сказать после оплаты (звёзды, код, промокод, ручная выдача). activated — забег стартовал этой оплатой."""
     async with session_scope() as s:
         user = await s.get(User, user_id)
         enr = await current_enrollment(s, user.id)
         view = await load_view(s, user, enr)
-        until = user.subscription_until
-        recurring = user.subscription_recurring
+        until, recurring = user.subscription_until, user.subscription_recurring
     if product in ("month", "year") and until:
         await bot.send_message(chat_id, texts.pay_ok_subscription(until, recurring))
-    if view.state in ("to_read", "clarify"):
+    book_buttons = kb([
+        [{"text": "📖 У меня бумажная книга", "callback": "book:paper"}],
+        [{"text": "Добавить книгу в приложении", "webapp": "book"}],
+    ])
+    if activated and view.state in ("to_read", "clarify"):
         from bot.handlers_day import today_kb, today_text
 
-        msg = texts.pay_ok_started_today() if product == "run" else "Забег стартует сегодня 🔥"
-        await bot.send_message(chat_id, msg)
+        await bot.send_message(chat_id, texts.pay_ok_started_today() if product == "run" else "Забег стартует сегодня 🔥")
         await bot.send_message(chat_id, today_text(view), reply_markup=today_kb(view))
-    elif view.state == "not_started":
+    elif activated and view.state == "not_started":
+        await bot.send_message(chat_id, texts.pay_ok_started(view.starts_on) if product == "run"
+                               else f"Забег открыт, старт — {texts.d(view.starts_on)}.")
+    elif view.state in ("to_read", "clarify", "checking", "done_today", "not_started", "waiting_start"):
+        # идёт другой забег (например, спринт) — покупка подождёт следующей книги
         if product == "run":
-            await bot.send_message(chat_id, texts.pay_ok_started(view.starts_on))
-        else:
-            await bot.send_message(chat_id, f"Забег открыт, старт — {texts.d(view.starts_on)}.")
+            await bot.send_message(chat_id, texts.PAY_OK_NEXT)
+    elif view.state == "plan_needed":
+        await bot.send_message(chat_id, texts.PAY_OK_PLAN, reply_markup=kb([[{"text": "Выбрать срок", "webapp": "book"}]]))
     elif product == "run":
-        await bot.send_message(chat_id, texts.PAY_OK_CREDIT, reply_markup=kb([
-            [{"text": "📖 У меня бумажная книга", "callback": "book:paper"}],
-            [{"text": "Добавить книгу в приложении", "webapp": "book"}],
-        ]))
+        await bot.send_message(chat_id, texts.PAY_OK_CREDIT, reply_markup=book_buttons)
+    elif view.state in ("no_run", "no_book", "finished", "expired", "refunded", "parse_failed"):
+        await bot.send_message(chat_id, texts.add_book_prompt(), reply_markup=book_buttons)
 
 
 @router.callback_query(F.data == "next:run")
@@ -250,7 +286,7 @@ async def redeem_and_reply(bot: Bot, chat_id: int, tg_user, code: str) -> bool:
         await bot.send_message(chat_id, texts.CODE_RESULT.get(status, texts.CODE_RESULT["not_found"]))
         return False
     await bot.send_message(chat_id, texts.code_ok(p.product))
-    await after_payment_message(bot, chat_id, uid, p.product)
+    await after_payment_message(bot, chat_id, uid, p.product, bool(getattr(p, "activated_now", None)))
     await flush(bot, outbox)
     return True
 
@@ -273,12 +309,27 @@ async def cb_code(call: CallbackQuery, state: FSMContext) -> None:
 
 @router.message(Flow.code, F.text)
 async def msg_code(message: Message, state: FSMContext, bot: Bot) -> None:
-    if message.text.startswith("/"):
-        await state.clear()
+    """Одна попытка ввода кода — потом бот снова принимает пересказы как обычно."""
+    text = message.text.strip()
+    await state.clear()
+    if text.startswith("/"):
         return
-    ok = await redeem_and_reply(bot, message.chat.id, message.from_user, message.text)
-    if ok:
-        await state.clear()
+    if len(text) > 24 or len(text.split()) > 2:
+        # это не код, а пересказ — не теряем его
+        from bot.handlers_day import _retell
+
+        await _retell(message, bot, message.text, source="text")
+        return
+    if not await redeem_and_reply(bot, message.chat.id, message.from_user, text):
+        await message.answer(texts.CODE_RETRY)
+
+
+@router.message(Flow.code, F.voice | F.audio | F.video_note)
+async def msg_code_voice(message: Message, state: FSMContext, bot: Bot) -> None:
+    await state.clear()
+    from bot.handlers_day import handle_voice
+
+    await handle_voice(message, bot, state)
 
 
 # --------------------------------------------------------------------------- промокоды
@@ -337,7 +388,8 @@ async def cb_money_back(call: CallbackQuery, bot: Bot) -> None:
     async with session_scope() as s:
         user, _ = await load_user(s, call.from_user)
         res = await billing.request_refund(s, user, bot, outbox)
-    await call.message.answer(texts.REFUND_OK if res == "ok" else texts.REFUND_REQUESTED if res == "requested" else texts.e(res))
+    replies = {"ok": texts.REFUND_OK, "requested": texts.REFUND_REQUESTED, "requested_partial": texts.REFUND_REQUESTED_PARTIAL}
+    await call.message.answer(replies.get(res) or texts.e(res))
     await flush(bot, outbox)
 
 

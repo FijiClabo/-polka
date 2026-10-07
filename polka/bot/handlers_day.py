@@ -59,12 +59,18 @@ def today_kb(v: DayView):
 
 
 @router.message(Command("today"))
-async def cmd_today(message: Message) -> None:
+async def cmd_today(message: Message, bot: Bot) -> None:
     async with session_scope() as s:
         user, _ = await load_user(s, message.from_user)
+        uid = user.id
         enr = await current_enrollment(s, user.id)
         v = await load_view(s, user, enr)
         text, markup = today_text(v), today_kb(v)
+    if v.state in ("no_run", "no_book", "awaiting_payment"):
+        from bot.handlers_start import send_status
+
+        await send_status(bot, message.chat.id, uid)  # там нужные кнопки: книга или тарифы
+        return
     await message.answer(text, reply_markup=markup)
 
 
@@ -94,9 +100,13 @@ async def reply_outcome(message: Message, out: RetellOutcome, bot: Bot, user_id:
 
 async def _retell(message: Message, bot: Bot, text: str, *, source: str, voice_id: str | None = None,
                   duration: int | None = None) -> None:
+    from bot.handlers_start import require_consent
+
     async with session_scope() as s:
         user, _ = await load_user(s, message.from_user)
         uid = user.id
+        if not await require_consent(message, user, s):
+            return
     await bot.send_chat_action(message.chat.id, "typing")
     outbox = Outbox()
     out = await submit_retelling(uid, text, source=source, via="bot", voice_file_id=voice_id,
@@ -119,6 +129,10 @@ async def msg_voice_trial(message: Message, bot: Bot, state: FSMContext) -> None
 
 
 async def handle_voice(message: Message, bot: Bot, state: FSMContext, trial: bool = False) -> None:
+    from bot.handlers_start import consent_gate
+
+    if not trial and not await consent_gate(message, message.from_user):
+        return  # голос не отправляем на распознавание без согласия
     media = message.voice or message.audio or message.video_note
     duration = int(getattr(media, "duration", 0) or 0)
     if duration > get_settings().voice_max_sec:

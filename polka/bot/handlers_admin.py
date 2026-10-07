@@ -15,7 +15,7 @@ from sqlalchemy import func, select
 
 import texts
 from bot.common import is_admin, load_user
-from bot.ui import flush
+from bot.ui import deep_link, flush
 from core import clock
 from db.models import Enrollment, Event, PromoCode, Purchase, Retelling, Run, Segment, User
 from db.session import session_scope
@@ -105,8 +105,27 @@ async def cmd_run_new(message: Message, command: CommandObject) -> None:
         await s.flush()
         await log_event(s, "run_created", host.id, run.id)
         rid = run.id
-    await message.answer(f"Забег «{texts.e(parts[0])}» создан (id {rid}). Старт: {texts.d(start)}. "
-                         "Новые участники записываются в него автоматически, оплату отмечай /grant.")
+    link = deep_link("group")
+    await message.answer(f"Групповой забег «{texts.e(parts[0])}» создан (id {rid}). Старт: {texts.d(start)}.\n"
+                         f"Ссылка для участников: {link or 't.me/<бот>?start=group'}\n"
+                         "В группу попадают только по этой ссылке, остальные читают в личных забегах. "
+                         "Оплату вручную отмечай /grant, закрыть набор — /run_close.")
+
+
+@router.message(Command("run_close"))
+async def cmd_run_close(message: Message) -> None:
+    """Закрыть набор в групповой забег: новые участники по ссылке больше не попадут, идущие продолжают."""
+    if not await _guard(message):
+        return
+    async with session_scope() as s:
+        run = await current_main_run(s)
+        if run is None:
+            await message.answer("Открытого группового забега нет.")
+            return
+        run.status = "finished"
+        await log_event(s, "run_closed", None, run.id)
+        title = run.title
+    await message.answer(f"Набор в «{texts.e(title)}» закрыт. Участники дочитывают как обычно.")
 
 
 @router.message(Command("run_date"))
@@ -187,7 +206,7 @@ async def cmd_grant(message: Message, command: CommandObject, bot: Bot) -> None:
             await grant(s, u, cohort)
             start = cohort_enr.plan_start_date or cohort.start_date
         else:
-            await billing.grant_manual(s, u, product, outbox)
+            granted = await billing.grant_manual(s, u, product, outbox)
             start = None
         tg_id, uid, name = u.tg_id, u.id, u.display_name
     if cohort_enr is not None:
@@ -195,7 +214,7 @@ async def cmd_grant(message: Message, command: CommandObject, bot: Bot) -> None:
     else:
         from bot.handlers_pay import after_payment_message
 
-        await after_payment_message(bot, tg_id, uid, product)
+        await after_payment_message(bot, tg_id, uid, product, bool(getattr(granted, "activated_now", None)))
     await flush(bot, outbox)
     await message.answer(f"Доступ выдан: {texts.e(name)} — {billing.product_title(product).lower()}.")
 

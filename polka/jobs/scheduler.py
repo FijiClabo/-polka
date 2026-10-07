@@ -39,12 +39,24 @@ def _due(user: User, t) -> bool:
 async def tick(bot: Bot) -> None:
     outbox = Outbox()
     await _activate_runs()
+    await _stuck_books()
     await _daily(outbox)
     await _sales(outbox)
     await process_pending_queue(outbox)
     await flush(bot, outbox)
     await _summaries(limit=5)
     await _conspects()
+
+
+async def _stuck_books() -> None:
+    """Разбор, прерванный перезапуском сервера, не должен висеть вечно: помечаем «не удалось» — можно загрузить снова."""
+    async with session_scope() as s:
+        books = list(await s.scalars(
+            select(Book).where(Book.parse_status == "pending", Book.created_at < clock.now() - timedelta(minutes=15))
+        ))
+        for b in books:
+            b.parse_status = "failed"
+            b.parse_error = "interrupted"
 
 
 async def _activate_runs() -> None:
@@ -65,10 +77,11 @@ async def _daily(outbox: Outbox) -> None:
                 if enr is None or enr.status not in ("paid", "active"):
                     continue
                 user = await s.get(User, enr.user_id)
-                if user is None or user.bot_blocked:
+                if user is None:
                     continue
-                await close_pending_days(s, enr, user, outbox)
-                await _morning_evening(s, enr, user, outbox)
+                await close_pending_days(s, enr, user, outbox)  # дни закрываются и у тех, кто заблокировал бота
+                if not user.bot_blocked:
+                    await _morning_evening(s, enr, user, outbox)
         except Exception:
             log.exception("daily job failed for enrollment %s", eid)
 
@@ -125,7 +138,7 @@ async def _morning_evening(s, enr: Enrollment, user: User, outbox: Outbox) -> No
 
 async def _sales(outbox: Outbox) -> None:
     """Напоминания, которые помогают продажам: каждое уходит человеку один раз и не раньше утра."""
-    from services.billing import subscription_active
+    from services.billing import guarantee_available, subscription_active
     from services.runs import sprint_used
 
     s_ = get_settings()
@@ -150,7 +163,8 @@ async def _sales(outbox: Outbox) -> None:
                 buttons = [[{"text": "Открыть забег", "webapp": "pay"}]]
                 if not await sprint_used(s, user.id):
                     buttons.append([{"text": "Сначала спринт на 7 дней — бесплатно", "callback": "sprint:start"}])
-                outbox.add(OutMsg(user.tg_id, texts.paywall_nudge(book.title if book else None, s_.refund_days),
+                guarantee = await guarantee_available(s, user)
+                outbox.add(OutMsg(user.tg_id, texts.paywall_nudge(book.title if book else None, s_.refund_days, guarantee),
                                   buttons=buttons, kind="paywall"))
                 await log_event(s, "paywall_nudge", user.id, enr.run_id)
 
@@ -177,6 +191,13 @@ async def _sales(outbox: Outbox) -> None:
                 await log_event(s, "sub_expiring_sent", user.id, stage=stage)
     except Exception:
         log.exception("sales job failed")
+    try:
+        from services.site_orders import expire_stale_orders
+
+        async with session_scope() as s:
+            await expire_stale_orders(s)
+    except Exception:
+        log.exception("stale orders job failed")
 
 
 async def _summaries(limit: int) -> None:

@@ -48,6 +48,10 @@ async def _enrollment_for_book(s, user: User):
 
 @router.message(F.document)
 async def msg_document(message: Message, bot: Bot, state: FSMContext) -> None:
+    from bot.handlers_start import consent_gate
+
+    if not await consent_gate(message, message.from_user):
+        return
     doc = message.document
     name = doc.file_name or "book"
     fmt = detect_format(name)
@@ -167,6 +171,7 @@ async def cb_plan(call: CallbackQuery, bot: Bot) -> None:
         try:
             await confirm_plan(s, user, enr, days)
         except PlanError as e:
+            await call.message.edit_reply_markup(reply_markup=None)
             await call.message.answer(f"Не получилось: {texts.e(str(e))}")
             return
         book = await s.get(Book, enr.book_id)
@@ -188,13 +193,21 @@ async def cb_plan(call: CallbackQuery, bot: Bot) -> None:
 
 @router.callback_query(F.data == "book:paper")
 async def cb_paper(call: CallbackQuery, state: FSMContext) -> None:
+    from bot.handlers_start import consent_gate
+
     await call.answer()
+    if not await consent_gate(call.message, call.from_user):
+        return
     await state.set_state(Flow.paper_title)
     await call.message.answer(texts.PAPER_ASK_TITLE)
 
 
 @router.message(Command("paper"))
 async def cmd_paper(message: Message, state: FSMContext) -> None:
+    from bot.handlers_start import consent_gate
+
+    if not await consent_gate(message, message.from_user):
+        return
     await state.set_state(Flow.paper_title)
     await message.answer(texts.PAPER_ASK_TITLE)
 

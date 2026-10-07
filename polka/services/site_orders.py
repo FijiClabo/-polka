@@ -16,6 +16,7 @@ import re
 import smtplib
 import ssl
 import uuid
+from datetime import timedelta
 from email.message import EmailMessage
 from pathlib import Path
 
@@ -65,6 +66,8 @@ async def create_order(session: AsyncSession, *, product: str, email: str, promo
     price = prices[product]
     if price.free:
         raise OrderError("Этот промокод даёт бесплатный доступ — активируй его в боте командой /promo.")
+    if price.promo and not await billing.promo_take(session, price.promo):
+        raise OrderError("Промокод только что закончился — цена без скидки. Обнови страницу.")  # резерв под этот заказ
     p = Purchase(
         user_id=None, product=product, provider="yookassa", currency="RUB", amount=price.rub * 100,
         list_amount=price.list_rub * 100, promo_code=price.promo, status="pending", order_id=uuid.uuid4().hex,
@@ -108,6 +111,8 @@ async def create_payment(p: Purchase, return_url: str) -> str:
 
 
 async def fetch_payment(payment_id: str) -> dict | None:
+    if not re.fullmatch(r"[0-9a-f-]{8,64}", payment_id or ""):
+        return None  # id из уведомления — чужие данные, в адрес запроса их подставляем только после проверки
     async with httpx.AsyncClient(timeout=20) as c:
         r = await c.get(f"{billing.YOOKASSA_API}/payments/{payment_id}", auth=_auth())
     if r.status_code != 200:
@@ -128,19 +133,15 @@ async def apply_payment_state(session: AsyncSession, p: Purchase, payment: dict,
             return False
         p.status = "paid"
         p.activation_code = billing.new_activation_code()
-        if p.promo_code:
-            from db.models import PromoCode
-
-            code = await session.get(PromoCode, p.promo_code)
-            if code is not None:
-                code.used += 1
-        await session.flush()
+        await session.flush()  # промокод учтён при создании заказа
         await log_event(session, "purchase", None, product=p.product, provider="yookassa", currency="RUB",
                         amount=p.amount, promo=p.promo_code, order=p.id, source=p.source)
         await billing.notify_admins_payment(session, None, p, outbox)
         return True
     if status == "canceled" and p.status == "pending":
         p.status = "canceled"
+        if p.promo_code:
+            await billing.promo_release(session, p.promo_code)  # заказ не оплачен — промокод снова свободен
         await log_event(session, "site_order_canceled", None, order=p.id,
                         reason=(payment.get("cancellation_details") or {}).get("reason"))
     return False
@@ -162,11 +163,24 @@ async def handle_notification(session: AsyncSession, body: dict, outbox: Outbox 
             return p
         return None
     if event == "refund.succeeded":
-        pid = obj.get("payment_id")
+        refund = await fetch_refund(obj.get("id", "")) if obj.get("id") else None
+        if not refund or refund.get("status") != "succeeded":
+            return None  # возврат подтверждается только ответом API ЮKassa
+        pid = refund.get("payment_id")
         p = await session.scalar(select(Purchase).where(Purchase.provider_charge_id == pid)) if pid else None
         if p is not None and p.status != "refunded":
             await billing.mark_refunded(session, p.id)
+            await log_event(session, "refund_webhook", p.user_id, order=p.id,
+                            amount=(refund.get("amount") or {}).get("value"))
     return None
+
+
+async def fetch_refund(refund_id: str) -> dict | None:
+    if not re.fullmatch(r"[0-9a-f-]{8,64}", refund_id or ""):
+        return None
+    async with httpx.AsyncClient(timeout=20) as c:
+        r = await c.get(f"{billing.YOOKASSA_API}/refunds/{refund_id}", auth=_auth())
+    return r.json() if r.status_code == 200 else None
 
 
 async def refresh_order(session: AsyncSession, order_id: str, outbox: Outbox | None = None) -> tuple[Purchase | None, bool]:
@@ -232,3 +246,21 @@ async def email_code(p: Purchase) -> bool:
     except Exception as e:
         log.warning("email to order %s failed: %s", p.id, e)
         return False
+
+
+async def expire_stale_orders(session: AsyncSession, older_than: timedelta = timedelta(days=2)) -> int:
+    """Неоплаченные заказы старше двух дней закрываем и освобождаем зарезервированный промокод."""
+    from services.common import now
+
+    rows = list(await session.scalars(
+        select(Purchase).where(Purchase.status == "pending", Purchase.created_at < now() - older_than).with_for_update()
+    ))
+    for p in rows:
+        payment = await fetch_payment(p.provider_charge_id) if p.provider_charge_id and get_settings().site_checkout else None
+        if payment and await apply_payment_state(session, p, payment, None):
+            continue  # оказалось оплачено — уведомление просто потерялось
+        if p.status == "pending":
+            p.status = "canceled"
+            if p.promo_code:
+                await billing.promo_release(session, p.promo_code)
+    return len(rows)

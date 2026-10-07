@@ -42,10 +42,11 @@ from services.books import (
     update_book_meta,
 )
 from services.common import Outbox, log_event, today_for
+from services.consent import give_consent, has_consent
 from services.flow import submit_retelling
 from services.progress import DayView, accepted_by_day, effective_freezes, load_view
 from services.retell import RetellOutcome
-from services.runs import current_enrollment, ensure_enrollment, sprint_used, start_sprint
+from services.runs import current_enrollment, ensure_enrollment, sprint_block, sprint_used, start_sprint
 from services.shelf import achievements_of, conspect, shelf
 from services.social import (
     are_friends,
@@ -184,7 +185,22 @@ def _me(u: User, enr: Enrollment | None, view: DayView | None) -> dict:
 async def get_me(user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
     enr = await current_enrollment(s, user.id)
     view = await load_view(s, user, enr)
-    return _me(user, enr, view)
+    return {**_me(user, enr, view), "consent": await has_consent(s, user)}
+
+
+@router.post("/consent")
+async def post_consent(user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    """Согласие на обработку данных из мини-приложения (отдельная запись в журнале согласий)."""
+    await give_consent(s, user, "webapp")
+    return {"ok": True}
+
+
+async def need_consent(user: User = Depends(current_user), s: AsyncSession = Depends(get_session)) -> User:
+    """Книги, пересказы и оплата — только после согласия на обработку персональных данных."""
+    if not await has_consent(s, user):
+        raise HTTPException(403, "Сначала нужно согласие на обработку данных")
+    await s.commit()  # не держим транзакцию открытой: проверка пересказа идёт в своих сессиях
+    return user
 
 
 @router.patch("/me")
@@ -248,6 +264,7 @@ async def _partner_block(s: AsyncSession, enr: Enrollment | None) -> dict | None
 
 @router.get("/today")
 async def get_today(user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    await billing.activate_pending(s, user)  # оплачено заранее — стартуем ждущий план
     enr = await current_enrollment(s, user.id, lock=True)
     if enr is not None:
         from services.progress import close_pending_days
@@ -464,17 +481,18 @@ async def patch_book(body: BookPatch, user: User = Depends(current_user), s: Asy
 
 
 @router.post("/book/paper")
-async def post_paper(body: PaperBook, user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+async def post_paper(body: PaperBook, user: User = Depends(need_consent), s: AsyncSession = Depends(get_session)):
     enr = await _book_enrollment(s, user)
     book = await add_paper_book(s, user, enr, body.title, body.author, body.pages)
     return {"book": book_brief(book)}
 
 
 @router.post("/sprint")
-async def post_sprint(user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+async def post_sprint(user: User = Depends(need_consent), s: AsyncSession = Depends(get_session)):
+    block = await sprint_block(s, user.id)
     enr = await start_sprint(s, user)
     if enr is None:
-        raise HTTPException(409, "Бесплатный спринт уже был — дальше забег по тарифу")
+        raise HTTPException(409, texts.SPRINT_BUSY if block == "running" else "Бесплатный спринт уже был — дальше забег по тарифу")
     return {"ok": True, "enrollment_id": enr.id}
 
 
@@ -518,6 +536,8 @@ async def _billing_state(s: AsyncSession, user: User) -> dict:
         "refund": {"eligible": chk.eligible, "partial": chk.partial, "reason": chk.reason if not chk.eligible else "",
                    "until": chk.until.isoformat() if chk.until else None},
         "guarantee_days": st.refund_days,
+        "guarantee_available": await billing.guarantee_available(s, user),
+        "freezes_sub": st.sub_freezes_per_week,
         "offer_url": f"{base}/offer" if base else None,
         "privacy_url": f"{base}/privacy" if base else None,
         "manual_info": st.payment_info,
@@ -535,6 +555,7 @@ async def _billing_state(s: AsyncSession, user: User) -> dict:
 
 @router.get("/billing")
 async def get_billing(user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    await billing.activate_pending(s, user)
     await log_event(s, "paywall_shown", user.id, via="webapp")
     return await _billing_state(s, user)
 
@@ -545,7 +566,7 @@ class InvoiceBody(BaseModel):
 
 
 @router.post("/billing/invoice")
-async def post_invoice(body: InvoiceBody, user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+async def post_invoice(body: InvoiceBody, user: User = Depends(need_consent), s: AsyncSession = Depends(get_session)):
     """Ссылка на оплату для Telegram.WebApp.openInvoice."""
     from aiogram.types import LabeledPrice
 
@@ -586,7 +607,7 @@ class FreeBody(BaseModel):
 
 
 @router.post("/billing/free")
-async def post_free(body: FreeBody, user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+async def post_free(body: FreeBody, user: User = Depends(need_consent), s: AsyncSession = Depends(get_session)):
     p = await billing.apply_free_promo(s, user, body.product)
     if p is None:
         raise HTTPException(400, "Промокод не даёт бесплатный доступ")
@@ -598,7 +619,7 @@ class CodeBody(BaseModel):
 
 
 @router.post("/billing/redeem")
-async def post_redeem(body: CodeBody, user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+async def post_redeem(body: CodeBody, user: User = Depends(need_consent), s: AsyncSession = Depends(get_session)):
     """Код активации из заказа на сайте."""
     out = Outbox()
     status, p = await billing.redeem_code(s, user, body.code, out)
@@ -624,14 +645,14 @@ async def post_refund(user: User = Depends(current_user), s: AsyncSession = Depe
     res = await billing.request_refund(s, user, _bot, out)
     await s.commit()
     await _flush(out)
-    if res not in ("ok", "requested"):
+    if res not in ("ok", "requested", "requested_partial"):
         raise HTTPException(400, res)
     return {"result": res}
 
 
 @router.post("/book/upload")
 async def post_upload(
-    background: BackgroundTasks, file: UploadFile = File(...), user: User = Depends(current_user),
+    background: BackgroundTasks, file: UploadFile = File(...), user: User = Depends(need_consent),
     s: AsyncSession = Depends(get_session),
 ):
     name = file.filename or "book"
@@ -735,7 +756,7 @@ class RetellBody(BaseModel):
 
 
 @router.post("/retell")
-async def post_retell(body: RetellBody, user: User = Depends(current_user)):
+async def post_retell(body: RetellBody, user: User = Depends(need_consent)):
     out = Outbox()
     res = await submit_retelling(user.id, body.text, source="text", via="webapp", outbox=out)
     await _flush(out)
@@ -744,7 +765,7 @@ async def post_retell(body: RetellBody, user: User = Depends(current_user)):
 
 @router.post("/retell/voice")
 async def post_retell_voice(
-    audio: UploadFile = File(...), duration: float = Form(0), user: User = Depends(current_user),
+    audio: UploadFile = File(...), duration: float = Form(0), user: User = Depends(need_consent),
 ):
     data = await audio.read(15 * 1024 * 1024)
     if not data:
@@ -757,7 +778,7 @@ async def post_retell_voice(
     if dur > get_settings().voice_max_sec + 5:
         raise HTTPException(400, "Запись длиннее 3 минут")
     if not text.strip():
-        raise HTTPException(422, "Не расслышал. Попробуй ещё раз поближе к микрофону.")
+        raise HTTPException(422, "Не получилось расслышать. Попробуй ещё раз поближе к микрофону.")
     out = Outbox()
     res = await submit_retelling(user.id, text, source="voice", via="webapp", voice_duration=int(dur), outbox=out)
     await _flush(out)

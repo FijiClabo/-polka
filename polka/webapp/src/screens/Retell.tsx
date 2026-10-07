@@ -8,7 +8,7 @@ import { useNav } from "../nav";
 import { closeApp, haptic } from "../tg";
 
 const MAX_SEC = 180;
-const MIN_CHARS = 50;
+const MIN_CHARS = 51; // «длиннее 50 знаков», как в правилах бота
 
 const ACH: Record<string, [string, string]> = {
   first_page: ["📖", "Первая страница"],

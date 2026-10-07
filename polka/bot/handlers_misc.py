@@ -85,7 +85,13 @@ async def cmd_book(message: Message) -> None:
 
 @router.message(Command("delete_me"))
 async def cmd_delete_me(message: Message) -> None:
-    await message.answer(texts.DELETE_CONFIRM, reply_markup=kb([[
+    from services.billing import subscription_active
+
+    async with session_scope() as s:
+        u = await get_user_by_tg(s, message.from_user.id)
+        sub_until = u.subscription_until if u and subscription_active(u) else None
+        credits = u.run_credits if u else 0
+    await message.answer(texts.delete_confirm(sub_until, credits), reply_markup=kb([[
         {"text": "Да, удалить всё", "callback": "del:yes"}, {"text": "Отмена", "callback": "del:no"},
     ]]))
 
@@ -100,6 +106,9 @@ async def cb_delete(call: CallbackQuery, state: FSMContext) -> None:
     async with session_scope() as s:
         u = await get_user_by_tg(s, call.from_user.id)
         if u:
+            from services.billing import cancel_subscription
+
+            await cancel_subscription(s, u, call.bot)  # автопродление звёзд не должно пережить удаление
             await delete_user_data(s, u)
     await state.clear()
     await call.message.answer(texts.DELETED)

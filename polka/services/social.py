@@ -219,6 +219,19 @@ async def make_pair(session: AsyncSession, run: Run, ea: Enrollment, eb: Enrollm
     return pair
 
 
+async def release_stale_pair(session: AsyncSession, enr: Enrollment | None) -> None:
+    """Напарник уже закончил своё участие (дочитал, выбыл, вернул деньги) — освобождаем место для новой пары."""
+    if enr is None or enr.pair_id is None:
+        return
+    other = await session.scalar(
+        select(Enrollment).where(Enrollment.pair_id == enr.pair_id, Enrollment.id != enr.id).limit(1)
+    )
+    if other is None or other.status not in OPEN_STATUSES:
+        enr.pair_id = None
+        if other is not None:
+            other.pair_id = None
+
+
 async def join_pair_by_code(session: AsyncSession, user: User, code: str, outbox: Outbox) -> tuple[str, User | None]:
     inviter_enr = await session.scalar(select(Enrollment).where(Enrollment.pair_code == code))
     if inviter_enr is None:
@@ -226,12 +239,14 @@ async def join_pair_by_code(session: AsyncSession, user: User, code: str, outbox
     inviter = await session.get(User, inviter_enr.user_id)
     if inviter is None or inviter.id == user.id:
         return "self", None
+    await release_stale_pair(session, inviter_enr)
     if inviter_enr.pair_id:
         return "taken", inviter
     if inviter_enr.status not in OPEN_STATUSES:
         return "not_found", None
     run = await session.get(Run, inviter_enr.run_id)
     my = await _enrollment_to_pair(session, user, run)
+    await release_stale_pair(session, my)
     if my.pair_id:
         return "already_paired", inviter
     pair = await make_pair(session, run, inviter_enr, my)

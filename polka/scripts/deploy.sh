@@ -7,6 +7,13 @@ cd "$(dirname "$0")/.."
 [ -f .env ] || { echo "Нет файла .env. Сначала: cp .env.example .env && nano .env"; exit 1; }
 grep -q '^BOT_TOKEN=.\+' .env || { echo "В .env не заполнен BOT_TOKEN"; exit 1; }
 grep -q '^DOMAIN=.\+' .env || { echo "В .env не заполнен DOMAIN"; exit 1; }
+# секрет вебхука: если пустой или из примера — создаём случайный (без него можно подделать «оплату»)
+if ! grep -qE '^WEBHOOK_SECRET=[A-Za-z0-9_-]{16,}$' .env || grep -q '^WEBHOOK_SECRET=change-me' .env; then
+  secret="$(openssl rand -hex 32)"
+  if grep -q '^WEBHOOK_SECRET=' .env; then sed -i "s/^WEBHOOK_SECRET=.*/WEBHOOK_SECRET=${secret}/" .env
+  else echo "WEBHOOK_SECRET=${secret}" >> .env; fi
+  echo "==> Создан случайный WEBHOOK_SECRET"
+fi
 
 if [ -d ../.git ] || [ -d .git ]; then
   echo "==> Забираю обновления из git"
