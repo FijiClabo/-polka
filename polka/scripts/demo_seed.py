@@ -56,7 +56,8 @@ class DemoLLM:
                                     ensure_ascii=False), "demo", "demo")
 
 
-RETELLS = [c["retelling"] for c in DEMO["cases"] if c["type"] == "honest_detailed"]
+RETELLS = [c["retelling"] for c in DEMO["cases"]
+           if c["type"] == "honest_detailed" and not DEMO["segments"].get(c["segment"], {}).get("sensitive")]
 
 
 def demo_book_bytes() -> bytes:

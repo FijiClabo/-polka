@@ -2,6 +2,7 @@
 
     python -m scripts.ai_eval                 # все настроенные провайдеры
     python -m scripts.ai_eval --provider yandex
+    python -m scripts.ai_eval --sensitive     # только «трудные» сцены: проверить фильтры содержания
 
 Цель: честные пересказы отклонены (rejected) менее чем в 5% случаев.
 Результаты сохраняются в tests/ai_eval/results/<дата>_<провайдер>.json
@@ -52,8 +53,9 @@ async def run_provider(name: str, provider, ds: dict) -> dict:
             verdict, reply, question = "error", str(e)[:200], None
         dt = time.monotonic() - t
         ok = verdict in case["ok"]
+        sensitive = bool(ds["segments"].get(case["segment"], {}).get("sensitive"))
         rows.append({"id": case["id"], "type": case["type"], "expected": case["expected"], "got": verdict,
-                     "ok": ok, "sec": round(dt, 1), "reply": reply, "question": question})
+                     "ok": ok, "sec": round(dt, 1), "reply": reply, "question": question, "sensitive": sensitive})
         mark = "✓" if ok else "✗"
         print(f"  {mark} {case['id']:4} {case['type']:16} expected={case['expected']:9} got={verdict:9} {dt:4.1f}s  {reply[:70]}")
     honest = [r for r in rows if r["type"].startswith("honest")]
@@ -72,6 +74,10 @@ async def run_provider(name: str, provider, ds: dict) -> dict:
         "fake_total": len(fake),
         "fake_caught": caught,
         "errors": sum(1 for r in rows if r["got"] == "error"),
+        # отказ модели или фильтр содержания на «трудной» сцене выглядит как error: день засчитается без сверки
+        "sensitive_total": sum(1 for r in rows if r["sensitive"]),
+        "sensitive_errors": sum(1 for r in rows if r["sensitive"] and r["got"] == "error"),
+        "sensitive_matched": sum(1 for r in rows if r["sensitive"] and r["ok"]),
         "avg_sec": round(sum(r["sec"] for r in rows) / max(len(rows), 1), 1),
         "verdicts": dict(Counter(r["got"] for r in rows)),
     }
@@ -81,9 +87,12 @@ async def run_provider(name: str, provider, ds: dict) -> dict:
 async def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--provider", choices=["anthropic", "yandex"], default=None)
+    ap.add_argument("--sensitive", action="store_true", help="только отрезки с пометкой sensitive")
     args = ap.parse_args()
     s = get_settings()
     ds = json.loads(DATASET.read_text(encoding="utf-8"))
+    if args.sensitive:
+        ds["cases"] = [c for c in ds["cases"] if ds["segments"].get(c["segment"], {}).get("sensitive")]
     providers = []
     if args.provider in (None, "anthropic") and s.anthropic_api_key:
         providers.append(("anthropic", AnthropicProvider(s)))
@@ -104,6 +113,9 @@ async def main() -> None:
             f"Выдуманные пойманы: {sm['fake_caught']}/{sm['fake_total']}. Ошибок: {sm['errors']}. "
             f"Среднее время: {sm['avg_sec']} с."
         )
+        if sm["sensitive_total"]:
+            print(f"Трудные сцены: совпало {sm['sensitive_matched']}/{sm['sensitive_total']}, "
+                  f"отказов и срабатываний фильтра: {sm['sensitive_errors']}.")
         out = RESULTS / f"{datetime.now():%Y-%m-%d_%H%M}_{name}.json"
         out.write_text(json.dumps(res, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"Сохранено: {out}")
