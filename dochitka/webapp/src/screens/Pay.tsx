@@ -26,7 +26,7 @@ type OrderState = Billing & { status: "pending" | "paid" | "canceled" | "refunde
 export default function Pay() {
   const nav = useNav();
   const { data, error, loading, reload } = useApi<Billing>("/billing?view=pay");
-  const [chosen, setProduct] = useState<Product>("run");
+  const [picked, setProduct] = useState<Product | null>(null);
   const [busy, setBusy] = useState(false);
   const [order, setOrder] = useState<Order | null>(null);
   const [email, setEmail] = useState("");
@@ -88,7 +88,9 @@ export default function Pay() {
 
   const sub = data.subscription;
   const renewing = sub.active && !data.needs_access;
-  // при продлении «одной книги» нет: выбираем между месяцем и годом
+  // по промокоду на 100% сразу выбран бесплатный тариф; при продлении «одной книги» нет — месяц или год
+  const freeProduct = (["run", "month", "year"] as Product[]).find((k) => data.prices[k].free && !(renewing && k === "run"));
+  const chosen: Product = picked ?? freeProduct ?? "run";
   const product: Product = renewing && chosen === "run" ? "month" : chosen;
   const p = data.prices;
   const sel = p[product];

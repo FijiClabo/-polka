@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import date, timedelta
 
 from aiogram import Bot, Router
@@ -40,7 +41,7 @@ ADMIN_HELP = """<b>Команды ведущего</b>
 /run_date 2026-10-20 — дата старта текущего забега
 /run_info — текущий забег
 /grant @user [run|month|year] — выдать доступ вручную (оплата переводом, подарок)
-/promo_new КОД 20 [лимит] [чей] — промокод со скидкой (100 — бесплатно)
+/promo_new КОД 20 [лимит] [тарифы] [чей] — промокод (100 — бесплатно; тарифы: run, month, year)
 /promos — промокоды: сколько пришло, оплатило, выручка
 /sales — продажи, воронка, источники
 /promo_off КОД — выключить промокод
@@ -228,27 +229,39 @@ async def cmd_grant(message: Message, command: CommandObject, bot: Bot) -> None:
 
 @router.message(Command("promo_new"))
 async def cmd_promo_new(message: Message, command: CommandObject) -> None:
-    """/promo_new КОД СКИДКА% [лимит] [чей] — например: /promo_new KNIGA20 20 100 @blogger"""
+    """/promo_new КОД СКИДКА% [лимит] [тарифы] [чей] — например: /promo_new KNIGA20 20 100 @blogger
+
+    Тарифы — run, month, year через запятую (по умолчанию все): /promo_new ТЕСТ 100 30 month
+    """
     if not await _guard(message):
         return
     parts = (command.args or "").split()
     if len(parts) < 2 or not parts[1].rstrip("%").isdigit():
-        await message.answer("Формат: /promo_new КОД СКИДКА [лимит] [чей]\nНапример: /promo_new KNIGA20 20 100 @blogger\n"
+        await message.answer("Формат: /promo_new КОД СКИДКА [лимит] [тарифы] [чей]\n"
+                             "Например: /promo_new KNIGA20 20 100 @blogger или /promo_new ТЕСТ 100 30 month\n"
+                             "Тарифы: run (одна книга), month, year — через запятую; без них — все. "
                              "Скидка 100 — бесплатный доступ. Ссылка для рекламы: t.me/<бот>?start=promo_КОД")
         return
     code = billing.normalize_code(parts[0])
     pct = max(0, min(100, int(parts[1].rstrip("%"))))
     limit = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else None
-    owner = next((x for x in parts[2:] if not x.isdigit()), None)
+    known = set(billing.PRODUCTS)
+    scope = next((x.lower() for x in parts[2:] if x.lower().split(",")[0] in known), None)
+    products = ",".join(x for x in (scope or "").split(",") if x in known) or ",".join(billing.PRODUCTS)
+    owner = next((x for x in parts[2:] if not x.isdigit() and x.lower() != scope), None)
     async with session_scope() as s:
         p = await s.get(PromoCode, code)
         if p is None:
             p = PromoCode(code=code)
             s.add(p)
-        p.discount_percent, p.max_uses, p.owner, p.active = pct, limit, owner, True
+        p.discount_percent, p.max_uses, p.owner, p.active, p.products = pct, limit, owner, True, products
     from bot.ui import deep_link
 
-    await message.answer(f"Промокод {code}: −{pct}%{f', до {limit} использований' if limit else ''}"
+    titles = ", ".join(billing.product_title(x).lower() for x in products.split(","))
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,57}", code):
+        await message.answer("Внимание: в ссылке Telegram допускаются только латиница, цифры, _ и -. "
+                             "Этот код можно ввести вручную, но ссылка с ним не сработает — для рассылки лучше латинский код.")
+    await message.answer(f"Промокод {code}: −{pct}% ({titles}){f', до {limit} использований' if limit else ''}"
                          f"{f', чей: {texts.e(owner)}' if owner else ''}.\nСсылка: {deep_link('promo_' + code)}")
 
 

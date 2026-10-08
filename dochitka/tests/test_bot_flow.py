@@ -279,3 +279,20 @@ async def test_self_serve_paid_flow(env, monkeypatch):
     async with session_scope() as s:
         assert await s.scalar(select(func.count(Purchase.id)).where(Purchase.status == "paid")) == 1
     get_settings.cache_clear()
+
+
+async def test_promo_new_for_one_tariff(env):
+    from db.models import PromoCode
+    from db.session import session_scope
+
+    bot, dp, session = env
+    await send_text(bot, dp, 900, "/start", "Ведущий")
+    await send_text(bot, dp, 900, "/promo_new PILOT 100 30 month", "Ведущий")
+    assert "абонемент на месяц" in session.texts()[-1] and "start=promo_PILOT" in session.texts()[-1]
+    async with session_scope() as s:
+        p = await s.get(PromoCode, "PILOT")
+        assert p.products == "month" and p.max_uses == 30 and p.discount_percent == 100 and p.owner is None
+    await send_text(bot, dp, 900, "/promo_new BLOG 20 @blogger", "Ведущий")
+    async with session_scope() as s:
+        p = await s.get(PromoCode, "BLOG")
+        assert p.products == "run,month,year" and p.owner == "@blogger" and p.max_uses is None
