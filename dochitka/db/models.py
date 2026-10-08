@@ -406,6 +406,8 @@ class PromoCode(Base):
     max_uses: Mapped[int | None] = mapped_column(Integer)
     used: Mapped[int] = mapped_column(Integer, default=0)
     owner: Mapped[str | None] = mapped_column(String(64))  # чей код (для выплат партнёру)
+    # пробный доступ: при скидке 100% абонемент выдаётся на столько дней (вместо 30 или 365)
+    trial_days: Mapped[int | None] = mapped_column(Integer)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _now_col()

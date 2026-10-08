@@ -412,7 +412,9 @@ def paywall_buttons(prices: dict, *, in_chat: bool = True) -> list[list[dict]]:
     rows = []
     for pr, label in ((run, "Одна книга"), (m, "Месяц"), (y, "Год")):
         if pr.free and pr.promo:
-            rows.append([{"text": f"{label} по промокоду — бесплатно", "callback": f"pay:free:{pr.product}"}])
+            text = (f"Пробный доступ на {days_word(pr.trial_days)} — бесплатно" if pr.trial_days
+                    else f"{label} по промокоду — бесплатно")
+            rows.append([{"text": text, "callback": f"pay:free:{pr.product}"}])
     if in_chat:
         if not run.free:
             rows.append([{"text": f"Оплатить книгу — {rub(run.rub)}", "callback": "pay:run"}])

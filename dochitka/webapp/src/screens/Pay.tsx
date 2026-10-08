@@ -215,7 +215,7 @@ export default function Pay() {
 
       {sel.free ? (
         <button className="btn primary block mt-16" disabled={busy} onClick={activateFree}>
-          Подключить по промокоду
+          {sel.trial_days ? `Начать пробный доступ на ${days(sel.trial_days)}` : "Подключить по промокоду"}
         </button>
       ) : !data.enabled ? (
         <div className="card mt-16 soon">
@@ -326,7 +326,8 @@ function PlanOption({ on, onPick, title, price, suffix = "", sub, extra, badge }
   extra?: string;
   badge?: string;
 }) {
-  const discounted = price.rub < price.list_rub;
+  const trial = price.free ? price.trial_days : null;
+  const discounted = price.rub < price.list_rub && !trial;
   return (
     <button className={`option${on ? " on" : ""}`} onClick={() => { haptic("select"); onPick(); }}>
       <span className="radio" />
@@ -335,6 +336,7 @@ function PlanOption({ on, onPick, title, price, suffix = "", sub, extra, badge }
           <b style={{ fontSize: 17 }}>{title}</b>
           {badge && <span className="badge accent">{badge}</span>}
           {discounted && <span className="badge ok">−{price.discount}%</span>}
+          {trial && <span className="badge ok">пробный</span>}
         </div>
         <div className="small muted">{sub}</div>
         {extra && <div className="tiny" style={{ color: "var(--accent-text)", marginTop: 2 }}>{extra}</div>}
@@ -342,7 +344,7 @@ function PlanOption({ on, onPick, title, price, suffix = "", sub, extra, badge }
       <div className="price">
         {discounted && <s className="tiny muted">{rub(price.list_rub)}</s>}
         <b className="num">{price.free ? "0 ₽" : rub(price.rub)}</b>
-        {suffix && <span className="tiny muted">{suffix}</span>}
+        {trial ? <span className="tiny muted">на {days(trial)}</span> : suffix && <span className="tiny muted">{suffix}</span>}
       </div>
     </button>
   );

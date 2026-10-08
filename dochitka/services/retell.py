@@ -37,6 +37,7 @@ NOT_SUBMITTABLE = {
 class Prepared:
     retelling_id: int
     check: CheckInput
+    user_id: int | None = None  # чей расход на ИИ
 
 
 @dataclass
@@ -149,7 +150,7 @@ async def start_submission(
         session.add(DialogTurn(retelling_id=r.id, role="user", text=text[:4000]))
     await session.flush()
     await log_event(session, "retelling_submitted", user.id, enr.run_id, source=source, length=len(text), via=via)
-    return Prepared(r.id, await build_check_input(session, r))
+    return Prepared(r.id, await build_check_input(session, r), user.id)
 
 
 def now_real_minus(**kw):
@@ -162,8 +163,11 @@ def now_real_minus(**kw):
 
 
 async def run_check(prep: Prepared) -> Verdict | None:
+    from ai.usage import ai_context
+
     try:
-        return await check_retelling(prep.check)
+        with ai_context(prep.user_id, "check"):
+            return await check_retelling(prep.check)
     except LLMUnavailable as e:
         log.warning("AI unavailable for retelling %s: %s", prep.retelling_id, e)
         return None

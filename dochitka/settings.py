@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     yandex_folder_id: str = ""
     yandexgpt_model: str = "yandexgpt/latest"
     yandexgpt_model_cheap: str = "yandexgpt-lite/latest"
+    # оценка расходов на ИИ для /sales и админки (цены провайдеров меняются — сверяй с прайсом)
+    yandexgpt_rub_per_1k: float = 0.8  # YandexGPT Pro, ₽ за 1000 токенов
+    yandexgpt_cheap_rub_per_1k: float = 0.2  # YandexGPT Lite
+    speechkit_rub_per_15s: float = 0.0  # распознавание речи, ₽ за 15 секунд; 0 — показываем только минуты
+    usd_rub: float = 90.0  # курс для оценки стоимости Claude
     llm_timeout_sec: float = 40.0
 
     # --- Речь в текст --------------------------------------------------------
@@ -64,9 +69,9 @@ class Settings(BaseSettings):
     # --- Оплата ---------------------------------------------------------------
     # Кнопка «Оплатить» в боте и мини-приложении ведёт на страницу оплаты ЮKassa (карта, СБП и др.).
     # Пока ключей нет — вместо кнопки показывается текст PAYMENT_INFO (оплата вручную, доступ — /grant).
-    price_run_rub: int = 990
-    price_month_rub: int = 299
-    price_year_rub: int = 1990
+    price_run_rub: int = 690
+    price_month_rub: int = 490
+    price_year_rub: int = 3990
     yookassa_shop_id: str = ""  # ЮKassa → Интеграция → shopId
     yookassa_secret_key: str = ""  # ЮKassa → Интеграция → Ключи API
     fiscal_receipts: bool = False  # чеки 54-ФЗ через «Чеки от ЮKassa» (тогда спросим e-mail покупателя)

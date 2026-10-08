@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type Achievement, type Billing, type Me } from "../api";
-import { AchIcon, IBook, IChevron, IEnvelope } from "../components/Icons";
+import { AchIcon, IBook, IChevron, IEnvelope, ISettings } from "../components/Icons";
 import { Avatar, Skeleton, Switch, toast } from "../components/ui";
 import { useApi } from "../hooks";
 import { useNav } from "../nav";
@@ -130,6 +130,17 @@ export default function Profile() {
         </div>
         <IChevron size={18} />
       </button>
+
+      {u.is_admin && (
+        <button className="card row mt-12" style={{ width: "100%", textAlign: "left" }} onClick={() => nav.push({ name: "admin" })}>
+          <ISettings size={22} />
+          <div className="grow">
+            <b>Админка</b>
+            <div className="small muted">Аналитика, промокоды и пробный доступ, выдача доступа</div>
+          </div>
+          <IChevron size={18} />
+        </button>
+      )}
 
       <AccessCard />
 

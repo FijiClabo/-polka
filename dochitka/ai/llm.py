@@ -30,6 +30,8 @@ class LLMResult:
     text: str
     provider: str
     model: str
+    tokens_in: int = 0
+    tokens_out: int = 0
 
 
 class LLMProvider(Protocol):
@@ -113,7 +115,12 @@ class AnthropicProvider:
         text = "".join(getattr(b, "text", "") for b in resp.content if getattr(b, "type", "") == "text")
         if not text.strip():
             raise LLMError(f"anthropic empty response, stop={resp.stop_reason}")
-        return LLMResult(text=text, provider=self.name, model=model)
+        u = getattr(resp, "usage", None)
+        # запись в кэш дороже обычного входа (×1,25), чтение из кэша — в 10 раз дешевле
+        tin = (getattr(u, "input_tokens", 0) or 0) + 1.25 * (getattr(u, "cache_creation_input_tokens", 0) or 0) \
+            + 0.1 * (getattr(u, "cache_read_input_tokens", 0) or 0)
+        return LLMResult(text=text, provider=self.name, model=model, tokens_in=round(tin),
+                         tokens_out=getattr(u, "output_tokens", 0) or 0)
 
 
 # --------------------------------------------------------------------------- YandexGPT
@@ -165,7 +172,9 @@ class YandexGPTProvider:
             raise LLMError(f"yandex bad response: {r.text[:300]}") from e
         if alt.get("status") in ("ALTERNATIVE_STATUS_CONTENT_FILTER",):
             raise LLMError("yandex content filter")
-        return LLMResult(text=text, provider=self.name, model=model)
+        usage = (r.json().get("result") or {}).get("usage") or {}
+        return LLMResult(text=text, provider=self.name, model=model, tokens_in=int(usage.get("inputTextTokens") or 0),
+                         tokens_out=int(usage.get("completionTokens") or 0))
 
 
 # --------------------------------------------------------------------------- демо (без ключей)
@@ -211,9 +220,13 @@ class LLMChain:
         max_tokens: int = 4000, start_from: int = 0,
     ) -> LLMResult:
         errors = []
+        from ai.usage import record_llm
+
         for p in self.providers[start_from:]:
             try:
-                return await p.complete(system, context, prompt, schema=schema, cheap=cheap, max_tokens=max_tokens)
+                res = await p.complete(system, context, prompt, schema=schema, cheap=cheap, max_tokens=max_tokens)
+                record_llm(res.provider, res.model, cheap, res.tokens_in, res.tokens_out)
+                return res
             except LLMError as e:
                 log.warning("LLM provider %s failed: %s", p.name, e)
                 errors.append(f"{p.name}: {e}")

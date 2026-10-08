@@ -185,7 +185,7 @@ async def test_full_flow(env):
     await send_text(bot, dp, ADMIN, "/export", "Ведущий")
     assert any(isinstance(m, SendDocument) for m in session.sent)
     await send_text(bot, dp, U, "/stats")
-    assert "только для ведущего" in session.texts()[-1]
+    assert "только для администратора" in session.texts()[-1]
 
     # удаление данных
     await send_text(bot, dp, U, "/delete_me")

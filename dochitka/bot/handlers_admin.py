@@ -1,6 +1,6 @@
-"""Админ-команды ведущего: забег, оплата, пары, статистика, ручное засчитывание, рассылка, экспорт.
+"""Админ-команды: забег, оплата, пары, статистика, ручное засчитывание, рассылка, экспорт.
 
-Доступны только tg_id из ADMIN_TG_IDS и ведущему текущего забега.
+Доступны только tg_id из ADMIN_TG_IDS: обычно это один человек — владелец сервиса.
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ ADMIN_HELP = """<b>Команды ведущего</b>
 /run_date 2026-10-20 — дата старта текущего забега
 /run_info — текущий забег
 /grant @user [run|month|year] — выдать доступ вручную (оплата переводом, подарок)
-/promo_new КОД 20 [лимит] [тарифы] [чей] — промокод (100 — бесплатно; тарифы: run, month, year)
+/promo_new КОД 20 [лимит] [тарифы] [14d] [чей] — промокод (100 — бесплатно; 14d — пробный доступ на 14 дней)
 /promos — промокоды: сколько пришло, оплатило, выручка
 /sales — продажи, воронка, источники
 /promo_off КОД — выключить промокод
@@ -57,20 +57,10 @@ ADMIN_HELP = """<b>Команды ведущего</b>
 /export — CSV для анализа теста"""
 
 
-async def _is_host(message: Message) -> bool:
-    if is_admin(message.from_user.id):
-        return True
-    async with session_scope() as s:
-        run = await current_main_run(s)
-        if run and run.host_user_id:
-            host = await s.get(User, run.host_user_id)
-            return bool(host and host.tg_id == message.from_user.id)
-    return False
-
-
 async def _guard(message: Message) -> bool:
-    if not await _is_host(message):
-        await message.answer("Эта команда только для ведущего.")
+    """Команды управления и вся статистика — только для администраторов из ADMIN_TG_IDS."""
+    if not is_admin(message.from_user.id):
+        await message.answer("Эта команда только для администратора.")
         return False
     return True
 
@@ -238,7 +228,8 @@ async def cmd_promo_new(message: Message, command: CommandObject) -> None:
     parts = (command.args or "").split()
     if len(parts) < 2 or not parts[1].rstrip("%").isdigit():
         await message.answer("Формат: /promo_new КОД СКИДКА [лимит] [тарифы] [чей]\n"
-                             "Например: /promo_new KNIGA20 20 100 @blogger или /promo_new ТЕСТ 100 30 month\n"
+                             "Например: /promo_new KNIGA20 20 100 @blogger, /promo_new PILOT 100 30 month или пробный доступ "
+                             "на 14 дней: /promo_new TRY14 100 50 14d\n"
                              "Тарифы: run (одна книга), month, year — через запятую; без них — все. "
                              "Скидка 100 — бесплатный доступ. Ссылка для рекламы: t.me/<бот>?start=promo_КОД")
         return
@@ -248,20 +239,28 @@ async def cmd_promo_new(message: Message, command: CommandObject) -> None:
     known = set(billing.PRODUCTS)
     scope = next((x.lower() for x in parts[2:] if x.lower().split(",")[0] in known), None)
     products = ",".join(x for x in (scope or "").split(",") if x in known) or ",".join(billing.PRODUCTS)
-    owner = next((x for x in parts[2:] if not x.isdigit() and x.lower() != scope), None)
+    trial = next((int(x[:-1]) for x in parts[2:] if re.fullmatch(r"\d{1,3}d", x.lower())), None)
+    if trial and pct < 100:
+        trial = None  # пробный срок — только для бесплатного доступа
+    if trial:
+        products = ",".join(x for x in products.split(",") if x != "run") or "month"
+    owner = next((x for x in parts[2:] if not x.isdigit() and x.lower() != scope
+                  and not re.fullmatch(r"\d{1,3}d", x.lower())), None)
     async with session_scope() as s:
         p = await s.get(PromoCode, code)
         if p is None:
             p = PromoCode(code=code)
             s.add(p)
         p.discount_percent, p.max_uses, p.owner, p.active, p.products = pct, limit, owner, True, products
+        p.trial_days = trial
     from bot.ui import deep_link
 
     titles = ", ".join(billing.product_title(x).lower() for x in products.split(","))
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,57}", code):
         await message.answer("Внимание: в ссылке Telegram допускаются только латиница, цифры, _ и -. "
                              "Этот код можно ввести вручную, но ссылка с ним не сработает — для рассылки лучше латинский код.")
-    await message.answer(f"Промокод {code}: −{pct}% ({titles}){f', до {limit} использований' if limit else ''}"
+    what = f"пробный доступ на {texts.days_word(trial)}" if trial else f"−{pct}% ({titles})"
+    await message.answer(f"Промокод {code}: {what}{f', до {limit} использований' if limit else ''}"
                          f"{f', чей: {texts.e(owner)}' if owner else ''}.\nСсылка: {deep_link('promo_' + code)}")
 
 
@@ -313,17 +312,30 @@ async def cmd_sales(message: Message, bot: Bot) -> None:
         sources = (await s.execute(
             select(User.source, func.count(User.id)).group_by(User.source).order_by(func.count(User.id).desc()).limit(8)
         )).all()
+        from services.analytics import _users_with, ai_costs
+
+        now_ = clock.real_now()
+        ai_day = await ai_costs(s, now_ - timedelta(days=1))
+        ai_week = await ai_costs(s, now_ - timedelta(days=7))
+        ai_total = await ai_costs(s)
+        active_7d = await _users_with(s, "day_done", since=now_ - timedelta(days=7))
 
     def line(title: str, x: dict) -> str:
         prod = ", ".join(f"{billing.product_title(k).lower()}: {v}" for k, v in x["by_product"].items()) or "—"
         n = x["count"]
         return f"{title}: {n} {texts.plural(n, 'оплата', 'оплаты', 'оплат')} · {x['rub']:.0f} ₽ ({prod})"
 
-    text = ["<b>Продажи</b>", line("Сегодня", day), line("7 дней", week), line("Всего", total),
+    text = ["<b>Продажи</b>", line("Сутки", day), line("7 дней", week), line("Всего", total),
             f"Возвратов: {total['refunds']}",
             "", "<b>Воронка</b>"]
     text += [f"{t}: {n}" for t, n in funnel]
     text += ["", "<b>Источники</b>"] + [f"{texts.e(src or 'без метки')}: {n}" for src, n in sources]
+    text += ["", "<b>Расходы на ИИ (оценка)</b>",
+             f"Сутки: {ai_day['rub']:.0f} ₽ · 7 дней: {ai_week['rub']:.0f} ₽ · всего: {ai_total['rub']:.0f} ₽",
+             f"Сдавали дни за 7 дней: {active_7d} чел."
+             + (f" · на одного: {ai_week['rub'] / active_7d:.0f} ₽ в неделю" if active_7d else ""),
+             f"Голосом за 7 дней: {ai_week['voice_min']:.0f} мин",
+             "", "Вся аналитика — в мини-приложении: Профиль → Админка."]
     await message.answer("\n".join(text))
 
 

@@ -148,7 +148,11 @@ async def transcribe_audio(audio: bytes) -> tuple[str, float]:
     errors = []
     for p in _stt:
         try:
-            return await p.transcribe(pcm), duration
+            text = await p.transcribe(pcm)
+            from ai.usage import record_stt
+
+            record_stt(p.name, duration)
+            return text, duration
         except (STTError, httpx.HTTPError) as e:
             log.warning("STT %s failed: %s", p.name, e)
             errors.append(str(e))

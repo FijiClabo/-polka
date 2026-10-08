@@ -48,6 +48,13 @@ async def tick(bot: Bot) -> None:
     await _safe(process_pending_queue(outbox))
     await _safe(flush(bot, outbox))
     await _safe(_summaries(limit=5))
+    await _safe(_flush_ai_usage())
+
+
+async def _flush_ai_usage() -> None:
+    from ai.usage import flush
+
+    await flush()
 
 
 async def _safe(coro) -> None:

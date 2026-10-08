@@ -64,6 +64,7 @@ class Price:
     list_rub: int
     promo: str | None = None
     discount: int = 0
+    trial_days: int | None = None  # бесплатный пробный абонемент на столько дней
 
     @property
     def free(self) -> bool:
@@ -111,6 +112,8 @@ async def prices_with_promo(session: AsyncSession, code: str | None) -> dict[str
         if promo and product in (promo.products or "").split(","):
             pr.rub = _discounted(rub, promo.discount_percent)
             pr.promo, pr.discount = promo.code, promo.discount_percent
+            if pr.free and promo.trial_days and product != "run":
+                pr.trial_days = promo.trial_days
         out[product] = pr
     return out
 
@@ -186,7 +189,7 @@ async def try_activate(session: AsyncSession, user: User, enr: Enrollment | None
     return None
 
 
-async def grant_entitlement(session: AsyncSession, user: User, p: Purchase) -> str | None:
+async def grant_entitlement(session: AsyncSession, user: User, p: Purchase, days: int | None = None) -> str | None:
     """Выдать права по покупке и сразу стартовать забег, если план уже готов.
 
     Сроки абонементов складываются: новая покупка прибавляет свой срок к оставшемуся.
@@ -199,7 +202,7 @@ async def grant_entitlement(session: AsyncSession, user: User, p: Purchase) -> s
         user.run_credits += 1
     else:
         base = max(now(), _aware(user.subscription_until)) if user.subscription_until else now()
-        until = base + timedelta(days=SUB_DAYS[p.product])
+        until = base + timedelta(days=days or SUB_DAYS[p.product])
         user.subscription_until = until
         user.subscription_kind = p.product
         user.sub_reminded_at = None
@@ -217,14 +220,15 @@ async def activate_pending(session: AsyncSession, user: User) -> str | None:
     return await try_activate(session, user, await current_enrollment(session, user.id))
 
 
-async def grant_manual(session: AsyncSession, user: User, product: str, outbox: Outbox | None = None) -> Purchase:
-    """Администратор выдал доступ вручную (оплата переводом, подарок, бартер)."""
+async def grant_manual(session: AsyncSession, user: User, product: str, outbox: Outbox | None = None,
+                       days: int | None = None) -> Purchase:
+    """Администратор выдал доступ вручную (подарок, тестер, бартер). days — свой срок абонемента."""
     p = Purchase(user_id=user.id, product=product, provider="manual", currency="RUB", amount=0, list_amount=0,
                  status="paid")
     session.add(p)
     await session.flush()
-    await log_event(session, "purchase", user.id, product=product, provider="manual", amount=0)
-    await grant_entitlement(session, user, p)
+    await log_event(session, "purchase", user.id, product=product, provider="manual", amount=0, days=days)
+    await grant_entitlement(session, user, p, days if product != "run" else None)
     return p
 
 
@@ -240,8 +244,9 @@ async def apply_free_promo(session: AsyncSession, user: User, product: str = "ru
     session.add(p)
     user.promo_code = None
     await session.flush()
-    await log_event(session, "purchase", user.id, product=product, provider="promo", amount=0, promo=price.promo)
-    await grant_entitlement(session, user, p)
+    await log_event(session, "purchase", user.id, product=product, provider="promo", amount=0, promo=price.promo,
+                    days=price.trial_days)
+    await grant_entitlement(session, user, p, price.trial_days)
     return p
 
 

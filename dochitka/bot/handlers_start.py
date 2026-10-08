@@ -355,8 +355,11 @@ async def trial_answer(message: Message, state: FSMContext, text: str) -> None:
         clarify_count=clar,
     )
     await message.bot.send_chat_action(message.chat.id, "typing")
+    from ai.usage import ai_context
+
     try:
-        v = await check_retelling(inp)
+        with ai_context(None, "trial"):
+            v = await check_retelling(inp)
     except LLMUnavailable:
         await message.answer(texts.TRIAL_AI_OFF)
         await finish_trial(message, state)

@@ -521,7 +521,8 @@ async def post_new_run(user: User = Depends(need_consent), s: AsyncSession = Dep
 
 
 def _price_json(p) -> dict:
-    return {"rub": p.rub, "list_rub": p.list_rub, "promo": p.promo, "discount": p.discount, "free": p.free}
+    return {"rub": p.rub, "list_rub": p.list_rub, "promo": p.promo, "discount": p.discount, "free": p.free,
+            "trial_days": p.trial_days}
 
 
 async def _billing_state(s: AsyncSession, user: User) -> dict:
@@ -765,8 +766,11 @@ async def post_retell_voice(
     data = await audio.read(15 * 1024 * 1024)
     if not data:
         raise HTTPException(400, "Пустая запись")
+    from ai.usage import ai_context
+
     try:
-        text, dur = await transcribe_audio(data)
+        with ai_context(user.id, "voice"):
+            text, dur = await transcribe_audio(data)
     except STTError as e:
         log.warning("webapp STT failed: %s", e)
         raise HTTPException(503, "Не получилось разобрать запись. Попробуй ещё раз или напиши текстом.") from e

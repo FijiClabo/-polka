@@ -316,6 +316,7 @@ export interface PriceInfo {
   promo: string | null;
   discount: number;
   free: boolean;
+  trial_days?: number | null;
 }
 
 export type Product = "run" | "month" | "year";
@@ -336,4 +337,54 @@ export interface Billing {
   plan_days: number | null;
   needs_access: boolean;
   purchases: { id: number; product: Product; amount: string; date: string; status: string }[];
+}
+
+// ------------------------------------------------------------------ админка
+
+export interface SalesSlice {
+  count: number;
+  rub: number;
+  by_product: Partial<Record<Product, number>>;
+  refunds: number;
+  payers: number;
+}
+
+export interface AiSlice {
+  rub: number;
+  tokens: number;
+  voice_min: number;
+  by_kind: Record<string, number>;
+  calls: Record<string, number>;
+}
+
+export interface PromoRow {
+  code: string;
+  discount: number;
+  products: Product[];
+  days: number | null;
+  used: number;
+  max_uses: number | null;
+  active: boolean;
+  owner: string | null;
+  came: number;
+  purchases: number;
+  revenue: number;
+  link: string;
+}
+
+export interface AdminOverview {
+  generated_at: string;
+  users: { total: number; new_today: number; new_7d: number; active_today: number; active_7d: number; retellings_7d: number; voice_share_7d: number };
+  access: { subscriptions: number; credits: number; with_access: number };
+  funnel: { title: string; n: number }[];
+  retention: { title: string; n: number }[];
+  sales: { today: SalesSlice; week: SalesSlice; month: SalesSlice; total: SalesSlice };
+  arppu: number;
+  sources: { source: string; users: number; payers: number }[];
+  promos: PromoRow[];
+  ai: { today: AiSlice; week: AiSlice; month: AiSlice; total: AiSlice; per_reader_week: number | null };
+  daily: { date: string; new_users: number; active: number; revenue: number; ai_rub: number }[];
+  prices: Record<Product, number>;
+  payments_enabled: boolean;
+  sprint_for_everyone: boolean;
 }

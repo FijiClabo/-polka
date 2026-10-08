@@ -4,6 +4,7 @@ import { BookStackIll } from "./components/Illustrations";
 import { ErrorState, ScreenSkeleton, TabBar, ToastHost, type Tab } from "./components/ui";
 import { NavContext, TABS, type Nav, type Route } from "./nav";
 import AddBook from "./screens/AddBook";
+import Admin from "./screens/Admin";
 import Consent from "./screens/Consent";
 import Finish from "./screens/Finish";
 import FriendCard from "./screens/FriendCard";
@@ -21,7 +22,7 @@ import { inTelegram, initTelegram, onThemeChange, paintChrome, setBackButton, se
 function initialRoute(): Route {
   const p = startParams();
   const s = p.get("s") || "today";
-  const known = ["today", "run", "friends", "shelf", "read", "retell", "profile", "book", "finish", "pay"];
+  const known = ["today", "run", "friends", "shelf", "read", "retell", "profile", "book", "finish", "pay", "admin"];
   if (!known.includes(s)) return { name: "today" };
   const params: Record<string, string> = {};
   p.forEach((v, k) => {
@@ -142,6 +143,7 @@ export default function App() {
     case "friend": screen = <FriendCard id={Number(route.params?.id)} />; break;
     case "finish": screen = <Finish />; break;
     case "pay": screen = <Pay />; break;
+    case "admin": screen = me.user.is_admin ? <Admin /> : <Today />; break;
     default: screen = <Today />;
   }
 
