@@ -268,3 +268,20 @@ async def test_public_pages(client):
     assert r.status_code in (200, 404)
     if r.status_code == 200:
         assert "{{" not in r.text
+
+
+async def test_leave_pair_and_remove_friend(client):
+    set_now(clock.real_now().date())
+    start, ids, (ta, tb, tc) = await _two_readers_same_book()
+    set_now(start, 10)
+    # напарник не становится другом сам по себе: книгу и полку напарника через «Друзей» не увидеть
+    assert (await client.get(f"/api/friends/{ids['A']}", headers=H(tb))).status_code == 404
+    assert (await client.post("/api/pair/leave", headers=H(tb))).status_code == 200
+    assert (await client.get("/api/pair", headers=H(tb))).json()["has_pair"] is False
+    assert (await client.get("/api/pair", headers=H(ta))).json()["has_pair"] is False
+    assert (await client.post("/api/pair/leave", headers=H(tb))).status_code == 404
+    # C убирает A из друзей — карточка больше не открывается ни у кого из двоих
+    assert (await client.get(f"/api/friends/{ids['A']}", headers=H(tc))).status_code == 200
+    assert (await client.delete(f"/api/friends/{ids['A']}", headers=H(tc))).status_code == 200
+    assert (await client.get(f"/api/friends/{ids['A']}", headers=H(tc))).status_code == 404
+    assert (await client.get(f"/api/friends/{ids['C']}", headers=H(ta))).status_code == 404

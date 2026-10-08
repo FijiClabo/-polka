@@ -119,6 +119,7 @@ async def attach_book(session: AsyncSession, enr: Enrollment, book: Book) -> Non
             if await _book_has_retellings(session, old.id):
                 await delete_book_text(session, old)
             else:
+                remove_file(old.file_path)
                 await session.delete(old)
 
 
@@ -220,6 +221,7 @@ async def delete_book(session: AsyncSession, enr: Enrollment | None, book: Book)
     if await _book_has_retellings(session, book.id):
         await delete_book_text(session, book)
     else:
+        remove_file(book.file_path)
         await session.delete(book)
     if enr and enr.book_id == book.id and enr.status in ("invited", "paid", "active"):
         enr.book_id = None

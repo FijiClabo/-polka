@@ -118,7 +118,8 @@ async def test_full_flow(env):
 
     # онбординг участника — по ссылке ведущего в групповой забег
     await send_text(bot, dp, U, "/start group")
-    assert any("групповом забеге" in t for t in session.texts())
+    # до согласия на обработку данных в забег не записываем — только запоминаем ссылку
+    assert not any("групповом забеге" in t for t in session.texts())
     assert "Привет" in session.texts()[-1]
     await press(bot, dp, U, "ob:1")
     await press(bot, dp, U, "ob:2")
@@ -126,6 +127,7 @@ async def test_full_flow(env):
     assert "согласие на обработку данных" in session.texts()[-1]
     assert "consent:pd" in session.last_markup_callbacks()
     await press(bot, dp, U, "consent:pd")
+    assert any("групповом забеге" in t for t in session.texts())
     assert any("Где ты живёшь" in t for t in session.texts())
     await press(bot, dp, U, "tz:Asia/Yekaterinburg")
     await press(bot, dp, U, "mt:08:00")

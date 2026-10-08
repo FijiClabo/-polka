@@ -11,7 +11,7 @@ import logging
 from datetime import timedelta
 
 from aiogram import Bot
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 
 import texts
 from ai.checker import summarize_segment
@@ -22,6 +22,7 @@ from core import clock
 from core.days import clock_minutes_in_user_day, minutes_since_day_start, plan_day_number
 from db.models import Book, DayResult, Enrollment, Retelling, Run, Segment, User
 from db.session import session_scope
+from services.books import remove_file
 from services.common import Outbox, OutMsg, allow_initiative, allow_once, log_event, today_for
 from services.flow import process_pending_queue
 from services.progress import close_pending_days, load_view
@@ -36,15 +37,24 @@ def _due(user: User, t) -> bool:
 
 
 async def tick(bot: Bot) -> None:
+    """Каждый шаг — отдельно: сбой одного (например, в очереди пересказов) не останавливает остальные,
+    в том числе удаление старых текстов, которое мы обещаем в политике."""
     outbox = Outbox()
-    await _activate_runs()
-    await _stuck_books()
-    await _daily(outbox)
-    await _sales(outbox)
-    await process_pending_queue(outbox)
-    await flush(bot, outbox)
-    await _summaries(limit=5)
-    await _forget_stale_texts()
+    await _safe(_forget_stale_texts())
+    await _safe(_activate_runs())
+    await _safe(_stuck_books())
+    await _safe(_daily(outbox))
+    await _safe(_sales(outbox))
+    await _safe(process_pending_queue(outbox))
+    await _safe(flush(bot, outbox))
+    await _safe(_summaries(limit=5))
+
+
+async def _safe(coro) -> None:
+    try:
+        await coro
+    except Exception:
+        log.exception("scheduler step failed")
 
 
 async def _stuck_books() -> None:
@@ -56,6 +66,8 @@ async def _stuck_books() -> None:
         for b in books:
             b.parse_status = "failed"
             b.parse_error = "interrupted"
+            remove_file(b.file_path)  # исходный файл после неудачного разбора не храним
+            b.file_path = None
 
 
 async def _activate_runs() -> None:
@@ -227,13 +239,19 @@ async def _summaries(limit: int) -> None:
 
 
 async def _forget_stale_texts() -> None:
-    """Пересказ, на уточнение которого так и не ответили, не храним дольше двух дней."""
+    """Тексты пересказов не храним: уточнение без ответа — не дольше двух дней,
+    а уже проверенные (в том числе сохранённые старыми версиями) — стираем сразу."""
     from services.retell import forget_texts
 
     async with session_scope() as s:
         stale = list(await s.scalars(
-            select(Retelling).where(Retelling.verdict == "clarify", Retelling.raw_text != "",
-                                    Retelling.created_at < clock.now() - timedelta(days=2)).limit(200)
+            select(Retelling).where(
+                Retelling.raw_text != "",
+                or_(
+                    Retelling.verdict.in_(("accepted", "rejected")),
+                    and_(Retelling.verdict == "clarify", Retelling.created_at < clock.now() - timedelta(days=2)),
+                ),
+            ).limit(200)
         ))
         for r in stale:
             await forget_texts(s, r)

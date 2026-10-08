@@ -46,7 +46,7 @@ USER_COMMANDS = [
 ADMIN_COMMANDS = USER_COMMANDS + [
     BotCommand(command="admin", description="Команды ведущего"),
     BotCommand(command="stats", description="Сводка по забегу"),
-    BotCommand(command="user", description="Участник: статус и пересказы"),
+    BotCommand(command="user", description="Участник: статус и вердикты"),
     BotCommand(command="grant", description="Выдать доступ вручную"),
     BotCommand(command="sales", description="Продажи и воронка"),
     BotCommand(command="promos", description="Промокоды"),
@@ -114,6 +114,6 @@ async def setup_bot(bot: Bot) -> None:
         url = webapp_url("today")
         if url:
             await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(text=s.project_name, web_app=WebAppInfo(url=url)))
-        await bot.set_my_short_description(f"{s.project_name}: дочитай книгу за 30 дней. 15 минут чтения и минута пересказа в день.")
+        await bot.set_my_short_description(f"{s.project_name}: дочитай свою книгу по плану на 21–60 дней. 15 минут чтения и минута пересказа в день.")
     except Exception as e:
         log.warning("bot setup partially failed: %s", e)

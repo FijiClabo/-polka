@@ -143,9 +143,12 @@ async def nudge(session: AsyncSession, sender: User, target: User, outbox: Outbo
     """Толкнуть друга/напарника: не чаще раза в день на пару «от кого — кому»."""
     if sender.id == target.id:
         return "self"
-    if kind == "friend" and not await are_friends(session, sender.id, target.id):
-        if not await is_partner(session, sender.id, target.id):
-            return "not_friends"
+    if kind == "partner":
+        _, partner, _ = await get_pair_for(session, await current_enrollment(session, sender.id))
+        if partner is None or partner.id != target.id:
+            return "not_friends"  # напоминать можно только нынешнему напарнику
+    elif not await are_friends(session, sender.id, target.id):
+        return "not_friends"
     day = today_for(sender)
     already = await session.scalar(
         select(FriendNudge.id).where(
@@ -156,6 +159,8 @@ async def nudge(session: AsyncSession, sender: User, target: User, outbox: Outbo
     ok, reason = rules.can_nudge(bool(already), True, st.today == "done")
     if not ok:
         return reason
+    if st.today not in ("reading", "burned"):
+        return "idle"  # человек ещё не начал или уже дочитал — толкать не к чему
     delivered = target.nudges_enabled and await allow_social(session, target, sender.id)
     try:
         async with session.begin_nested():
@@ -252,10 +257,7 @@ async def join_pair_by_code(session: AsyncSession, user: User, code: str, outbox
         return "error", inviter
     outbox.add(OutMsg(inviter.tg_id, texts.pair_joined(user.display_name), kind="pair",
                       buttons=[[{"text": "Напарник", "webapp": "friends"}]]))
-    # пара — это ещё и друзья
-    if not await are_friends(session, inviter.id, user.id):
-        low, high = rules.friendship_key(inviter.id, user.id)
-        session.add(Friendship(user_low_id=low, user_high_id=high, invited_by_id=inviter.id))
+    # в друзья напарник не добавляется: напарнику виден только прогресс, а друзьям — ещё книга и полка
     return "ok", inviter
 
 
@@ -307,3 +309,25 @@ async def ensure_pair_code(session: AsyncSession, enr: Enrollment) -> str:
         enr.pair_code = random_code(10)
         await session.flush()
     return enr.pair_code
+
+
+async def remove_friend(session: AsyncSession, user: User, friend_id: int) -> bool:
+    """Убрать из друзей (в обе стороны): больше не видим книги, стрика и полки друг друга."""
+    low, high = rules.friendship_key(user.id, friend_id)
+    f = await session.scalar(select(Friendship).where(Friendship.user_low_id == low, Friendship.user_high_id == high))
+    if f is None:
+        return False
+    await session.delete(f)
+    await log_event(session, "friend_removed", user.id, friend=friend_id)
+    return True
+
+
+async def leave_pair(session: AsyncSession, enr: Enrollment | None) -> bool:
+    """Выйти из пары: общий стрик заканчивается, каждый читает дальше сам."""
+    if enr is None or enr.pair_id is None:
+        return False
+    pair_id = enr.pair_id
+    for e in await session.scalars(select(Enrollment).where(Enrollment.pair_id == pair_id)):
+        e.pair_id = None
+    await log_event(session, "pair_left", enr.user_id, pair=pair_id)
+    return True

@@ -9,7 +9,6 @@ from core.rules import (
     all_segments_done,
     can_nudge,
     can_submit_more_today,
-    can_view_partner_retelling,
     close_day,
     daily_limit,
     finish_in_time,
@@ -160,16 +159,6 @@ def test_same_book_by_names_or_hash():
     assert same_book("x", "y", "h1", "z", "w", "h1")
     assert not same_book(t, a, None, normalize_text("Собачье сердце"), a, None)
     assert not same_book("", "", None, "", "", None)
-
-
-# ------------------------------------------------------------------ доступ к пересказам напарника
-
-
-def test_partner_retelling_visibility():
-    assert can_view_partner_retelling(True, 0.30, 0.30)
-    assert can_view_partner_retelling(True, 0.20, 0.35)
-    assert not can_view_partner_retelling(True, 0.40, 0.35)
-    assert not can_view_partner_retelling(False, 0.10, 0.90)
 
 
 # ------------------------------------------------------------------ друзья и толчки

@@ -56,13 +56,14 @@ async def check_bot(s) -> None:
             base = (s.telegram_api_base or "https://api.telegram.org").rstrip("/")
             me = (await c.get(f"{base}/bot{s.bot_token}/getMe")).json()
         except httpx.HTTPError as e:
-            say(BAD, f"Нет связи с api.telegram.org: {e.__class__.__name__}", "Сервер должен иметь доступ к Telegram")
+            say(BAD, f"Нет связи с {base}: {e.__class__.__name__}",
+                "Сервер должен иметь доступ к Telegram (или укажи TELEGRAM_API_BASE)")
             return
         if not me.get("ok"):
             say(BAD, "Токен бота не принят Telegram", "Проверь BOT_TOKEN (без пробелов и кавычек)")
             return
         say(OK, f"Бот @{me['result']['username']} на связи")
-        info = (await c.get(f"https://api.telegram.org/bot{s.bot_token}/getWebhookInfo")).json().get("result", {})
+        info = (await c.get(f"{base}/bot{s.bot_token}/getWebhookInfo")).json().get("result", {})
         url = info.get("url", "")
         if s.bot_mode == "webhook":
             want = f"{s.public_url}{s.webhook_path}"
@@ -176,7 +177,7 @@ async def main() -> None:
     if s.fast_day_minutes:
         say(WARN, f"Включено ускоренное время: сутки = {s.fast_day_minutes} мин", "Для настоящего забега: FAST_DAY_MINUTES=0")
     if s.bot_mode == "webhook" and not s.webhook_secret_ok:
-        say(BAD, "WEBHOOK_SECRET пустой или из примера — можно подделать запросы Telegram, в том числе «оплату»",
+        say(BAD, "WEBHOOK_SECRET пустой или из примера — можно подделать сообщения от имени Telegram",
             "Удали строку WEBHOOK_SECRET из .env и запусти bash scripts/deploy.sh — он создаст случайный")
     if s.dev_auth_bypass:
         say(BAD, "DEV_AUTH_BYPASS=true — проверка подписи отключена!", "Только для локального просмотра. На сервере — false")

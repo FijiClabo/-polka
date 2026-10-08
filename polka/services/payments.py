@@ -18,20 +18,26 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core import clock
 from db.models import Purchase, User
 from services import billing
-from services.common import Outbox, log_event, now
+from services.common import Outbox, OutMsg, log_event
 from settings import get_settings
 
 log = logging.getLogger(__name__)
 
 API = "https://api.yookassa.ru/v3"
-EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,190}\.[A-Za-z]{2,24}$")
+EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,24}$")
 ID_RE = re.compile(r"^[0-9a-f-]{8,64}$")
+REUSE_ORDER_FOR = timedelta(minutes=30)  # повторное «Оплатить» в течение получаса открывает тот же платёж
 
 
 class PaymentError(Exception):
     pass
+
+
+class RetryLater(Exception):
+    """ЮKassa не ответила: уведомление нужно повторить позже (ЮKassa сама повторяет его до суток)."""
 
 
 def enabled() -> bool:
@@ -63,7 +69,7 @@ async def create_order(session: AsyncSession, user: User, product: str, email: s
         raise PaymentError("Нужен e-mail для чека.")
     price = (await billing.prices_for(session, user))[product]
     if price.free:
-        raise PaymentError("По этому промокоду доступ бесплатный — нажми «Активировать».")
+        raise PaymentError("По этому промокоду доступ бесплатный — платить не нужно, нажми кнопку с промокодом.")
     if price.promo and not await billing.promo_take(session, price.promo):
         raise PaymentError("Промокод только что закончился — обнови экран.")
     p = Purchase(
@@ -97,7 +103,15 @@ async def create_payment(p: Purchase, return_url: str) -> str:
         raise PaymentError("Платёжный сервис не ответил. Попробуй ещё раз через минуту.") from e
     if r.status_code not in (200, 201):
         log.error("yookassa create payment failed: %s %s", r.status_code, r.text[:500])
-        raise PaymentError("Платёжный сервис не ответил. Попробуй ещё раз через минуту.")
+        if r.status_code >= 500 or r.status_code == 429:
+            raise PaymentError("Платёжный сервис не ответил. Попробуй ещё раз через минуту.")
+        try:
+            param = str((r.json() or {}).get("parameter") or "")
+        except ValueError:
+            param = ""
+        if "email" in param:
+            raise PaymentError("Проверь e-mail — на него придёт чек.")
+        raise PaymentError("Не получилось создать платёж. Напиши в поддержку — разберёмся.")
     data = r.json()
     p.provider_charge_id = data.get("id")
     url = (data.get("confirmation") or {}).get("confirmation_url")
@@ -110,30 +124,81 @@ def return_url(order_id: str) -> str:
     return f"{get_settings().public_url}/pay/done?order={order_id}"
 
 
-async def start_payment(session: AsyncSession, user: User, product: str, email: str | None = None) -> tuple[str, str]:
-    """Заказ + платёж: (ссылка на оплату, id заказа)."""
+async def _reusable_order(session: AsyncSession, user: User, product: str) -> tuple[str, Purchase] | None:
+    """Человек снова нажал «Оплатить», а прошлый платёж ещё ждёт: отдаём ту же ссылку.
+
+    Так повторное нажатие не создаёт второй заказ и не занимает ещё одно использование промокода.
+    """
+    p = await session.scalar(
+        select(Purchase).where(
+            Purchase.user_id == user.id, Purchase.product == product, Purchase.provider == "yookassa",
+            Purchase.status == "pending", Purchase.provider_charge_id.is_not(None),
+            Purchase.created_at >= clock.real_now() - REUSE_ORDER_FOR,
+        ).order_by(Purchase.id.desc()).limit(1)
+    )
+    if p is None or (p.promo_code or None) != (user.promo_code or None):
+        return None
+    if get_settings().fiscal_receipts and user.email and p.email != user.email:
+        return None
+    try:
+        payment = await fetch_payment(p.provider_charge_id)
+    except RetryLater:
+        return None
+    if not payment or payment.get("status") != "pending":
+        return None
+    url = (payment.get("confirmation") or {}).get("confirmation_url")
+    return (url, p) if url else None
+
+
+async def start_payment(session: AsyncSession, user: User, product: str,
+                        email: str | None = None) -> tuple[str, Purchase]:
+    """Заказ + платёж: (ссылка на оплату, заказ). Сумма для кнопки — из заказа, а не пересчитанная."""
+    if email:
+        email = email.strip()
+        if not EMAIL_RE.match(email):
+            raise PaymentError("Проверь e-mail — на него придёт чек.")
+        user.email = email[:128]
+    if enabled() and product in billing.PRODUCTS and not needs_email(user):
+        reused = await _reusable_order(session, user, product)
+        if reused:
+            return reused
     p = await create_order(session, user, product, email)
     url = await create_payment(p, return_url(p.order_id))
-    return url, p.order_id
+    return url, p
+
+
+async def _api_get(path: str) -> dict | None:
+    """GET к API ЮKassa. None — объекта нет (404); RetryLater — ЮKassa сейчас не ответила."""
+    try:
+        async with httpx.AsyncClient(timeout=20) as c:
+            r = await c.get(f"{API}/{path}", auth=_auth())
+    except httpx.HTTPError as e:
+        raise RetryLater(str(e)) from e
+    if r.status_code == 200:
+        return r.json()
+    if r.status_code == 404:
+        return None
+    log.warning("yookassa GET %s: %s", path, r.status_code)
+    raise RetryLater(f"yookassa {r.status_code}")
 
 
 async def fetch_payment(payment_id: str) -> dict | None:
     if not ID_RE.match(payment_id or ""):
         return None  # id из уведомления — чужие данные, в адрес запроса их подставляем только после проверки
-    async with httpx.AsyncClient(timeout=20) as c:
-        r = await c.get(f"{API}/payments/{payment_id}", auth=_auth())
-    if r.status_code != 200:
-        log.warning("yookassa get payment %s: %s", payment_id, r.status_code)
-        return None
-    return r.json()
+    return await _api_get(f"payments/{payment_id}")
 
 
 async def fetch_refund(refund_id: str) -> dict | None:
     if not ID_RE.match(refund_id or ""):
         return None
-    async with httpx.AsyncClient(timeout=20) as c:
-        r = await c.get(f"{API}/refunds/{refund_id}", auth=_auth())
-    return r.json() if r.status_code == 200 else None
+    return await _api_get(f"refunds/{refund_id}")
+
+
+async def _lock(session: AsyncSession, p: Purchase) -> Purchase:
+    """Перечитать заказ под блокировкой: два уведомления (или уведомление и опрос) не выдадут доступ дважды."""
+    return await session.scalar(
+        select(Purchase).where(Purchase.id == p.id).with_for_update().execution_options(populate_existing=True)
+    )
 
 
 async def apply_payment_state(session: AsyncSession, p: Purchase, payment: dict, outbox: Outbox | None) -> bool:
@@ -141,17 +206,24 @@ async def apply_payment_state(session: AsyncSession, p: Purchase, payment: dict,
     if payment.get("id") != p.provider_charge_id:
         return False
     status = payment.get("status")
-    if status == "succeeded" and p.status == "pending":
+    if status == "succeeded" and p.status in ("pending", "canceled"):
         amount = payment.get("amount") or {}
         if amount.get("currency") != "RUB" or round(float(amount.get("value", 0)) * 100) != p.amount:
             log.error("order %s: amount mismatch %s", p.id, amount)
             return False
+        if p.status == "canceled":
+            # заказ закрыли у нас, а оплата всё же прошла (например, деньги дошли поздно) — доступ всё равно выдаём
+            log.warning("order %s: paid after local cancel", p.id)
+            if p.promo_code:
+                await billing.promo_take(session, p.promo_code, enforce_limit=False)
         p.status = "paid"
         await session.flush()
         user = await session.get(User, p.user_id) if p.user_id else None
         await log_event(session, "purchase", p.user_id, product=p.product, provider="yookassa", amount=p.amount,
                         promo=p.promo_code, order=p.id)
         if user is not None:
+            if p.promo_code and user.promo_code == p.promo_code:
+                user.promo_code = None  # промокод использован; источник (promo:КОД) остаётся в user.source
             await billing.grant_entitlement(session, user, p)
         await billing.notify_admins_payment(session, user, p, outbox)
         return True
@@ -165,16 +237,22 @@ async def apply_payment_state(session: AsyncSession, p: Purchase, payment: dict,
 
 
 async def handle_notification(session: AsyncSession, body: dict, outbox: Outbox | None = None) -> Purchase | None:
-    """Уведомление ЮKassa. Возвращает заказ, если он оплачен прямо сейчас."""
+    """Уведомление ЮKassa. Возвращает заказ, если он оплачен прямо сейчас.
+
+    RetryLater — ЮKassa не ответила на проверку: вебхук отвечает ошибкой, и ЮKassa повторит уведомление.
+    """
     event = body.get("event", "")
     obj = body.get("object") or {}
     if event.startswith("payment."):
         pid = obj.get("id")
-        p = await session.scalar(select(Purchase).where(Purchase.provider_charge_id == pid).with_for_update()) if pid else None
+        p = await session.scalar(select(Purchase).where(Purchase.provider_charge_id == pid)) if pid else None
         if p is None:
             return None
-        payment = await fetch_payment(pid)
-        if payment and await apply_payment_state(session, p, payment, outbox):
+        payment = await fetch_payment(pid)  # до блокировки: не держим заказ, пока ждём ответа ЮKassa
+        if not payment:
+            return None
+        p = await _lock(session, p)
+        if await apply_payment_state(session, p, payment, outbox):
             return p
         return None
     if event == "refund.succeeded":
@@ -183,34 +261,79 @@ async def handle_notification(session: AsyncSession, body: dict, outbox: Outbox 
             return None  # возврат подтверждается только ответом API ЮKassa
         pid = refund.get("payment_id")
         p = await session.scalar(select(Purchase).where(Purchase.provider_charge_id == pid)) if pid else None
-        if p is not None and p.status != "refunded":
-            await billing.mark_refunded(session, p.id)
+        if p is None or p.status == "refunded":
+            return None
+        refunded = _kopecks((refund.get("amount") or {}).get("value"))
+        payment = await fetch_payment(pid)
+        if payment and payment.get("refunded_amount"):
+            refunded = max(refunded, _kopecks(payment["refunded_amount"].get("value")))
+        if refunded < p.amount:
+            # частичный возврат (жест доброй воли) — доступ не забираем, просто сообщаем админам
+            await log_event(session, "partial_refund", p.user_id, order=p.id, amount=refunded)
+            if outbox is not None:
+                for admin in get_settings().admin_ids:
+                    outbox.add(OutMsg(admin, f"Частичный возврат по заказу #{p.id}: {refunded / 100:.0f} ₽ "
+                                             f"из {p.amount / 100:.0f} ₽. Доступ оставлен.", kind="admin"))
+            return None
+        await billing.mark_refunded(session, p.id)
     return None
+
+
+def _kopecks(value) -> int:
+    try:
+        return round(float(value) * 100)
+    except (TypeError, ValueError):
+        return 0
 
 
 async def refresh_order(session: AsyncSession, order_id: str, outbox: Outbox | None = None) -> tuple[Purchase | None, bool]:
     """Для страницы «спасибо» и мини-приложения: если уведомление ещё не дошло — спросить статус у ЮKassa самим."""
-    p = await session.scalar(select(Purchase).where(Purchase.order_id == order_id).with_for_update())
+    p = await session.scalar(select(Purchase).where(Purchase.order_id == order_id))
     if p is None:
         return None, False
-    if p.status == "pending" and p.provider_charge_id and enabled():
+    if p.status != "pending" or not p.provider_charge_id or not enabled():
+        return p, False
+    try:
         payment = await fetch_payment(p.provider_charge_id)
-        if payment:
-            return p, await apply_payment_state(session, p, payment, outbox)
-    return p, False
+    except RetryLater:
+        return p, False
+    if not payment:
+        return p, False
+    p = await _lock(session, p)
+    return p, await apply_payment_state(session, p, payment, outbox)
 
 
 async def expire_stale_orders(session: AsyncSession, older_than: timedelta = timedelta(days=2)) -> int:
-    """Неоплаченные заказы старше двух дней закрываем и освобождаем зарезервированный промокод."""
-    rows = list(await session.scalars(
-        select(Purchase).where(Purchase.status == "pending", Purchase.created_at < now() - older_than).with_for_update()
+    """Старые неоплаченные заказы: закрываем только то, что ЮKassa подтвердила как отменённое (или где платежа нет).
+
+    Если ЮKassa не ответила или платёж ещё ждёт — заказ не трогаем: ЮKassa сама отменит неоплаченный платёж,
+    и придёт уведомление. Время — настоящее (created_at пишется по реальным часам, даже в ускоренном режиме).
+    """
+    if not enabled():
+        return 0
+    ids = list(await session.scalars(
+        select(Purchase.id).where(Purchase.status == "pending", Purchase.provider == "yookassa",
+                                  Purchase.created_at < clock.real_now() - older_than)
     ))
-    for p in rows:
-        payment = await fetch_payment(p.provider_charge_id) if p.provider_charge_id and enabled() else None
-        if payment and await apply_payment_state(session, p, payment, None):
-            continue  # оказалось оплачено — уведомление просто потерялось
+    closed = 0
+    for pid in ids:
+        p = await session.get(Purchase, pid)
+        if p is None or p.status != "pending":
+            continue
+        if p.provider_charge_id:
+            try:
+                payment = await fetch_payment(p.provider_charge_id)
+            except RetryLater:
+                continue
+            if payment is not None:
+                p = await _lock(session, p)
+                await apply_payment_state(session, p, payment, None)
+                closed += p.status != "pending"
+                continue
+        p = await _lock(session, p)  # платёж в ЮKassa так и не создался или его там нет
         if p.status == "pending":
             p.status = "canceled"
             if p.promo_code:
                 await billing.promo_release(session, p.promo_code)
-    return len(rows)
+            closed += 1
+    return closed

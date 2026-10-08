@@ -159,7 +159,11 @@ def plan_kb(opts) -> object:
 
 @router.callback_query(F.data.startswith("plan:"))
 async def cb_plan(call: CallbackQuery, bot: Bot) -> None:
+    from bot.handlers_start import consent_gate
+
     await call.answer()
+    if not await consent_gate(call.message, call.from_user):
+        return
     days = int(call.data.split(":")[1])
     outbox = Outbox()
     async with session_scope() as s:

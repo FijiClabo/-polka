@@ -17,7 +17,7 @@ import texts
 from bot.common import is_admin, load_user
 from bot.ui import deep_link, flush
 from core import clock
-from db.models import Enrollment, Event, PromoCode, Purchase, Retelling, Run, Segment, User
+from db.models import Consent, Enrollment, Event, PromoCode, Purchase, Retelling, Run, Segment, User
 from db.session import session_scope
 from services import billing
 from services.admin import export_zip, find_user, stats, stats_text
@@ -29,6 +29,12 @@ from settings import get_settings
 
 router = Router(name="admin")
 
+STATUS_RU = {"invited": "ждёт оплаты", "paid": "оплачен", "active": "идёт", "finished": "дочитан",
+             "dropped": "выбыл", "refunded": "отменён"}
+VERDICT_RU = {"accepted": "засчитан", "rejected": "не засчитан", "clarify": "уточнение", "pending": "в очереди"}
+TODAY_RU = {"done": "сдано", "reading": "ещё читает", "burned": "стрик сгорел", "idle": "не в забеге",
+            "finished": "книга дочитана", "waiting": "ждёт старта"}
+
 ADMIN_HELP = """<b>Команды ведущего</b>
 /run_new Название | 2026-10-20 | 990 — создать забег (дату можно словом «сегодня»/«завтра»)
 /run_date 2026-10-20 — дата старта текущего забега
@@ -37,14 +43,16 @@ ADMIN_HELP = """<b>Команды ведущего</b>
 /promo_new КОД 20 [лимит] [чей] — промокод со скидкой (100 — бесплатно)
 /promos — промокоды: сколько пришло, оплатило, выручка
 /sales — продажи, воронка, источники
-/refund_done ID — отметить, что деньги по платежу вернули в кабинете ЮKassa (доступ закроется)
+/promo_off КОД — выключить промокод
+/refund_done ID — отметить, что деньги по заказу вернули в кабинете ЮKassa (доступ закроется)
 /refund @user — возврат в групповом забеге
 /pair_set @a @b — назначить пару
 /pairs_auto — разбить половину оплативших без пары на пары
-/user @user — статус и последние пересказы (с id)
+/user @user — статус и последние вердикты по пересказам (с id, без текстов)
 /override &lt;id&gt; accepted — засчитать пересказ вручную
 /stats — сводка по забегу
-/broadcast текст — сообщение всем участникам
+/broadcast текст — сообщение всем, кто дал согласие (/broadcast group текст — только групповому забегу)
+/run_close — закрыть набор в групповой забег
 /export — CSV для анализа теста"""
 
 
@@ -195,7 +203,7 @@ async def cmd_grant(message: Message, command: CommandObject, bot: Bot) -> None:
     async with session_scope() as s:
         u = await find_user(s, parts[0])
         if not u:
-            await message.answer("Не нашёл пользователя. Он должен хотя бы раз нажать /start в боте.")
+            await message.answer("Пользователь не найден. Нужен хотя бы один /start в боте с этого аккаунта.")
             return
         cohort = await current_main_run(s)
         cohort_enr = None
@@ -294,8 +302,9 @@ async def cmd_sales(message: Message, bot: Bot) -> None:
         )).all()
 
     def line(title: str, x: dict) -> str:
-        prod = ", ".join(f"{k}: {v}" for k, v in x["by_product"].items()) or "—"
-        return f"{title}: {x['count']} оплат · {x['rub']:.0f} ₽ ({prod})"
+        prod = ", ".join(f"{billing.product_title(k).lower()}: {v}" for k, v in x["by_product"].items()) or "—"
+        n = x["count"]
+        return f"{title}: {n} {texts.plural(n, 'оплата', 'оплаты', 'оплат')} · {x['rub']:.0f} ₽ ({prod})"
 
     text = ["<b>Продажи</b>", line("Сегодня", day), line("7 дней", week), line("Всего", total),
             f"Возвратов: {total['refunds']}",
@@ -312,7 +321,7 @@ async def cmd_refund_done(message: Message, command: CommandObject, bot: Bot) ->
         return
     arg = (command.args or "").strip()
     if not arg.isdigit():
-        await message.answer("Формат: /refund_done ID_платежа (номер пришёл в уведомлении о запросе возврата)")
+        await message.answer("Формат: /refund_done номер_заказа (он есть в уведомлении об оплате: «заказ #…»)")
         return
     async with session_scope() as s:
         p = await billing.mark_refunded(s, int(arg))
@@ -334,7 +343,7 @@ async def cmd_refund(message: Message, command: CommandObject, bot: Bot) -> None
         run = await current_main_run(s)
         enr = await s.scalar(select(Enrollment).where(Enrollment.user_id == u.id, Enrollment.run_id == run.id)) if u and run else None
         if not enr:
-            await message.answer("Не нашёл участие.")
+            await message.answer("Участие не найдено.")
             return
         await refund(s, enr)
         tg_id, name = u.tg_id, u.display_name
@@ -355,7 +364,7 @@ async def cmd_pair_set(message: Message, command: CommandObject, bot: Bot) -> No
         run = await current_main_run(s)
         ua, ub = await find_user(s, refs[0]), await find_user(s, refs[1])
         if not (run and ua and ub):
-            await message.answer("Не нашёл забег или пользователей.")
+            await message.answer("Забег или пользователи не найдены.")
             return
         ea = await s.scalar(select(Enrollment).where(Enrollment.user_id == ua.id, Enrollment.run_id == run.id))
         eb = await s.scalar(select(Enrollment).where(Enrollment.user_id == ub.id, Enrollment.run_id == run.id))
@@ -398,21 +407,22 @@ async def cmd_user(message: Message, command: CommandObject) -> None:
     async with session_scope() as s:
         u = await find_user(s, (command.args or "").strip())
         if not u:
-            await message.answer("Не нашёл пользователя.")
+            await message.answer("Пользователь не найден.")
             return
         st = await public_status(s, u)
         enrs = list(await s.scalars(select(Enrollment).where(Enrollment.user_id == u.id)))
         lines = [f"<b>{texts.e(u.display_name)}</b> @{texts.e(u.tg_username or '-')} · tg_id {u.tg_id} · {texts.e(u.timezone)}",
-                 f"Книга: {texts.e(st.book_title or '—')} · стрик {st.streak} · сегодня: {st.today}"]
+                 f"Книга: {texts.e(st.book_title or '—')} · стрик {st.streak} · сегодня: {TODAY_RU.get(st.today, st.today)}"]
         for e in enrs:
-            lines.append(f"Участие #{e.id}: забег {e.run_id}, {e.status}, план {e.plan_days or '—'} дн., старт {e.plan_start_date or '—'}")
+            lines.append(f"Участие #{e.id}: забег {e.run_id}, {STATUS_RU.get(e.status, e.status)}, "
+                         f"план {e.plan_days or '—'} дн., старт {e.plan_start_date or '—'}")
         rows = await s.execute(
             select(Retelling, Segment.day_number).join(Segment, Segment.id == Retelling.segment_id, isouter=True)
             .where(Retelling.enrollment_id.in_([e.id for e in enrs] or [-1])).order_by(Retelling.id.desc()).limit(10)
         )
         lines.append("\nПоследние пересказы (тексты не храним):")
         for r, dn in rows.all():
-            lines.append(f"#{r.id} · день {dn} · {r.verdict}{' (без сверки)' if not r.verified else ''}")
+            lines.append(f"#{r.id} · день {dn} · {VERDICT_RU.get(r.verdict, r.verdict)}{' (без сверки)' if not r.verified else ''}")
     await message.answer("\n".join(lines))
 
 
@@ -452,17 +462,27 @@ async def cmd_broadcast(message: Message, command: CommandObject, bot: Bot) -> N
     if not text:
         await message.answer("Формат: /broadcast текст сообщения")
         return
+    group_only = text.startswith("group ")
+    if group_only:
+        text = text[6:].strip()
     async with session_scope() as s:
-        run = await current_main_run(s)
-        ids = list(await s.scalars(
-            select(User.tg_id).join(Enrollment, Enrollment.user_id == User.id).where(
-                Enrollment.run_id == run.id, Enrollment.status.in_(("invited", "paid", "active", "finished"))
-            )
-        )) if run else []
+        if group_only:
+            run = await current_main_run(s)
+            ids = list(await s.scalars(
+                select(User.tg_id).join(Enrollment, Enrollment.user_id == User.id).where(
+                    Enrollment.run_id == run.id, Enrollment.status.in_(("invited", "paid", "active", "finished"))
+                )
+            )) if run else []
+        else:
+            # всем, кто дал согласие на обработку данных (личные забеги — тоже)
+            ids = list(await s.scalars(
+                select(User.tg_id).join(Consent, Consent.user_id == User.id)
+                .where(Consent.doc_type == "pd", Consent.revoked_at.is_(None)).distinct()
+            ))
     outbox = Outbox()
     for tg in ids:
         outbox.add(OutMsg(tg, texts.e(text)))
-    await message.answer(f"Отправляю {len(ids)} участникам…")
+    await message.answer(f"Отправляю сообщение, получателей: {len(ids)}…")
     await flush(bot, outbox)
     await message.answer("Готово.")
 
@@ -480,7 +500,7 @@ async def cmd_export(message: Message) -> None:
             return
         data = await export_zip(s, run)
     await message.answer_document(BufferedInputFile(data, f"dochitka_run{run.id}_{date.today()}.zip"),
-                                  caption="participants, retellings, days, events (CSV) + metrics.txt")
+                                  caption="Участники, пересказы (без текстов), дни, события — CSV и сводка metrics.txt")
 
 
 @router.message(Command("timewarp"))

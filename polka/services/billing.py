@@ -192,6 +192,9 @@ async def grant_entitlement(session: AsyncSession, user: User, p: Purchase) -> s
     Сроки абонементов складываются: новая покупка прибавляет свой срок к оставшемуся.
     Возвращает способ доступа, если забег стартовал прямо сейчас.
     """
+    # строка пользователя — под блокировкой: две оплаты одновременно не перезапишут друг другу срок и кредиты
+    await session.flush()
+    await session.refresh(user, with_for_update=True)
     if p.product == "run":
         user.run_credits += 1
     else:
@@ -256,7 +259,7 @@ async def notify_admins_payment(session: AsyncSession, user: User | None, p: Pur
     src = f", источник: {src}" if src else ""
     for admin in get_settings().admin_ids:
         outbox.add(OutMsg(admin, f"Оплата: {texts.e(who)} — {product_title(p.product).lower()}, "
-                                 f"{format_amount(p)} ({via}{extra}{src})", kind="admin"))
+                                 f"{format_amount(p)} ({via}{extra}{src}) · заказ #{p.id}", kind="admin"))
 
 
 # --------------------------------------------------------------------------- отмена оплаты (возврат в кабинете ЮKassa)
@@ -275,18 +278,23 @@ async def revoke(session: AsyncSession, user: User, p: Purchase) -> None:
     until = _aware(user.subscription_until) if user.subscription_until else now()
     user.subscription_until = max(now(), until - timedelta(days=SUB_DAYS[p.product]))
     if not subscription_active(user):
+        # закрываем только забеги, открытые этой покупкой (или начатые уже после неё);
+        # забег, начатый по прошлому оплаченному периоду, можно дочитать
         for e in await session.scalars(
             select(Enrollment).where(Enrollment.user_id == user.id, Enrollment.access == "subscription",
                                      Enrollment.status.in_(("paid", "active")))
         ):
-            e.status = "refunded"
+            started_by_it = e.purchase_id == p.id or (
+                e.purchase_id is None and e.paid_at is not None and _aware(e.paid_at) >= _aware(p.created_at))
+            if started_by_it:
+                e.status = "refunded"
 
 
 async def mark_refunded(session: AsyncSession, purchase_id: int) -> Purchase | None:
     p = await session.get(Purchase, purchase_id)
     if p is None or p.status == "refunded":
         return p
-    user = await session.get(User, p.user_id) if p.user_id else None
+    user = await session.get(User, p.user_id, with_for_update=True, populate_existing=True) if p.user_id else None
     was_paid = p.status == "paid"
     p.status = "refunded"
     p.refunded_at = now()

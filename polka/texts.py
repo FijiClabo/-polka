@@ -53,7 +53,7 @@ def welcome() -> list[str]:
         "по 15 минут чтения в день. В конце книга встаёт на твою полку.",
         "Каждый день читаешь свой отрезок — в приложении, в любой читалке или на бумаге — "
         "и за 30–60 секунд <b>пересказываешь</b> его мне голосом или текстом.\n\n"
-        "Я не экзаменатор: просто убеждаюсь, что отрезок прочитан. Если что-то неясно — задам один вопрос.",
+        "Я не экзаменатор: просто убеждаюсь, что отрезок прочитан. Если что-то неясно — задам уточняющий вопрос.",
         "День засчитывается только после пересказа. Дни подряд — это <b>стрик</b>.\n\n"
         "Раз в неделю есть заморозка: если пропустишь день, стрик не сгорит. "
         "А с напарником стрик общий — подводить друг друга не хочется.",
@@ -157,12 +157,16 @@ def status_in_list(start: date | None) -> str:
     return f"Забег стартует {d(start)}. Ты в списке." if start else "Ты в списке. Дату старта сообщу отдельно."
 
 
+def status_plan_ready(start: date | None) -> str:
+    return f"План готов, старт — {d(start)}. Первый отрезок пришлю утром в день старта."
+
+
 STATUS_NO_RUN = "Забег ещё не начат: пришли книгу — и соберём план."
 
 
 def sprint_offer(inviter: str | None) -> str:
     who = f"{e(inviter)} зовёт тебя читать вместе. " if inviter else ""
-    return (f"{who}Не готов сразу к целой книге? Попробуй бесплатно: <b>спринт</b> — 7 дней на рассказ или короткую "
+    return (f"{who}Целая книга — это много для начала? Попробуй бесплатно: <b>спринт</b> — 7 дней на рассказ или короткую "
             "книгу. Всё как в забеге, только короче.")
 
 
@@ -228,11 +232,11 @@ def friend_joined(name: str) -> str:
 
 
 def friends_now(name: str) -> str:
-    return f"Вы с {e(name)} теперь друзья."
+    return f"Теперь вы друзья: {e(name)}."
 
 
 def pair_joined(name: str) -> str:
-    return f"{e(name)} — твой напарник. Общий стрик растёт, только если сдали оба."
+    return f"{e(name)} — твой напарник. Общий стрик растёт, только если день сдан у вас двоих."
 
 
 NO_BOOK_REMINDER = "Забег уже идёт, а книги у тебя пока нет. Пришли файл epub/fb2 или добавь бумажную — начнём со следующего дня."
@@ -274,7 +278,7 @@ def rejected(reply: str) -> str:
     return f"{e(reply)}\n\nПопробуй ещё раз — расскажи пару конкретных моментов из отрезка."
 
 
-QUEUED = "Принял. Проверю чуть позже — день не сгорит, пришлю ответ сюда."
+QUEUED = "Пересказ получен. Проверю чуть позже — день не сгорит, ответ придёт в чат с ботом."
 CHECKING = "Ещё проверяю прошлый пересказ — секунду."
 RATE_LIMITED = "Многовато попыток за час. Давай сделаем паузу и вернёмся чуть позже."
 VOICE_TOO_LONG = "Голосовое длиннее 3 минут — я столько не осилю. Достаточно 30–60 секунд."
@@ -283,7 +287,7 @@ STT_OFF = "Голосовые пока не настроены — напиши,
 
 
 def pending_resolved(out) -> str:
-    return "Твой пересказ проверен повторно: засчитано. День на месте."
+    return "Проверка задержалась, поэтому пересказ засчитан без сверки. День на месте."
 
 
 def override_notice() -> str:
@@ -325,7 +329,7 @@ def achievements_message(codes: list[str]) -> str:
 
 
 def finished(title: str, days: int, streak: int, retells: int, partner: str | None) -> str:
-    who = f" Вместе с {e(partner)}." if partner else ""
+    who = f" Напарник: {e(partner)}." if partner else ""
     return (f"<b>Дочитано!</b>\n«{e(title)}» за {days_word(days)}. Лучший стрик — {streak}, "
             f"пересказов — {retells}.{who}\n\nКнига встала на твою полку.")
 
@@ -347,12 +351,15 @@ def help_text() -> str:
         "/pair — позвать напарника\n"
         "/friends — друзья и личная ссылка\n"
         "/settings — время и пояс\n"
+        "/buy — тарифы и оплата\n"
+        "/terms — оферта и документы\n"
+        "/paysupport — вопросы по оплате\n"
         "/delete_me — удалить все мои данные"
         f"{contact}"
     )
 
 
-DELETE_CONFIRM = "Удалить профиль, книги и все пересказы? Это необратимо."
+DELETE_CONFIRM = "Удалить профиль, книги, прогресс и полку? Это необратимо."
 
 
 def delete_confirm(sub_until=None, credits: int = 0) -> str:
@@ -396,7 +403,7 @@ def paywall(book_title: str | None, plan_days: int | None, prices: dict) -> str:
              "и вторая заморозка в неделю."]
     if run.promo and run.discount:
         lines += ["", f"Промокод {e(run.promo)}: −{run.discount}%"]
-    return "\n".join(lines)
+    return "\n".join(lines) + offer_note()
 
 
 def paywall_buttons(prices: dict, *, in_chat: bool = True) -> list[list[dict]]:
@@ -407,19 +414,30 @@ def paywall_buttons(prices: dict, *, in_chat: bool = True) -> list[list[dict]]:
         if pr.free and pr.promo:
             rows.append([{"text": f"{label} по промокоду — бесплатно", "callback": f"pay:free:{pr.product}"}])
     if in_chat:
-        rows.append([{"text": f"Оплатить книгу — {rub(run.rub)}", "callback": "pay:run"}])
-        rows.append([{"text": f"Месяц — {rub(m.rub)}", "callback": "pay:month"},
-                     {"text": f"Год — {rub(y.rub)}", "callback": "pay:year"}])
+        if not run.free:
+            rows.append([{"text": f"Оплатить книгу — {rub(run.rub)}", "callback": "pay:run"}])
+        subs = [{"text": f"{label} — {rub(pr.rub)}", "callback": f"pay:{pr.product}"}
+                for pr, label in ((m, "Месяц"), (y, "Год")) if not pr.free]
+        if subs:
+            rows.append(subs)
+        rows.append([{"text": "Тарифы в приложении", "webapp": "pay"}])
     else:
         rows.append([{"text": "Оплатить", "webapp": "pay"}])
-    rows.append([{"text": "Тарифы в приложении", "webapp": "pay"}])
     return rows
 
 
 def pay_link(product: str) -> str:
     what = {"run": "забег на одну книгу", "month": "абонемент на месяц", "year": "абонемент на год"}[product]
     return (f"Оплата: {what}. Откроется защищённая страница ЮKassa — картой или через СБП. "
-            "После оплаты возвращайся сюда: доступ откроется сам.")
+            "После оплаты возвращайся сюда: доступ откроется сам." + offer_note())
+
+
+def offer_note() -> str:
+    """Ссылка на оферту до оплаты (п. 4.1 оферты): оплата по кнопке — это её принятие."""
+    base = get_settings().public_url
+    if base.startswith("http"):
+        return f'\n\nОплачивая, ты принимаешь <a href="{base.rstrip("/")}/offer">условия оферты</a>.'
+    return "\n\nОплачивая, ты принимаешь условия оферты — /terms."
 
 
 def consent_text(consent_url: str | None, privacy_url: str | None) -> str:
@@ -429,7 +447,7 @@ def consent_text(consent_url: str | None, privacy_url: str | None) -> str:
     if privacy_url:
         links.append(f'<a href="{privacy_url}">политика конфиденциальности</a>')
     docs = (" Документы: " + " и ".join(links) + ".") if links else ""
-    return ("Последний шаг перед стартом — согласие на обработку данных.\n\n"
+    return ("Перед стартом нужно согласие на обработку данных.\n\n"
             "Что храним: имя и id в Telegram, часовой пояс, книги и прогресс — чтобы строить план и напоминать о чтении. "
             "Пересказы и голосовые не храним: они нужны только для проверки и сразу удаляются. "
             "Напарник видит лишь твой прогресс."

@@ -15,7 +15,7 @@ from ai.checker import CheckInput, check_retelling
 from ai.llm import LLMUnavailable
 from bot.common import Flow, load_user, parse_time, parse_tz, tz_from_location, tz_label
 from bot.ui import REMOVE_KB, app_kb, flush, kb, location_kb
-from db.models import User
+from db.models import Run, User
 from db.session import session_scope
 from services.common import Outbox, log_event, now
 from services.progress import load_view
@@ -32,56 +32,78 @@ router = Router(name="start")
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, command: CommandObject, state: FSMContext, bot: Bot) -> None:
+    from services.consent import has_consent
+
     await state.clear()
     payload = (command.args or "").strip()
     outbox = Outbox()
+    pending = None
     async with session_scope() as s:
         user, created = await load_user(s, message.from_user)
         inviter_name = None
-        if payload.startswith("f_"):
-            inviter = await add_friend_by_code(s, user, payload[2:], is_new_user=created or user.onboarding_step != "done",
-                                               outbox=outbox)
-            if inviter:
-                inviter_name = inviter.display_name
-                if not user.source:
-                    user.source = "friend"
-                if not created and user.onboarding_step == "done":
-                    outbox.add(_reply(user, texts.friends_now(inviter.display_name)))
-        elif payload.startswith("promo_") or payload.startswith("src_"):
-            # метка источника (реклама, блогер) и промокод из ссылки: t.me/<бот>?start=promo_READ20
-            from services.billing import normalize_code, valid_promo
-
-            if payload.startswith("promo_"):
-                promo = await valid_promo(s, payload[6:])
-                if promo is not None:
-                    user.promo_code = promo.code
-                    outbox.add(_reply(user, texts.promo_applied(promo.code, promo.discount_percent)))
-                if not user.source:
-                    user.source = f"promo:{normalize_code(payload[6:])}"
-            elif not user.source:
-                user.source = payload[4:36]
-        elif payload == "group":
-            # групповой забег ведущего — только по его ссылке
-            status, _enr = await join_cohort(s, user)
-            outbox.add(_reply(user, texts.COHORT_JOIN[status]))
-        elif payload.startswith("p_"):
-            status, inviter = await join_pair_by_code(s, user, payload[2:], outbox)
-            if status == "ok" and inviter:
-                outbox.add(_reply(user, texts.pair_joined(inviter.display_name)))
-            elif status == "taken":
-                outbox.add(_reply(user, "У этого участника уже есть напарник."))
-            elif status == "already_paired":
-                outbox.add(_reply(user, "У тебя уже есть напарник в этом забеге."))
+        if _is_social(payload) and not await has_consent(s, user):
+            # дружба, пара и групповой забег — только после согласия на обработку данных:
+            # ссылку запоминаем и применяем, когда человек нажмёт «Даю согласие»
+            pending = payload
+        else:
+            inviter_name = await _apply_payload(s, user, created, payload, outbox)
         if inviter_name:
             await s.flush()
         onboarded = user.onboarding_step == "done"
         uid = user.id
-        await state.update_data(inviter_name=inviter_name)
+        await state.update_data(inviter_name=inviter_name, pending_start=pending)
     await flush(bot, outbox)
     if onboarded:
+        if pending:
+            await ask_consent(message)
+            return
         await send_status(bot, message.chat.id, uid)
         return
     await send_welcome(message, 0)
+
+
+def _is_social(payload: str) -> bool:
+    return payload.startswith(("f_", "p_")) or payload == "group"
+
+
+async def _apply_payload(s, user: User, created: bool, payload: str, outbox: Outbox) -> str | None:
+    """Ссылка из /start: друг, промокод, метка источника, групповой забег, напарник. Возвращает имя пригласившего."""
+    inviter_name = None
+    if payload.startswith("f_"):
+        inviter = await add_friend_by_code(s, user, payload[2:], is_new_user=created or user.onboarding_step != "done",
+                                           outbox=outbox)
+        if inviter:
+            inviter_name = inviter.display_name
+            if not user.source:
+                user.source = "friend"
+            if not created and user.onboarding_step == "done":
+                outbox.add(_reply(user, texts.friends_now(inviter.display_name)))
+    elif payload.startswith("promo_") or payload.startswith("src_"):
+        # метка источника (реклама, блогер) и промокод из ссылки: t.me/<бот>?start=promo_READ20
+        from services.billing import normalize_code, valid_promo
+
+        if payload.startswith("promo_"):
+            promo = await valid_promo(s, payload[6:])
+            if promo is not None:
+                user.promo_code = promo.code
+                outbox.add(_reply(user, texts.promo_applied(promo.code, promo.discount_percent)))
+            if not user.source:
+                user.source = f"promo:{normalize_code(payload[6:])}"
+        elif not user.source:
+            user.source = payload[4:36]
+    elif payload == "group":
+        # групповой забег ведущего — только по его ссылке
+        status, _enr = await join_cohort(s, user)
+        outbox.add(_reply(user, texts.COHORT_JOIN[status]))
+    elif payload.startswith("p_"):
+        status, inviter = await join_pair_by_code(s, user, payload[2:], outbox)
+        if status == "ok" and inviter:
+            outbox.add(_reply(user, texts.pair_joined(inviter.display_name)))
+        elif status == "taken":
+            outbox.add(_reply(user, "У этого участника уже есть напарник."))
+        elif status == "already_paired":
+            outbox.add(_reply(user, "У тебя уже есть напарник в этом забеге."))
+    return inviter_name
 
 
 def _reply(user: User, text: str):
@@ -92,7 +114,7 @@ def _reply(user: User, text: str):
 
 async def send_welcome(message: Message, idx: int) -> None:
     parts = texts.welcome()
-    btn = "Дальше →" if idx < len(parts) - 1 else "Поехали"
+    btn = "Дальше" if idx < len(parts) - 1 else "Поехали"
     cb = f"ob:{idx + 1}" if idx < len(parts) - 1 else "ob:go"
     await message.answer(parts[idx], reply_markup=kb([[{"text": btn, "callback": cb}]]))
 
@@ -117,15 +139,22 @@ async def ask_consent(message: Message) -> None:
 
 
 @router.callback_query(F.data == "consent:pd")
-async def cb_consent(call: CallbackQuery) -> None:
+async def cb_consent(call: CallbackQuery, state: FSMContext, bot: Bot) -> None:
     from services.consent import give_consent
 
     await call.answer()
     await call.message.edit_reply_markup(reply_markup=None)
+    data = await state.get_data()
+    pending = data.get("pending_start")
+    outbox = Outbox()
     async with session_scope() as s:
         user, _ = await load_user(s, call.from_user)
         await give_consent(s, user, "bot")
+        if pending:
+            inviter_name = await _apply_payload(s, user, False, pending, outbox)
+            await state.update_data(pending_start=None, inviter_name=inviter_name or data.get("inviter_name"))
         onboarded = user.onboarding_step == "done"
+    await flush(bot, outbox)
     if onboarded:
         await call.message.answer("Спасибо! Можно продолжать.")
         return
@@ -137,6 +166,15 @@ async def consent_gate(message: Message, tg_user) -> bool:
     async with session_scope() as s:
         user, _ = await load_user(s, tg_user)
         return await require_consent(message, user, s)
+
+
+async def _consented(tg_id: int) -> bool:
+    from services.consent import has_consent
+    from services.users import get_user_by_tg
+
+    async with session_scope() as s:
+        u = await get_user_by_tg(s, tg_id)
+        return u is not None and await has_consent(s, u)
 
 
 async def require_consent(message: Message, user: User, session) -> bool:
@@ -166,7 +204,7 @@ async def ask_tz(message: Message, settings_mode: bool = False) -> None:
         rows.append(row)
     rows.append([{"text": "Другой пояс", "callback": f"{prefix}:other"}])
     await message.answer(texts.ASK_TZ, reply_markup=kb(rows))
-    await message.answer("Или отправь геопозицию — определю сам.", reply_markup=location_kb())
+    await message.answer("Или отправь геопозицию — пояс определится по ней.", reply_markup=location_kb())
 
 
 async def _save_tz(tg_id: int, tz: str) -> None:
@@ -211,6 +249,8 @@ async def msg_tz_input(message: Message, state: FSMContext) -> None:
 
 @router.message(F.location)
 async def msg_location(message: Message, state: FSMContext) -> None:
+    if not await consent_gate(message, message.from_user):
+        return
     tz = tz_from_location(message.location.latitude, message.location.longitude)
     if not tz:
         await message.answer("Не получилось определить пояс по геопозиции. Выбери кнопкой.", reply_markup=REMOVE_KB)
@@ -294,6 +334,9 @@ async def _after_time(message: Message, tg_id: int, which: str, t, settings_mode
 
 
 async def start_trial(message: Message, state: FSMContext) -> None:
+    if not await _consented(message.chat.id):
+        await ask_consent(message)  # пробный пересказ уходит на проверку ИИ — только после согласия
+        return
     await state.set_state(Flow.trial)
     await state.update_data(trial_dialog=[], trial_clarify=0)
     await message.answer(
@@ -385,6 +428,8 @@ async def send_book_prompt(bot: Bot, chat_id: int) -> None:
 @router.callback_query(F.data == "sprint:start")
 async def cb_sprint(call: CallbackQuery, bot: Bot) -> None:
     await call.answer()
+    if not await consent_gate(call.message, call.from_user):
+        return
     await call.message.edit_reply_markup(reply_markup=None)
     async with session_scope() as s:
         user, _ = await load_user(s, call.from_user)
@@ -408,6 +453,7 @@ async def send_status(bot: Bot, chat_id: int, user_id: int) -> None:
         await activate_pending(s, user)  # оплачено заранее (кредит, абонемент) — стартуем ждущий план
         enr = await current_enrollment(s, user.id)
         view = await load_view(s, user, enr)
+        group_run = bool(enr and enr.run_id and (await s.get(Run, enr.run_id)).kind == "main")
     st = view.state
     if st == "awaiting_payment":
         from bot.handlers_pay import send_paywall
@@ -420,7 +466,8 @@ async def send_status(bot: Bot, chat_id: int, user_id: int) -> None:
     elif st == "waiting_start":
         text = texts.status_in_list(view.starts_on)
     elif st == "not_started":
-        text = texts.status_in_list(view.starts_on) + "\nПлан готов, первый отрезок пришлю утром в день старта."
+        text = (texts.status_in_list(view.starts_on) + "\nПлан готов, первый отрезок пришлю утром в день старта."
+                if group_run else texts.status_plan_ready(view.starts_on))
     elif st in ("to_read", "clarify", "checking", "done_today"):
         from bot.handlers_day import today_text
 

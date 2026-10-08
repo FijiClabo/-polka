@@ -35,12 +35,13 @@ async def cmd_pair(message: Message) -> None:
         pair, partner, p_enr = await get_pair_for(s, enr)
         if pair and partner:
             st = await public_status(s, partner)
-            book = st.book_title or "книга ещё не выбрана"
+            # напарнику виден только прогресс: день плана, сдан ли сегодня, общий стрик — без книги
+            day = f"день {min(st.plan_day, st.plan_days)} из {st.plan_days} · " if st.plan_day and st.plan_days else ""
             text = (f"Твой напарник — <b>{texts.e(partner.display_name)}</b>.\n"
-                    f"Читает: {texts.e(book)} · сегодня: {STATUS_WORD.get(st.today, st.today)}\n"
+                    f"{day}сегодня: {STATUS_WORD.get(st.today, '')}\n"
                     f"Общий стрик: <b>{pair.streak}</b>")
             rows = []
-            if st.today != "done":
+            if st.today in ("reading", "burned"):
                 rows.append([{"text": "Напомнить напарнику", "callback": f"nudge:{partner.id}:p"}])
             rows.append([{"text": "Открыть", "webapp": "friends"}])
             await message.answer(text, reply_markup=kb(rows))
@@ -49,7 +50,7 @@ async def cmd_pair(message: Message) -> None:
         name = user.display_name
     link = deep_link(f"p_{code}")
     await message.answer(
-        "Позови напарника из своего забега — общий стрик растёт, только если сдали оба. "
+        "Позови напарника — книги у вас разные, а стрик общий: он растёт, только если день сдан у вас двоих. "
         f"Перешли ссылку:\n{link}",
         reply_markup=kb([[{"text": "Отправить приглашение", "url": share_link(link, texts.pair_invite_text(name))}]]),
     )
@@ -89,7 +90,7 @@ async def cb_nudge(call: CallbackQuery, bot: Bot) -> None:
         target = await s.get(User, int(uid))
         res = await nudge(s, user, target, outbox, kind="partner" if kind == "p" else "friend") if target else "not_found"
     msg = {"ok": "Отправлено.", "already": "Сегодня толчок уже был — хватит одного.", "done": "Там день уже сдан.",
-           "disabled": "Этот человек отключил толчки."}.get(res, "Не получилось.")
+           "idle": "Сейчас читать нечего — толчок не нужен."}.get(res, "Не получилось.")
     await call.answer(msg, show_alert=False)
     await flush(bot, outbox)
 

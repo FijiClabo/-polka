@@ -54,9 +54,11 @@ from services.social import (
     ensure_pair_code,
     friend_ids,
     get_pair_for,
+    leave_pair,
     nudge,
     nudged_today,
     public_status,
+    remove_friend,
 )
 from services.users import valid_timezone
 from settings import get_settings
@@ -230,7 +232,7 @@ async def patch_me(body: MePatch, user: User = Depends(current_user), s: AsyncSe
     if body.webapp_onboarded is not None:
         user.webapp_onboarded = body.webapp_onboarded
     enr = await current_enrollment(s, user.id)
-    return _me(user, enr, await load_view(s, user, enr))
+    return {**_me(user, enr, await load_view(s, user, enr)), "consent": await has_consent(s, user)}
 
 
 # --------------------------------------------------------------------------- сегодня
@@ -266,7 +268,7 @@ async def _partner_block(s: AsyncSession, enr: Enrollment | None) -> dict | None
     st = await public_status(s, partner)
     return {**user_brief(partner), "today": st.today, "done_at": st.done_at, "pair_streak": pair.streak,
             "best_pair_streak": pair.best_streak, "plan_day": st.plan_day,
-            "plan_days": st.plan_days}
+            "plan_days": st.plan_days, "can_nudge": st.today in ("reading", "burned")}
 
 
 @router.get("/today")
@@ -407,8 +409,16 @@ async def get_pair(user: User = Depends(current_user), s: AsyncSession = Depends
     }
 
 
+@router.post("/pair/leave")
+async def post_pair_leave(user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    """Выйти из пары: общий стрик заканчивается, каждый читает дальше сам."""
+    if not await leave_pair(s, await current_enrollment(s, user.id)):
+        raise HTTPException(404, "Нет напарника")
+    return {"ok": True}
+
+
 @router.post("/pair/nudge")
-async def post_pair_nudge(user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+async def post_pair_nudge(user: User = Depends(need_consent), s: AsyncSession = Depends(get_session)):
     enr = await current_enrollment(s, user.id)
     _, partner, _ = await get_pair_for(s, enr)
     if partner is None:
@@ -474,7 +484,7 @@ async def get_book(user: User = Depends(current_user), s: AsyncSession = Depends
 
 
 @router.patch("/book")
-async def patch_book(body: BookPatch, user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+async def patch_book(body: BookPatch, user: User = Depends(need_consent), s: AsyncSession = Depends(get_session)):
     enr = await current_enrollment(s, user.id)
     book = await s.get(Book, enr.book_id) if enr and enr.book_id else None
     if book is None or book.owner_user_id != user.id:
@@ -500,7 +510,7 @@ async def post_sprint(user: User = Depends(need_consent), s: AsyncSession = Depe
 
 
 @router.post("/runs/new")
-async def post_new_run(user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+async def post_new_run(user: User = Depends(need_consent), s: AsyncSession = Depends(get_session)):
     """Следующая книга: новое участие (личный забег), если текущее закончено."""
     enr = await ensure_enrollment(s, user)
     await log_event(s, "next_run", user.id, enr.run_id)
@@ -552,9 +562,11 @@ async def _billing_state(s: AsyncSession, user: User) -> dict:
 
 
 @router.get("/billing")
-async def get_billing(user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+async def get_billing(view: str | None = None, user: User = Depends(current_user),
+                      s: AsyncSession = Depends(get_session)):
     await billing.activate_pending(s, user)
-    await log_event(s, "paywall_shown", user.id, via="webapp")
+    if view == "pay":
+        await log_event(s, "paywall_shown", user.id, via="webapp")
     return await _billing_state(s, user)
 
 
@@ -567,11 +579,11 @@ class PayBody(BaseModel):
 async def post_pay(body: PayBody, user: User = Depends(need_consent), s: AsyncSession = Depends(get_session)):
     """Кнопка «Оплатить»: заказ и платёж в ЮKassa → ссылка на страницу оплаты."""
     try:
-        url, order = await payments.start_payment(s, user, body.product, body.email)
+        url, p = await payments.start_payment(s, user, body.product, body.email)
     except payments.PaymentError as e:
         raise HTTPException(400, str(e)) from e
     await log_event(s, "payment_link", user.id, product=body.product, via="webapp")
-    return {"url": url, "order": order}
+    return {"url": url, "order": p.order_id, "amount": p.amount // 100}
 
 
 @router.get("/billing/order/{order_id}")
@@ -610,7 +622,7 @@ class PromoBody(BaseModel):
 
 
 @router.post("/billing/promo")
-async def post_promo(body: PromoBody, user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+async def post_promo(body: PromoBody, user: User = Depends(need_consent), s: AsyncSession = Depends(get_session)):
     promo = await billing.valid_promo(s, body.code)
     if promo is None:
         raise HTTPException(404, "Такого промокода нет или он закончился")
@@ -673,7 +685,7 @@ async def get_plan_options(user: User = Depends(current_user), s: AsyncSession =
 
 
 @router.post("/book/plan")
-async def post_plan(body: PlanBody, user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+async def post_plan(body: PlanBody, user: User = Depends(need_consent), s: AsyncSession = Depends(get_session)):
     enr = await current_enrollment(s, user.id)
     if enr is None or enr.book_id is None:
         raise HTTPException(404, "Нет книги")
@@ -811,12 +823,21 @@ async def get_friend(user_id: int, user: User = Depends(current_user), s: AsyncS
     sh = await shelf(s, f, enr)
     for item in sh["finished"] + ([sh["current"]] if sh["current"] else []):
         item.pop("retellings", None)  # другу — только полка, ничего о пересказах
+        item.pop("partner", None)  # и без имени напарника: это данные третьего человека
     sh.pop("retellings_count", None)
     return {"status": st.__dict__, "achievements": await achievements_of(s, f.id), "shelf": sh}
 
 
+@router.delete("/friends/{user_id}")
+async def delete_friend(user_id: int, user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    """Убрать из друзей: больше не видим книги, стрика и полки друг друга."""
+    if not await remove_friend(s, user, user_id):
+        raise HTTPException(404, "Не найдено")
+    return {"ok": True}
+
+
 @router.post("/friends/{user_id}/nudge")
-async def post_friend_nudge(user_id: int, user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+async def post_friend_nudge(user_id: int, user: User = Depends(need_consent), s: AsyncSession = Depends(get_session)):
     target = await s.get(User, user_id)
     if target is None or not await are_friends(s, user.id, user_id):
         raise HTTPException(404, "Не найдено")
@@ -887,15 +908,15 @@ def _unsign(token: str) -> dict | None:
     return data
 
 
-async def render_for(s: AsyncSession, user: User, kind: str, size: str) -> bytes:
+async def render_for(s: AsyncSession, user: User, kind: str, size: str, book_id: int | None = None) -> bytes:
     from share.cards import render_card
 
     enr = await current_enrollment(s, user.id)
     if kind == "finish":
-        enr = await s.scalar(
-            select(Enrollment).where(Enrollment.user_id == user.id, Enrollment.status == "finished")
-            .order_by(Enrollment.finished_at.desc()).limit(1)
-        )
+        q = select(Enrollment).where(Enrollment.user_id == user.id, Enrollment.status == "finished")
+        if book_id:
+            q = q.where(Enrollment.book_id == book_id)  # своя книга: user_id в условии
+        enr = await s.scalar(q.order_by(Enrollment.finished_at.desc()).limit(1))
         if enr is None:
             raise HTTPException(404, "Ещё нет дочитанных книг")
     if enr is None:
@@ -923,11 +944,12 @@ async def get_share(kind: str, size: str = "story", user: User = Depends(current
 
 
 @router.post("/share/{kind}/send")
-async def send_share(kind: str, size: str = "story", user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+async def send_share(kind: str, size: str = "story", book: int | None = None, user: User = Depends(current_user),
+                     s: AsyncSession = Depends(get_session)):
     """Прислать карточку в чат с ботом — оттуда её удобно переслать или сохранить."""
     if kind not in ("streak", "finish", "pair"):
         raise HTTPException(404)
-    png = await render_for(s, user, kind, size)
+    png = await render_for(s, user, kind, size, book)
     if _bot is None:
         raise HTTPException(503, "Бот недоступен")
     from aiogram.types import BufferedInputFile
@@ -938,11 +960,12 @@ async def send_share(kind: str, size: str = "story", user: User = Depends(curren
 
 
 @router.get("/share/{kind}/link")
-async def share_link_ep(kind: str, request: Request, size: str = "story", user: User = Depends(current_user)):
+async def share_link_ep(kind: str, request: Request, size: str = "story", book: int | None = None,
+                        user: User = Depends(current_user)):
     """Публичная ссылка на картинку на 1 час — нужна для «Поделиться в сторис» (shareToStory)."""
     if kind not in ("streak", "finish", "pair"):
         raise HTTPException(404)
-    token = _sign({"u": user.id, "k": kind, "s": size, "exp": int(_time.time()) + 3600})
+    token = _sign({"u": user.id, "k": kind, "s": size, "b": book, "exp": int(_time.time()) + 3600})
     base = get_settings().public_url or str(request.base_url).rstrip("/")
     return {"url": f"{base}/share/img/{token}.png"}
 
@@ -958,7 +981,7 @@ async def public_share_img(token: str, s: AsyncSession = Depends(get_session)):
     user = await s.get(User, int(data["u"]))
     if user is None:
         raise HTTPException(404)
-    png = await render_for(s, user, data["k"], data.get("s", "story"))
+    png = await render_for(s, user, data["k"], data.get("s", "story"), data.get("b"))
     return Response(png, media_type="image/png", headers={"Cache-Control": "public, max-age=600"})
 
 

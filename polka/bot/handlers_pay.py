@@ -78,13 +78,13 @@ async def cb_pay(call: CallbackQuery, bot: Bot) -> None:
     try:
         async with session_scope() as s:
             user, _ = await load_user(s, call.from_user)
-            url, _order = await payments.start_payment(s, user, product)
-            price = (await billing.prices_for(s, user))[product]
+            url, order = await payments.start_payment(s, user, product)
+            amount = order.amount // 100  # сумма из заказа: ровно то, что спишет ЮKassa
             await log_event(s, "payment_link", user.id, product=product, via="bot")
     except payments.PaymentError as e:
         await call.message.answer(texts.e(str(e)), reply_markup=kb([[{"text": "Оплатить в приложении", "webapp": "pay"}]]))
         return
-    await call.message.answer(texts.pay_link(product), reply_markup=kb([[{"text": f"Оплатить {texts.rub(price.rub)}", "url": url}]]))
+    await call.message.answer(texts.pay_link(product), reply_markup=kb([[{"text": f"Оплатить {texts.rub(amount)}", "url": url}]]))
 
 
 async def after_payment_message(bot: Bot, chat_id: int, user_id: int, product: str, activated: bool = False) -> None:
@@ -122,7 +122,11 @@ async def after_payment_message(bot: Bot, chat_id: int, user_id: int, product: s
 @router.callback_query(F.data == "next:run")
 async def cb_next_run(call: CallbackQuery, bot: Bot) -> None:
     """Следующая книга после финиша: новое участие, дальше — обычный путь книга → план → доступ."""
+    from bot.handlers_start import consent_gate
+
     await call.answer()
+    if not await consent_gate(call.message, call.from_user):
+        return
     async with session_scope() as s:
         user, _ = await load_user(s, call.from_user)
         enr = await ensure_enrollment(s, user)

@@ -145,16 +145,6 @@ def same_book(
 # --------------------------------------------------------------------------- доступ
 
 
-def can_view_partner_retelling(same: bool, segment_pos_to: float, viewer_progress: float) -> bool:
-    """Пересказ напарника виден, только если книга та же и смотрящий уже сдал эту часть книги.
-
-    Сравнение по доле книги, потому что планы у напарников могут быть разной длины.
-    """
-    if not same:
-        return False
-    return segment_pos_to <= viewer_progress + 1e-6
-
-
 def friendship_key(a: int, b: int) -> tuple[int, int]:
     if a == b:
         raise ValueError("Нельзя дружить с собой")

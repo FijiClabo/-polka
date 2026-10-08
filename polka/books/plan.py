@@ -80,7 +80,7 @@ def plan_options(total_pages: int, total_words: int | None = None, *, paper: boo
     if total_pages < SHORT_BOOK_PAGES:
         options = [opt(d) for d in SHORT_DURATIONS]
     elif total_pages > LONG_BOOK_PAGES:
-        options = [opt(60, f"Книга длинная: около {math.ceil(total_pages / 60)} страниц в день. "
+        options = [opt(60, f"Книга длинная: около {_pages_per_day(total_pages)} в день. "
                            "Это заметная нагрузка — можно выбрать книгу короче.")]
     else:
         options = [opt(d) for d in DURATIONS if MIN_PAGES_PER_DAY <= total_pages / d <= MAX_PAGES_PER_DAY]
@@ -268,3 +268,8 @@ def segment_minutes(word_count: int, pages: int, paper: bool) -> int:
 
 def strip_marks(text: str) -> str:
     return "\n".join(line[len(SUBHEADING_MARK):] if line.startswith(SUBHEADING_MARK) else line for line in text.split("\n"))
+
+
+def _pages_per_day(total_pages: int) -> str:
+    n = math.ceil(total_pages / 60)
+    return f"{n} {'страницы' if n % 10 == 1 and n % 100 != 11 else 'страниц'}"  # «около 21 страницы»

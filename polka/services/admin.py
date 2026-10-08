@@ -135,11 +135,15 @@ async def export_zip(session: AsyncSession, run: Run) -> bytes:
     return buf.getvalue()
 
 
+
+_STATUS_RU = {"invited": "ждут оплаты", "paid": "оплачено", "active": "идут", "finished": "дочитали",
+              "dropped": "выбыли", "refunded": "отменено"}
+
 def stats_text(st: dict) -> str:
     v = st["verdicts"]
     return (
         f"<b>{st['run']}</b>\n"
-        f"Статусы: {', '.join(f'{k}: {n}' for k, n in st['statuses'].items()) or '—'}\n"
+        f"Статусы: {', '.join(f'{_STATUS_RU.get(k, k)}: {n}' for k, n in st['statuses'].items()) or '—'}\n"
         f"Идут по плану: {st['active']}, сдали сегодня: {st['done_today']}\n"
         f"Средний стрик: {st['avg_streak']}\n"
         f"В парах: {st['paired']}, без плана: {st['no_plan']}\n"

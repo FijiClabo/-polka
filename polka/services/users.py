@@ -104,6 +104,10 @@ async def delete_user_data(session: AsyncSession, user: User) -> None:
     await session.execute(
         delete(Pair).where((Pair.user_a_id == user.id) | (Pair.user_b_id == user.id))
     )
+    from services.books import remove_file
+
+    for path in await session.scalars(select(Book.file_path).where(Book.owner_user_id == user.id, Book.file_path.is_not(None))):
+        remove_file(path)  # файл книги, если разбор так и не закончился
     await session.execute(delete(Book).where(Book.owner_user_id == user.id))
     await session.execute(delete(Friendship).where((Friendship.user_low_id == user.id) | (Friendship.user_high_id == user.id)))
     await session.execute(delete(FriendNudge).where((FriendNudge.from_user_id == user.id) | (FriendNudge.to_user_id == user.id)))

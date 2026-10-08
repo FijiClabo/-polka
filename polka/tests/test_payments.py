@@ -46,9 +46,10 @@ class FakeYooKassa:
         async def create_payment(p, return_url):
             pid = f"{len(self.payments) + 1:08d}-0000-0000"
             p.provider_charge_id = pid
-            self.payments[pid] = {"id": pid, "status": "pending",
+            url = f"https://yoomoney.ru/checkout/{pid}"
+            self.payments[pid] = {"id": pid, "status": "pending", "confirmation": {"confirmation_url": url},
                                   "amount": {"value": f"{p.amount / 100:.2f}", "currency": "RUB"}}
-            return f"https://yoomoney.ru/checkout/{pid}"
+            return url
 
         async def fetch_payment(pid):
             return self.payments.get(pid)
@@ -62,6 +63,14 @@ class FakeYooKassa:
 
     def succeed(self, pid: str) -> None:
         self.payments[pid]["status"] = "succeeded"
+
+    def cancel(self, pid: str) -> None:
+        self.payments[pid]["status"] = "canceled"
+
+
+async def _start(s, user, product="run", email=None):
+    url, p = await payments.start_payment(s, user, product, email)
+    return url, p.order_id
 
 
 async def _user(s, tg_id: int = 700):
@@ -79,7 +88,7 @@ async def _with_plan(s, user, days: int = 21, pages: int = 210):
 
 async def _paid(s, yk, user, product="run", outbox=None):
     """Нажали «Оплатить», ЮKassa подтвердила оплату, пришло уведомление."""
-    url, order = await payments.start_payment(s, user, product)
+    url, order = await _start(s, user, product)
     assert url.startswith("https://yoomoney.ru/")
     p = await s.scalar(select(Purchase).where(Purchase.order_id == order))
     yk.succeed(p.provider_charge_id)
@@ -123,7 +132,7 @@ async def test_forged_notification_grants_nothing(db, monkeypatch):
     async with session_scope() as s:
         user = await _user(s)
         await _with_plan(s, user)
-        _url, order = await payments.start_payment(s, user, "run")
+        _url, order = await _start(s, user, "run")
         p = await s.scalar(select(Purchase).where(Purchase.order_id == order))
         # уведомление «оплачено», а в ЮKassa платёж ещё не оплачен
         await payments.handle_notification(s, {"event": "payment.succeeded", "object": {"id": p.provider_charge_id}})
@@ -176,7 +185,7 @@ async def test_canceled_payment_releases_promo(db, monkeypatch):
         user = await _user(s)
         user.promo_code = "ONE"
         await s.flush()
-        _url, order = await payments.start_payment(s, user, "run")
+        _url, order = await _start(s, user, "run")
         p = await s.scalar(select(Purchase).where(Purchase.order_id == order))
         assert p.amount == round(get_settings().price_run_rub * 0.5) * 100
         assert (await s.get(PromoCode, "ONE")).used == 1  # зарезервирован под заказ
@@ -198,15 +207,15 @@ async def test_payments_disabled_and_email_for_receipt(db, monkeypatch):
         get_settings.cache_clear()
         assert payments.needs_email(user)
         with pytest.raises(payments.PaymentError, match="e-mail"):
-            await payments.start_payment(s, user, "run")
+            await _start(s, user, "run")
         with pytest.raises(payments.PaymentError, match="e-mail"):
-            await payments.start_payment(s, user, "run", "not-an-email")
-        url, order = await payments.start_payment(s, user, "run", "reader@example.com")
+            await _start(s, user, "run", "not-an-email")
+        url, order = await _start(s, user, "run", "reader@example.com")
         assert user.email == "reader@example.com" and not payments.needs_email(user)
         monkeypatch.setenv("YOOKASSA_SHOP_ID", "")
         get_settings.cache_clear()
         with pytest.raises(payments.PaymentError):
-            await payments.start_payment(s, user, "run")
+            await _start(s, user, "run")
 
 
 async def test_promo_limits_and_free_promo(db):
@@ -238,7 +247,8 @@ async def test_verified_refund_closes_access(db, monkeypatch):
         # неподтверждённое уведомление о возврате не действует
         await payments.handle_notification(s, {"event": "refund.succeeded", "object": {"id": "r-1", "payment_id": p.provider_charge_id}})
         assert p.status == "paid" and enr.status == "paid"
-        yk.refunds["0000aaaa-r1"] = {"id": "0000aaaa-r1", "status": "succeeded", "payment_id": p.provider_charge_id}
+        yk.refunds["0000aaaa-r1"] = {"id": "0000aaaa-r1", "status": "succeeded", "payment_id": p.provider_charge_id,
+                                     "amount": {"value": f"{p.amount / 100:.2f}", "currency": "RUB"}}
         await payments.handle_notification(s, {"event": "refund.succeeded", "object": {"id": "0000aaaa-r1"}})
         assert p.status == "refunded" and enr.status == "refunded"
 
@@ -267,19 +277,84 @@ async def test_sales_summary(db, monkeypatch):
 
 
 async def test_expire_stale_orders(db, monkeypatch):
+    from core import clock as real_clock
+
     yk = FakeYooKassa(monkeypatch)
     async with session_scope() as s:
         user = await _user(s)
-        _url, order = await payments.start_payment(s, user, "run")
-        _url2, order2 = await payments.start_payment(s, user, "month")
-        p2 = await s.scalar(select(Purchase).where(Purchase.order_id == order2))
-        yk.succeed(p2.provider_charge_id)  # оплачено, но уведомление потерялось
-    set_now(TODAY + timedelta(days=3), 10)
+        _url, order = await _start(s, user, "run")
+        _url2, order2 = await _start(s, user, "month")
+        _url3, order3 = await _start(s, user, "year")
+        for o, status in ((order, "cancel"), (order2, "succeed")):
+            pp = await s.scalar(select(Purchase).where(Purchase.order_id == o))
+            getattr(yk, status)(pp.provider_charge_id)  # ЮKassa отменила / оплачено, но уведомление потерялось
+        for pp in await s.scalars(select(Purchase)):
+            pp.created_at = real_clock.real_now() - timedelta(days=3)
     async with session_scope() as s:
         await payments.expire_stale_orders(s)
         p = await s.scalar(select(Purchase).where(Purchase.order_id == order))
         p2 = await s.scalar(select(Purchase).where(Purchase.order_id == order2))
-        assert p.status == "canceled" and p2.status == "paid"
+        p3 = await s.scalar(select(Purchase).where(Purchase.order_id == order3))
+        # у третьего ЮKassa ещё «ждёт оплату» — не трогаем, она сама отменит платёж и пришлёт уведомление
+        assert p.status == "canceled" and p2.status == "paid" and p3.status == "pending"
+
+
+async def test_late_payment_after_local_cancel_still_grants(db, monkeypatch):
+    yk = FakeYooKassa(monkeypatch)
+    async with session_scope() as s:
+        user = await _user(s)
+        _url, order = await _start(s, user, "run")
+        p = await s.scalar(select(Purchase).where(Purchase.order_id == order))
+        p.status = "canceled"
+        yk.succeed(p.provider_charge_id)
+        await payments.handle_notification(s, {"event": "payment.succeeded", "object": {"id": p.provider_charge_id}})
+        assert p.status == "paid" and user.run_credits == 1
+
+
+async def test_repeat_pay_tap_reuses_pending_order(db, monkeypatch):
+    yk = FakeYooKassa(monkeypatch)
+    async with session_scope() as s:
+        s.add(PromoCode(code="ONE", discount_percent=50, products="run", active=True, used=0, max_uses=1))
+        user = await _user(s)
+        user.promo_code = "ONE"
+        url1, p1 = await payments.start_payment(s, user, "run")
+        url2, p2 = await payments.start_payment(s, user, "run")  # закрыл страницу оплаты и нажал снова
+        promo = await s.get(PromoCode, "ONE")
+        assert p1.id == p2.id and url1 == url2 and promo.used == 1 and p2.amount == p1.amount
+        assert len(yk.payments) == 1
+
+
+async def test_yookassa_unavailable_asks_for_retry(db, monkeypatch):
+    yk = FakeYooKassa(monkeypatch)
+    async with session_scope() as s:
+        user = await _user(s)
+        _url, order = await _start(s, user, "run")
+        p = await s.scalar(select(Purchase).where(Purchase.order_id == order))
+        pid = p.provider_charge_id
+
+    async def down(_pid):
+        raise payments.RetryLater("503")
+
+    monkeypatch.setattr(payments, "fetch_payment", down)
+    async with session_scope() as s:
+        with pytest.raises(payments.RetryLater):
+            await payments.handle_notification(s, {"event": "payment.succeeded", "object": {"id": pid}})
+        p, just_paid = await payments.refresh_order(s, order)  # опрос из мини-приложения просто ждёт дальше
+        assert p.status == "pending" and not just_paid
+    assert yk.payments[pid]["status"] == "pending"
+
+
+async def test_partial_refund_keeps_access(db, monkeypatch):
+    yk = FakeYooKassa(monkeypatch)
+    out = Outbox()
+    async with session_scope() as s:
+        user = await _user(s)
+        p = await _paid(s, yk, user, "year")
+        yk.refunds["0000aaaa-r9"] = {"id": "0000aaaa-r9", "status": "succeeded", "payment_id": p.provider_charge_id,
+                                     "amount": {"value": "500.00", "currency": "RUB"}}
+        await payments.handle_notification(s, {"event": "refund.succeeded", "object": {"id": "0000aaaa-r9"}}, out)
+        assert p.status == "paid" and billing.subscription_active(user)
+        assert any("Частичный возврат" in m.text for m in out.messages)
 
 
 # --------------------------------------------------------------------------- связанные сценарии забега

@@ -16,7 +16,7 @@ const ACH: Record<string, string> = {
   first_page: "Первая страница",
   week: "Неделя",
   two_weeks: "Две недели",
-  iron: "Железный",
+  iron: "Железная воля",
   duet: "Дуэт",
   kept_word: "Месяц вдвоём",
   comeback: "Возвращение",

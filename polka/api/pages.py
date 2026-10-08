@@ -80,14 +80,15 @@ _DATA_IF = re.compile(r'<(?P<tag>[a-z0-9]+)(?P<attrs>[^>]*?)\sdata-if="(?P<key>[
                       re.S)
 
 _DOC_STYLE = """
-:root{--bg:#F3EEE6;--card:#FBF8F3;--text:#2A2623;--muted:#786F67;--accent:#B5573F;--line:rgba(42,38,35,.12);color-scheme:light}
+:root{--bg:#F3EEE6;--card:#FBF8F3;--text:#2A2623;--muted:#6F665E;--accent:#B5573F;--line:rgba(42,38,35,.12);color-scheme:light}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font:400 16px/1.7 "Onest",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
 .doc{max-width:760px;margin:0 auto;padding:24px 20px 72px}
 .top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:20px;font-size:15px}
 .top a{color:var(--muted);text-decoration:none}
 a{color:var(--accent);text-underline-offset:3px}
-h1,h2,h3{font-family:"Cormorant Garamond","Cormorant",Georgia,serif;font-weight:600;letter-spacing:-.01em}
+b,strong{font-weight:500}
+h1,h2,h3{font-family:"Cormorant","Cormorant Garamond",Georgia,serif;font-weight:600;letter-spacing:-.01em}
 h1{font-size:clamp(30px,7vw,42px);line-height:1.1;margin:8px 0 10px}
 h2{font-size:25px;line-height:1.25;margin:40px 0 10px}
 h3{font-size:20px;margin:24px 0 8px}
@@ -130,10 +131,10 @@ def render(name: str, src: str | None = None) -> str:
             '<!doctype html><html lang="ru"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width, initial-scale=1">'
             f'<meta name="theme-color" content="#F3EEE6"><title>{title}</title>'
-            '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600'
+            '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant:wght@500;600'
             '&family=Onest:wght@400;500&display=swap">'
             f'<style>{_DOC_STYLE}</style></head>'
-            f'<body><div class="doc"><div class="top"><a href="/">← {project}</a>'
+            f'<body><div class="doc"><div class="top"><a href="/">{project}</a>'
             '<a href="javascript:print()">Печать / PDF</a></div>'
             f"{body}</div></body></html>"
         )
@@ -207,8 +208,12 @@ async def yookassa_webhook(request: Request):
     except ValueError as e:
         raise HTTPException(400) from e
     out = Outbox()
-    async with session_scope() as s:
-        paid = await payments.handle_notification(s, body, out)
+    try:
+        async with session_scope() as s:
+            paid = await payments.handle_notification(s, body, out)
+    except payments.RetryLater as e:
+        # ЮKassa не ответила на проверку — отвечаем ошибкой, и она повторит уведомление позже
+        raise HTTPException(503, "retry later") from e
     await _after_paid(paid, out)
     return {"ok": True}
 
