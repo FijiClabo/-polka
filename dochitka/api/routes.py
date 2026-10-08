@@ -26,7 +26,7 @@ from ai.llm import get_llm
 from ai.stt import STTError, build_stt, transcribe_audio
 from api.auth import current_user, get_session
 from books.parse import detect_format, is_other_book_format
-from books.plan import PlanError, segment_minutes
+from books.plan import PlanError, segment_anchors, segment_minutes, segment_place
 from books.types import PARSE_ERRORS, SUBHEADING_MARK
 from core.days import local_now, plan_day_number
 from db.models import Book, DayResult, Enrollment, Purchase, Retelling, Segment, User
@@ -113,7 +113,8 @@ def seg_brief(seg: Segment | None, book: Book | None, day: int | None = None) ->
         "day_number": seg.day_number, "title": seg.title, "page_from": seg.page_from, "page_to": seg.page_to,
         "pages": pages, "minutes": segment_minutes(seg.word_count, pages, paper),
         "retell_prompt": seg.retell_prompt, "can_read": bool(book and book.has_text and seg.text),
-        "pos_to": seg.pos_to,
+        "pos_to": seg.pos_to, "place": segment_place(seg.page_from, seg.page_to, seg.pos_from, seg.pos_to, paper),
+        "anchors": None if paper else segment_anchors(seg.text),
     }
 
 

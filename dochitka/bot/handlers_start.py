@@ -423,7 +423,7 @@ async def after_onboarding(bot: Bot, chat_id: int, user_id: int, inviter_name: s
 async def send_book_prompt(bot: Bot, chat_id: int) -> None:
     await bot.send_message(
         chat_id, texts.add_book_prompt(),
-        reply_markup=kb([[{"text": "У меня бумажная книга", "callback": "book:paper"}],
+        reply_markup=kb([[{"text": "Читаю без файла", "callback": "book:paper"}],
                          [{"text": "Добавить в приложении", "webapp": "book"}]]),
     )
 

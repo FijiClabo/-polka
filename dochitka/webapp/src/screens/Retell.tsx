@@ -128,7 +128,10 @@ export default function Retell() {
 
   const prompt = answering
     ? question!
-    : seg?.retell_prompt || "Что было в этом отрезке? Расскажи своими словами.";
+    : seg?.retell_prompt ||
+      (t.book?.source === "paper"
+        ? "Что было в этом отрезке? Расскажи своими словами и назови главу, где сейчас закладка."
+        : "Что было в этом отрезке? Расскажи своими словами.");
   const recording = rec.state === "recording";
 
   return (

@@ -71,7 +71,7 @@ function MainCard({ data }: { data: TodayData }) {
           {s === "parse_failed" ? "Попробуем другую книгу?" : "Добавь свою книгу"}
         </div>
         <p className="meta">
-          Файл epub или fb2 — или бумажная книга по названию и числу страниц. Мы разобьём её на отрезки по 15 минут в день.
+          Файл epub или fb2 — или книга без файла: название и число страниц твоего издания. Мы разобьём её на отрезки по 15 минут в день.
         </p>
         <button className="btn primary block mt-12" onClick={() => nav.push({ name: "book" })}>
           Добавить книгу <IArrow size={18} />
@@ -160,7 +160,7 @@ function MainCard({ data }: { data: TodayData }) {
             <>
               <div className="eyebrow" style={{ color: "var(--green-text)" }}>Сегодня сдано</div>
               <div className="seg-title">{seg ? `Завтра: ${seg.title}` : "Все отрезки на сегодня сданы"}</div>
-              {seg && <div className="meta">стр. {seg.page_from}–{seg.page_to}</div>}
+              {seg && <div className="meta">{seg.place}</div>}
             </>
           ) : (
             <>
@@ -168,11 +168,11 @@ function MainCard({ data }: { data: TodayData }) {
                 День {data.plan_day! > (data.plan_days || 0) ? `${data.plan_day} · отсрочка` : `${data.plan_day} из ${data.plan_days}`}
               </div>
               <div className="seg-title">{seg?.title}</div>
-              {seg && <div className="meta">стр. {seg.page_from}–{seg.page_to}</div>}
+              {seg && <div className="meta">{seg.place}</div>}
               {seg && (
                 <div className="chips">
                   <span className="chip">≈ {seg.minutes} мин</span>
-                  <span className="chip">{seg.pages} стр.</span>
+                  {paper && <span className="chip">{seg.pages} стр.</span>}
                   {data.catching_up && <span className="chip" style={{ color: "var(--accent-text)" }}>догоняем</span>}
                 </div>
               )}
@@ -233,7 +233,16 @@ function MainCard({ data }: { data: TodayData }) {
         ) : null}
       </div>
       {paper && (s === "to_read" || s === "clarify") && seg && (
-        <p className="tiny muted mt-12 center">Читай по своей книге: стр. {seg.page_from}–{seg.page_to}</p>
+        <p className="tiny muted mt-12 center">
+          Читай по своей книге: стр. {seg.page_from}–{seg.page_to}. В пересказе назови главу, где закладка.
+        </p>
+      )}
+      {!paper && seg?.anchors && (s === "to_read" || s === "clarify") && (
+        <div className="anchors mt-12">
+          <div className="tiny muted">Читаешь в бумажной книге или в другом приложении — отрезок отсюда и досюда:</div>
+          <div className="small mt-8"><span className="muted">Начало:</span> «{seg.anchors[0]}»</div>
+          <div className="small"><span className="muted">Конец:</span> «{seg.anchors[1]}»</div>
+        </div>
       )}
       {s === "to_read" && data.limit > 1 && (
         <p className="tiny muted mt-12 center">Финишная прямая: сегодня можно сдать до {data.limit} отрезков.</p>
@@ -328,7 +337,7 @@ function NoRun({ data }: { data: TodayData }) {
       <div className="eyebrow">{data.has_access ? "Доступ открыт" : "С чего начать"}</div>
       <div className="seg-title" style={{ fontSize: 22 }}>Какую книгу дочитаем?</div>
       <p className="meta">
-        Загрузи epub или fb2 — или выбери бумажную книгу. Разобьём её на отрезки по 15 минут в день, а ИИ будет проверять
+        Загрузи epub или fb2 — или читай без файла, по своему изданию. Разобьём её на отрезки по 15 минут в день, а ИИ будет проверять
         короткие пересказы.
       </p>
       <NewRunButton label="Выбрать книгу" />

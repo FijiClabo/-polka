@@ -91,14 +91,18 @@ TRIAL_AI_OFF = "Пересказ принят. (Проверка ИИ сейча
 
 def add_book_prompt() -> str:
     return (
-        "Теперь книга. Пришли сюда файл <b>epub</b> или <b>fb2</b> — я разобью его на отрезки по дням.\n\n"
-        "Читаешь на бумаге? Нажми «У меня бумажная книга»."
+        "Теперь книга. Есть два способа.\n\n"
+        "<b>Есть файл epub или fb2</b> — пришли его сюда. Проверка полная: сверяю пересказ с текстом. Читать можно где "
+        "удобно — в приложении, в другой читалке или в бумажной книге: каждый день подскажу, с каких слов начать "
+        "и на каких закончить.\n\n"
+        "<b>Файла нет</b> — бумажная книга или читаешь в другом приложении: нажми «Читаю без файла». Отрезки будут "
+        "по страницам твоего издания, а проверка — разговор о прочитанном, без сверки с текстом."
     )
 
 
 BOOK_RECEIVED = "Файл получен, разбираю. Это займёт до минуты."
-BOOK_TOO_BIG = "Файл больше {mb} МБ — Telegram не даст мне его скачать. Попробуй другой файл или добавь книгу как бумажную."
-BOOK_UNSUPPORTED = "Пока умею только epub и fb2. Можно найти книгу в другом формате или добавить её как бумажную."
+BOOK_TOO_BIG = "Файл больше {mb} МБ — Telegram не даст мне его скачать. Попробуй другой файл или читай без файла."
+BOOK_UNSUPPORTED = "Пока умею только epub и fb2. Можно найти книгу в другом формате или читать без файла."
 BOOK_NOT_A_BOOK = "Это не похоже на книгу. Я жду файл epub или fb2."
 
 
@@ -117,7 +121,7 @@ def _hm(minutes: int) -> str:
 
 
 def book_failed(reason: str) -> str:
-    return f"Не получилось: {e(reason)}\n\nМожно прислать другой файл или добавить книгу как бумажную — тогда сверка будет по общему знанию о книге."
+    return f"Не получилось: {e(reason)}\n\nМожно прислать другой файл или читать без файла — тогда проверка будет разговором о прочитанном."
 
 
 def book_replace_confirm(title: str) -> str:
@@ -141,7 +145,7 @@ def plan_ready(title: str, days: int, start: date | None, ppd: float, minutes: i
 
 PAPER_ASK_TITLE = "Как называется книга?"
 PAPER_ASK_AUTHOR = "Кто автор? (Если не знаешь — отправь «-».)"
-PAPER_ASK_PAGES = "Сколько в ней страниц? Только число."
+PAPER_ASK_PAGES = "Сколько страниц в твоём издании? Только число — по нему поделю книгу на дни."
 PAPER_BAD_PAGES = "Нужно число от 20 до 3000."
 
 
@@ -171,7 +175,7 @@ def sprint_offer(inviter: str | None) -> str:
 
 
 SPRINT_STARTED = ("Спринт открыт. Пришли файл короткой книги или рассказа (epub/fb2, до 140 страниц) — "
-                  "или выбери бумажную.")
+                  "или добавь книгу без файла (/paper).")
 SPRINT_BUSY = "Сейчас идёт твой забег — спринт можно начать после финиша. Читаем дальше."
 COHORT_JOIN = {
     "ok": "Ты в групповом забеге. Добавь книгу и выбери срок — старт вместе со всеми.",
@@ -184,12 +188,23 @@ SPRINT_USED = "Бесплатный спринт уже был. Дальше —
 
 # --------------------------------------------------------------------------- день
 
-def _seg_line(title: str, pages: str, minutes: int) -> str:
-    return f"<b>{e(title)}</b>\n{e(pages)} · ≈ {minutes} мин"
+def seg_block(title: str, place: str, minutes: int, anchors: tuple[str, str] | None = None) -> str:
+    """Отрезок дня: название, где он в книге, сколько минут и — если есть текст — первые и последние слова."""
+    text = f"<b>{e(title)}</b>\n{e(place)} · ≈ {minutes} мин"
+    if anchors:
+        text += f"\nНачало: «{e(anchors[0])}»\nКонец: «{e(anchors[1])}»"
+    return text
 
 
-def morning(name: str, day_n: int, plan_days: int, title: str, pages: str, minutes: int, *, catching_up: bool,
-            yesterday: str | None, streak: int, partner: str | None, run_started: bool) -> str:
+def retell_hint(paper: bool) -> str:
+    if paper:
+        return "Прочитаешь — расскажи голосом или текстом, что там было, и назови главу, где сейчас закладка."
+    return "Прочитаешь — расскажи мне голосом или текстом, что там было."
+
+
+def morning(name: str, day_n: int, plan_days: int, title: str, place: str, minutes: int, *, catching_up: bool,
+            yesterday: str | None, streak: int, partner: str | None, run_started: bool,
+            anchors: tuple[str, str] | None = None, paper: bool = False) -> str:
     lines = []
     if run_started:
         lines.append("Забег начался.")
@@ -200,7 +215,7 @@ def morning(name: str, day_n: int, plan_days: int, title: str, pages: str, minut
     head = f"День {day_n} из {plan_days}"
     if catching_up:
         head += " · догоняем вчерашний отрезок"
-    lines.append(f"{head}\n{_seg_line(title, pages, minutes)}")
+    lines.append(f"{head}\n{seg_block(title, place, minutes, anchors)}")
     tail = []
     if streak:
         tail.append(f"Стрик: {streak}")
@@ -208,7 +223,7 @@ def morning(name: str, day_n: int, plan_days: int, title: str, pages: str, minut
         tail.append(f"Напарник: {e(partner)}")
     if tail:
         lines.append(" · ".join(tail))
-    lines.append("Прочитаешь — расскажи мне голосом или текстом, что там было.")
+    lines.append(retell_hint(paper))
     return "\n\n".join(lines)
 
 
@@ -239,7 +254,7 @@ def pair_joined(name: str) -> str:
     return f"{e(name)} — твой напарник. Общий стрик растёт, только если день сдан у вас двоих."
 
 
-NO_BOOK_REMINDER = "Забег уже идёт, а книги у тебя пока нет. Пришли файл epub/fb2 или добавь бумажную — начнём со следующего дня."
+NO_BOOK_REMINDER = "Забег уже идёт, а книги у тебя пока нет. Пришли файл epub/fb2 или добавь книгу без файла (/paper) — начнём со следующего дня."
 
 
 # --------------------------------------------------------------------------- вердикты
@@ -302,11 +317,11 @@ def too_short_hint(seg_title: str | None) -> str:
 
 def state_message(state: str, *, next_title: str | None = None, start: date | None = None) -> str:
     return {
-        "no_run": "Начнём с книги: пришли файл epub или fb2 — или нажми /paper, если читаешь на бумаге.",
+        "no_run": "Начнём с книги: пришли файл epub или fb2 — или нажми /paper, если файла нет.",
         "awaiting_payment": "План готов — осталось открыть доступ: /buy",
         "no_book": add_book_prompt(),
         "parsing": "Ещё разбираю твою книгу — минутку.",
-        "parse_failed": "С файлом не вышло. Пришли другой или добавь книгу как бумажную.",
+        "parse_failed": "С файлом не вышло. Пришли другой или читай без файла (/paper).",
         "plan_needed": "Книга есть, осталось выбрать срок. Нажми «Настроить план».",
         "waiting_start": status_in_list(start),
         "not_started": f"План стартует {d(start)}. Пересказы — с первого дня.",

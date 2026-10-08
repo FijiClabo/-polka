@@ -12,7 +12,7 @@ from aiogram.types import Message
 
 import texts
 from ai.stt import STTError, transcribe_audio
-from books.plan import segment_minutes
+from books.plan import segment_anchors, segment_minutes, segment_place
 from bot.common import Flow, load_user
 from bot.ui import app_kb, flush, kb
 from db.session import session_scope
@@ -34,18 +34,18 @@ def today_text(v: DayView) -> str:
     if seg is None:
         return texts.state_message(v.state, start=v.starts_on)
     paper = v.book is not None and v.book.source == "paper"
-    pages = f"стр. {seg.page_from}–{seg.page_to}"
+    place = segment_place(seg.page_from, seg.page_to, seg.pos_from, seg.pos_to, paper)
     minutes = segment_minutes(seg.word_count, seg.page_to - seg.page_from + 1, paper)
     head = f"День {v.plan_day} из {v.plan_days}"
     if v.catching_up:
         head += " · догоняем вчерашний отрезок"
-    text = f"{head}\n<b>{texts.e(seg.title)}</b>\n{pages} · ≈ {minutes} мин"
+    text = f"{head}\n{texts.seg_block(seg.title, place, minutes, None if paper else segment_anchors(seg.text))}"
     if v.state == "clarify" and v.open_retelling is not None:
         text += f"\n\nЖду ответ на вопрос: <b>{texts.e(v.open_retelling.ai_question or '')}</b>"
     elif v.state == "checking":
         text += "\n\n" + texts.CHECKING
     else:
-        text += "\n\nПрочитаешь — перескажи мне голосом или текстом."
+        text += "\n\n" + texts.retell_hint(paper)
     return text
 
 

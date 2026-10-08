@@ -266,6 +266,33 @@ def segment_minutes(word_count: int, pages: int, paper: bool) -> int:
     return max(1, round(word_count / WORDS_PER_MINUTE))
 
 
+ANCHOR_WORDS = 6
+
+
+def segment_place(page_from: int, page_to: int, pos_from: float, pos_to: float, paper: bool) -> str:
+    """Где отрезок: у бумажной книги — страницы её издания, у файла — проценты книги.
+
+    Страницы файла условные и не совпадут ни с бумажным изданием, ни с другим приложением, а проценты совпадут.
+    """
+    if paper:
+        return f"стр. {page_from}–{page_to}"
+    a, b = round(pos_from * 100), max(1, round(pos_to * 100))
+    return f"{b}% книги" if a >= b else f"{a}–{b}% книги"
+
+
+def segment_anchors(text: str | None, words: int = ANCHOR_WORDS) -> tuple[str, str] | None:
+    """Первые и последние слова отрезка: по ним место находится в любом издании и любом приложении."""
+    if not text:
+        return None
+    lines = [x.strip() for x in text.split("\n") if x.strip() and not x.startswith(SUBHEADING_MARK)]
+    ws = " ".join(lines).split()
+    if len(ws) <= words * 2:
+        return None
+    start = " ".join(ws[:words]).rstrip(" ,;:—–-")
+    end = " ".join(ws[-words:]).lstrip(" ,;:—–-")
+    return f"{start}…", f"…{end}"
+
+
 def strip_marks(text: str) -> str:
     return "\n".join(line[len(SUBHEADING_MARK):] if line.startswith(SUBHEADING_MARK) else line for line in text.split("\n"))
 

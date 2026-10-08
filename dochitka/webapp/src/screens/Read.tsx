@@ -86,7 +86,7 @@ export default function Read({ day }: { day: number }) {
             <div className="reader-text" style={{ fontSize: SIZES[size] ?? 18, lineHeight: lh }}>
               {data.paragraphs.map((p, i) => (p.t === "h" ? <h3 key={i}>{p.text}</h3> : <p key={i}>{p.text}</p>))}
             </div>
-            <p className="small muted center mt-24">стр. {data.page_from}–{data.page_to} · конец отрезка</p>
+            <p className="small muted center mt-24">Конец отрезка</p>
           </>
         )}
       </article>

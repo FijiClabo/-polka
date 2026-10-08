@@ -87,6 +87,10 @@ export interface SegBrief {
   retell_prompt: string | null;
   can_read: boolean;
   pos_to: number;
+  /** Где отрезок: «стр. 45–60» у бумажной книги, «34–37% книги» у файла. */
+  place: string;
+  /** Первые и последние слова отрезка — чтобы найти место в любом издании (только у книг с файлом). */
+  anchors: [string, string] | null;
 }
 
 export interface UserBrief {

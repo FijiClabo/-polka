@@ -28,7 +28,7 @@ export default function AddBook() {
 
   const upload = async (f: File) => {
     if (f.size > data.max_mb * 1024 * 1024) {
-      toast(`Файл больше ${data.max_mb} МБ — Telegram такой не пропустит. Добавь книгу как бумажную.`);
+      toast(`Файл больше ${data.max_mb} МБ — Telegram такой не пропустит. Можно читать без файла.`);
       return;
     }
     setUploading(true);
@@ -80,25 +80,31 @@ export default function AddBook() {
       <div className="screen no-tabs">
         {input}
         <h1 className="h-display">Своя книга</h1>
-        <p className="muted">Файл или бумажная — как удобнее. Текст файла видишь только ты.</p>
+        <p className="muted">Два способа — выбери, как удобнее. Текст файла видишь только ты.</p>
         {book?.parse_status === "failed" && (
           <div className="card mt-12" style={{ background: "var(--missed-bg)", borderColor: "transparent" }}>
             <b>Не получилось разобрать файл</b>
-            <p className="small muted" style={{ margin: "6px 0 0" }}>{data.parse_error || "Попробуй другой файл или добавь книгу как бумажную."}</p>
+            <p className="small muted" style={{ margin: "6px 0 0" }}>{data.parse_error || "Попробуй другой файл или читай без файла."}</p>
           </div>
         )}
         {mode === "choose" ? (
           <>
             <div className="drop mt-16" onClick={() => fileRef.current?.click()}>
               <IUpload size={30} />
-              <div style={{ fontWeight: 700, marginTop: 8 }}>Загрузить epub или fb2</div>
-              <div className="small muted">до {data.max_mb} МБ · или просто отправь файл боту в чат</div>
+              <div style={{ fontWeight: 700, marginTop: 8 }}>Есть файл epub или fb2</div>
+              <div className="small">Полная проверка: ИИ сверяет пересказ с текстом</div>
+              <div className="small muted mt-8">
+                Читать можно где удобно — здесь, в другой читалке или в бумажной книге: каждый день покажем первые и последние слова отрезка.
+              </div>
+              <div className="tiny muted mt-8">до {data.max_mb} МБ · или отправь файл боту в чат</div>
             </div>
             <button className="card row mt-12" style={{ width: "100%", textAlign: "left" }} onClick={() => setMode("paper")}>
               <IBook size={26} />
               <div className="grow">
-                <b>У меня бумажная книга</b>
-                <div className="small muted">Название, автор и число страниц — отрезки по страницам</div>
+                <b>Файла нет</b>
+                <div className="small muted">
+                  Бумажная книга или другое приложение. Отрезки — по страницам твоего издания, проверка — разговор о прочитанном, без сверки с текстом.
+                </div>
               </div>
             </button>
             <button className="btn ghost block mt-12" onClick={closeApp}>Отправить файл в чат</button>
@@ -289,7 +295,7 @@ function PaperForm({ onDone, onCancel }: { onDone: () => void; onCancel: () => v
         <input className="input" value={author} onChange={(e) => setAuthor(e.target.value)} placeholder="Михаил Булгаков" />
       </div>
       <div className="field">
-        <label>Сколько страниц</label>
+        <label>Сколько страниц в твоём издании</label>
         <input className="input" inputMode="numeric" value={pg} onChange={(e) => setPg(e.target.value.replace(/\D/g, ""))} placeholder="480" />
         {pg && (n < 20 || n > 3000) && <span className="tiny" style={{ color: "var(--danger)" }}>от 20 до 3000</span>}
       </div>

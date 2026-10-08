@@ -141,7 +141,7 @@ function DayDetail({ n }: { n: number }) {
             : data.state === "missed"
               ? "Пересказа не было. Отрезок можно догнать — он остаётся первым в очереди."
               : data.segment
-                ? `стр. ${data.segment.page_from}–${data.segment.page_to} · ≈ ${data.segment.minutes} мин`
+                ? `${data.segment.place} · ≈ ${data.segment.minutes} мин`
                 : "Этот день ещё впереди."}
         </p>
       )}

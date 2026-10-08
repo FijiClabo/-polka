@@ -2137,3 +2137,12 @@ img {
   font-size: 17px;
   letter-spacing: 0.5px;
 }
+
+/* ---------------------------------------------------------------- начало и конец отрезка (читать можно где угодно) */
+
+.anchors {
+  background: var(--surface-2);
+  border-radius: var(--r-m);
+  padding: 12px 14px;
+  line-height: 1.45;
+}

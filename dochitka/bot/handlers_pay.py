@@ -97,7 +97,7 @@ async def after_payment_message(bot: Bot, chat_id: int, user_id: int, product: s
     if product in ("month", "year") and until:
         await bot.send_message(chat_id, texts.pay_ok_subscription(until))
     book_buttons = kb([
-        [{"text": "У меня бумажная книга", "callback": "book:paper"}],
+        [{"text": "Читаю без файла", "callback": "book:paper"}],
         [{"text": "Добавить книгу в приложении", "webapp": "book"}],
     ])
     if activated and view.state in ("to_read", "clarify"):

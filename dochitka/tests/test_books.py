@@ -272,3 +272,18 @@ def test_long_book_plan_is_built():
 def test_fb2_utf8():
     book = parse_book("u.fb2", make_fb2(encoding="utf-8"))
     assert book.title == "Тестовая книга fb2"
+
+
+def test_segment_place_and_anchors():
+    from books.plan import segment_anchors, segment_place
+
+    # у файла — проценты книги (страницы файла не совпадут с бумажным изданием), у бумажной — страницы её издания
+    assert segment_place(45, 60, 0.337, 0.372, paper=False) == "34–37% книги"
+    assert segment_place(45, 60, 0.3, 0.4, paper=True) == "стр. 45–60"
+    text = ("## Подзаголовок\n— Да.\nНу что ж, пойдём, сказал он и вышел из комнаты, не оглядываясь.\n"
+            "Длинный абзац о том, как всё устроено в этом мире, — и тут всё закончилось.")
+    start, end = segment_anchors(text)
+    assert start == "— Да. Ну что ж, пойдём…"  # подзаголовок пропущен, короткая реплика склеена со следующей
+    assert end == "…мире, — и тут всё закончилось."
+    assert segment_anchors("Совсем короткий отрезок.") is None
+    assert segment_anchors(None) is None
