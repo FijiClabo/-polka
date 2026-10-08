@@ -10,6 +10,7 @@ from aiogram import Bot
 from aiogram.client.session.base import BaseSession
 from aiogram.methods import GetFile, GetMe, SendDocument, SendMessage, SendPhoto, TelegramMethod
 from aiogram.types import CallbackQuery, Chat, Document, File, Message, Update, User
+from sqlalchemy import select
 
 from books.samples import sample_set
 from core import clock
@@ -296,3 +297,37 @@ async def test_promo_new_for_one_tariff(env):
     async with session_scope() as s:
         p = await s.get(PromoCode, "BLOG")
         assert p.products == "run,month,year" and p.owner == "@blogger" and p.max_uses is None
+
+
+async def test_takedown_by_rightsholder(env):
+    """Жалоба правообладателя: админ находит книгу по названию и удаляет её текст, забег продолжается без файла."""
+    bot, dp, session = env
+    set_now(datetime.now().date(), 10)
+    ADMIN, U = 900, 778
+    await send_text(bot, dp, ADMIN, "/start", "Админ")
+    await send_text(bot, dp, U, "/start")
+    for cb in ("ob:1", "ob:2", "ob:go", "consent:pd", "tz:Europe/Moscow", "mt:08:00", "et:21:00"):
+        await press(bot, dp, U, cb)
+    await send_text(bot, dp, U, "Червяков в театре чихнул на лысину генерала Бризжалова и сильно смутился, начал думать.")
+    await send_doc(bot, dp, session, U, "book.epub", sample_set()["01_clean_with_toc.epub"])
+
+    await send_text(bot, dp, U, "/takedown Аккуратная")
+    assert "только для администратора" in session.texts()[-1]
+    await send_text(bot, dp, ADMIN, "/takedown аккуратная", "Админ")
+    listing = session.texts()[-1]
+    assert "Аккуратная книга" in listing and "/takedown ID" in listing
+    book_id = listing.split("\n")[1].split(" · ")[0]
+    await send_text(bot, dp, ADMIN, f"/takedown {book_id}", "Админ")
+    assert "удалён, владелец предупреждён" in session.texts()[-1]
+    assert any("по обращению правообладателя" in t for t in session.texts())
+
+    from db.models import Book, Segment
+    from db.session import session_scope
+
+    async with session_scope() as s:
+        book = await s.get(Book, int(book_id))
+        assert not book.has_text
+        texts_left = [t for t in await s.scalars(select(Segment.text).where(Segment.book_id == book.id)) if t]
+        assert texts_left == []
+    await send_text(bot, dp, ADMIN, f"/takedown {book_id}", "Админ")
+    assert "уже удалён" in session.texts()[-1]

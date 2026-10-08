@@ -196,6 +196,11 @@ def seg_block(title: str, place: str, minutes: int, anchors: tuple[str, str] | N
     return text
 
 
+def book_taken_down(title: str) -> str:
+    return (f"Файл книги «{e(title)}» удалён по обращению правообладателя (п. 9.6 оферты). Забег продолжается: "
+            "читай по своему экземпляру, а пересказы проверим разговором о прочитанном, без сверки с текстом.")
+
+
 def retell_hint(paper: bool) -> str:
     if paper:
         return "Прочитаешь — расскажи голосом или текстом, что там было, и назови главу, где сейчас закладка."

@@ -18,7 +18,8 @@ import texts
 from bot.common import is_admin, load_user
 from bot.ui import deep_link, flush
 from core import clock
-from db.models import Consent, Enrollment, Event, PromoCode, Purchase, Retelling, Run, Segment, User
+from core.rules import normalize_text
+from db.models import Book, Consent, Enrollment, Event, PromoCode, Purchase, Retelling, Run, Segment, User
 from db.session import session_scope
 from services import billing
 from services.admin import export_zip, find_user, stats, stats_text
@@ -54,7 +55,8 @@ ADMIN_HELP = """<b>Команды ведущего</b>
 /stats — сводка по забегу
 /broadcast текст — сообщение всем, кто дал согласие (/broadcast group текст — только групповому забегу)
 /run_close — закрыть набор в групповой забег
-/export — CSV для анализа теста"""
+/export — CSV для анализа теста
+/takedown название — найти книги по жалобе правообладателя; /takedown ID — удалить текст книги (забег продолжится без файла)"""
 
 
 async def _guard(message: Message) -> bool:
@@ -526,6 +528,47 @@ async def cmd_export(message: Message) -> None:
         data = await export_zip(s, run)
     await message.answer_document(BufferedInputFile(data, f"dochitka_run{run.id}_{date.today()}.zip"),
                                   caption="Участники, пересказы (без текстов), дни, события — CSV и сводка metrics.txt")
+
+
+@router.message(Command("takedown"))
+async def cmd_takedown(message: Message, command: CommandObject, bot: Bot) -> None:
+    """Жалоба правообладателя (п. 9.6 оферты, ст. 1253.1 ГК): найти книги по названию и удалить их текст."""
+    if not await _guard(message):
+        return
+    arg = (command.args or "").strip()
+    if not arg:
+        await message.answer("Формат: /takedown название — найти книги; /takedown ID — удалить текст книги.")
+        return
+    from services.books import delete_book_text
+
+    outbox = Outbox()
+    async with session_scope() as s:
+        if not arg.isdigit():
+            q = normalize_text(arg)
+            rows = (await s.execute(
+                select(Book, User).join(User, User.id == Book.owner_user_id)
+                .where(Book.title_norm.contains(q), Book.deleted_at.is_(None), Book.source.in_(("epub", "fb2")))
+                .order_by(Book.id.desc()).limit(20)
+            )).all()
+            if not rows:
+                await message.answer("Книг с текстом по такому названию нет.")
+                return
+            lines = [f"{b.id} · {texts.e(b.title)}{(' — ' + texts.e(b.author)) if b.author else ''} · "
+                     f"{texts.e('@' + u.tg_username if u.tg_username else u.display_name)}" for b, u in rows]
+            await message.answer("Книги с текстом:\n" + "\n".join(lines) + "\n\nУдалить текст: /takedown ID")
+            return
+        book = await s.get(Book, int(arg))
+        if book is None or not book.has_text:
+            await message.answer("Книги с таким ID нет или её текст уже удалён.")
+            return
+        owner = await s.get(User, book.owner_user_id)
+        title = book.title
+        await delete_book_text(s, book)
+        await log_event(s, "book_takedown", owner.id if owner else None, book_id=book.id)
+        if owner and not owner.bot_blocked:
+            outbox.add(OutMsg(owner.tg_id, texts.book_taken_down(title)))
+    await flush(bot, outbox)
+    await message.answer(f"Текст книги «{texts.e(title)}» удалён, владелец предупреждён. Ответь правообладателю, что файл удалён.")
 
 
 @router.message(Command("timewarp"))
