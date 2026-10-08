@@ -130,6 +130,7 @@ export interface PartnerBlock extends UserBrief {
   best_pair_streak: number;
   plan_day: number | null;
   plan_days: number | null;
+  can_nudge?: boolean;
 }
 
 export interface WeekDay {

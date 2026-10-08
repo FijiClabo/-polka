@@ -3,7 +3,7 @@ import { api, type Billing, type PriceInfo, type Product } from "../api";
 import { IArrow, ICheck } from "../components/Icons";
 import { OpenBookIll } from "../components/Illustrations";
 import { Cover, ErrorState, ScreenSkeleton, toast } from "../components/ui";
-import { dayMonth, days } from "../format";
+import { dayMonth, days, plural } from "../format";
 import { invalidate, useApi } from "../hooks";
 import { useNav } from "../nav";
 import { haptic, openExternal } from "../tg";
@@ -25,14 +25,15 @@ type OrderState = Billing & { status: "pending" | "paid" | "canceled" | "refunde
 
 export default function Pay() {
   const nav = useNav();
-  const { data, error, loading, reload } = useApi<Billing>("/billing");
-  const [product, setProduct] = useState<Product>("run");
+  const { data, error, loading, reload } = useApi<Billing>("/billing?view=pay");
+  const [chosen, setProduct] = useState<Product>("run");
   const [busy, setBusy] = useState(false);
   const [order, setOrder] = useState<Order | null>(null);
   const [email, setEmail] = useState("");
   const [promoOpen, setPromoOpen] = useState(false);
   const [promo, setPromo] = useState("");
   const alive = useRef(true);
+  const inFlight = useRef(false);
 
   useEffect(() => () => { alive.current = false; }, []);
 
@@ -44,6 +45,8 @@ export default function Pay() {
 
   // После перехода на страницу ЮKassa ждём подтверждения: проверяем заказ сами и при возвращении в приложение
   const check = useCallback(async (o: Order, quiet = true) => {
+    if (inFlight.current) return; // прошлый запрос ещё идёт — не копим их
+    inFlight.current = true;
     try {
       const r = await api.get<OrderState>(`/billing/order/${o.id}`);
       if (!alive.current) return;
@@ -61,6 +64,8 @@ export default function Pay() {
       }
     } catch (e) {
       if (!quiet) toast((e as Error).message);
+    } finally {
+      inFlight.current = false;
     }
   }, [done]);
 
@@ -81,6 +86,10 @@ export default function Pay() {
   if (error && !data) return <ErrorState message={error} onRetry={reload} />;
   if (loading || !data) return <ScreenSkeleton />;
 
+  const sub = data.subscription;
+  const renewing = sub.active && !data.needs_access;
+  // при продлении «одной книги» нет: выбираем между месяцем и годом
+  const product: Product = renewing && chosen === "run" ? "month" : chosen;
   const p = data.prices;
   const sel = p[product];
   const emailOk = !data.needs_email || EMAIL_RE.test(email.trim());
@@ -138,20 +147,6 @@ export default function Pay() {
     }
   };
 
-  const sub = data.subscription;
-  if (sub.active && !data.needs_access) {
-    return (
-      <div className="screen no-tabs">
-        <h1 className="h-title">Абонемент</h1>
-        <div className="card book-card center">
-          <div className="ill-wrap"><OpenBookIll size={150} /></div>
-          <div className="seg-title">Всё открыто</div>
-          <p className="meta">Абонемент действует до {dayMonth(sub.until)}. Книга за книгой без доплат.</p>
-          <button className="btn primary block mt-12" onClick={done}>К чтению <IArrow size={18} /></button>
-        </div>
-      </div>
-    );
-  }
 
   if (order) {
     return (
@@ -175,7 +170,16 @@ export default function Pay() {
 
   return (
     <div className="screen no-tabs pay">
-      <h1 className="h-title">{data.needs_access && data.plan_days ? "Последний шаг" : "Тарифы"}</h1>
+      <h1 className="h-title">{renewing ? "Продлить абонемент" : data.needs_access && data.plan_days ? "Последний шаг" : "Тарифы"}</h1>
+
+      {renewing && (
+        <div className="card book-card center">
+          <div className="ill-wrap"><OpenBookIll size={130} /></div>
+          <div className="seg-title">Всё открыто до {dayMonth(sub.until)}</div>
+          <p className="meta">Книга за книгой без доплат. Новый срок прибавится к оставшемуся.</p>
+          <button className="btn secondary block mt-12" onClick={done}>К чтению <IArrow size={18} /></button>
+        </div>
+      )}
 
       {data.book && data.plan_days && data.needs_access && (
         <div className="card row" style={{ gap: 14 }}>
@@ -189,14 +193,17 @@ export default function Pay() {
       )}
 
       <div className="section-title">Выбери формат</div>
-      <PlanOption
-        on={product === "run"} onPick={() => setProduct("run")}
-        title="Одна книга" price={p.run} sub="Забег до финиша: план, проверка пересказов, напарник"
-        extra={perDay ? `≈ ${rub(perDay)} в день` : undefined}
-      />
+      {!renewing && (
+        <PlanOption
+          on={product === "run"} onPick={() => setProduct("run")}
+          title="Одна книга" price={p.run} sub="Забег до финиша: план, проверка пересказов, напарник"
+          extra={perDay ? `≈ ${rub(perDay)} в день` : undefined}
+        />
+      )}
       <PlanOption
         on={product === "month"} onPick={() => setProduct("month")}
-        title="Месяц" price={p.month} suffix="за 30 дней" sub="Книга за книгой без доплат и две заморозки в неделю"
+        title="Месяц" price={p.month} suffix="за 30 дней"
+        sub={`Книга за книгой без доплат и ${data.freezes_sub} ${plural(data.freezes_sub, "заморозка", "заморозки", "заморозок")} в неделю`}
       />
       <PlanOption
         on={product === "year"} onPick={() => setProduct("year")}
@@ -241,7 +248,7 @@ export default function Pay() {
       <div className="section-title">Что внутри</div>
       <div className="card" style={{ padding: "8px 16px" }}>
         {INCLUDED.map((t) => (
-          <div key={t} className="row included" style={{ gap: 10, padding: "8px 0" }}>
+          <div key={t} className="row" style={{ gap: 10, padding: "8px 0" }}>
             <span className="check-mini"><ICheck size={14} /></span>
             <span className="small">{t}</span>
           </div>
@@ -328,7 +335,7 @@ function PlanOption({ on, onPick, title, price, suffix = "", sub, extra, badge }
           {discounted && <span className="badge ok">−{price.discount}%</span>}
         </div>
         <div className="small muted">{sub}</div>
-        {extra && <div className="tiny" style={{ color: "var(--accent)", marginTop: 2 }}>{extra}</div>}
+        {extra && <div className="tiny" style={{ color: "var(--accent-text)", marginTop: 2 }}>{extra}</div>}
       </div>
       <div className="price">
         {discounted && <s className="tiny muted">{rub(price.list_rub)}</s>}

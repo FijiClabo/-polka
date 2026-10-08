@@ -142,7 +142,7 @@ def _status_message(o: RetellOutcome) -> str | None:
     if o.status == "queued":
         return texts.QUEUED
     if o.status == "too_short":
-        return "Расскажи чуть подробнее — хотя бы пару предложений (от 50 знаков)."
+        return "Расскажи чуть подробнее — хотя бы пару предложений (больше 50 знаков)."
     if o.status == "rate_limited":
         return texts.RATE_LIMITED
     if o.status == "checking":

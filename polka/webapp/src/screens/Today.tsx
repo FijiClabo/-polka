@@ -3,7 +3,7 @@ import { api, type Today as TodayData } from "../api";
 import { IArrow, ICheck, IFlameSolid, IHand, ISnow } from "../components/Icons";
 import { OpenBookIll } from "../components/Illustrations";
 import { Avatar, Cover, ErrorState, ScreenSkeleton, toast } from "../components/ui";
-import { dayMonth, days, daysUntil, firstName, greeting, longDate, plural } from "../format";
+import { dayMonth, days, daysUntil, firstName, greeting, longDate, nudgeToast, plural, STATUS_TEXT } from "../format";
 import { invalidate, useApi, usePoll } from "../hooks";
 import { useNav } from "../nav";
 import { haptic } from "../tg";
@@ -87,7 +87,7 @@ function MainCard({ data }: { data: TodayData }) {
         <p className="meta">Обычно это меньше минуты. Можно закрыть приложение — я напишу в чат.</p>
         <div className="progress">
           <div className="bar">
-            <div className="fill" style={{ width: "60%", animation: "shimmer 1.3s infinite linear" }} />
+            <div className="fill indeterminate" />
           </div>
         </div>
       </div>
@@ -158,7 +158,7 @@ function MainCard({ data }: { data: TodayData }) {
             </>
           ) : s === "done_today" ? (
             <>
-              <div className="eyebrow" style={{ color: "var(--green)" }}>Сегодня сдано</div>
+              <div className="eyebrow" style={{ color: "var(--green-text)" }}>Сегодня сдано</div>
               <div className="seg-title">{seg ? `Завтра: ${seg.title}` : "Все отрезки на сегодня сданы"}</div>
               {seg && <div className="meta">стр. {seg.page_from}–{seg.page_to}</div>}
             </>
@@ -173,7 +173,7 @@ function MainCard({ data }: { data: TodayData }) {
                 <div className="chips">
                   <span className="chip">≈ {seg.minutes} мин</span>
                   <span className="chip">{seg.pages} стр.</span>
-                  {data.catching_up && <span className="chip" style={{ color: "var(--accent)" }}>догоняем</span>}
+                  {data.catching_up && <span className="chip" style={{ color: "var(--accent-text)" }}>догоняем</span>}
                 </div>
               )}
             </>
@@ -210,7 +210,7 @@ function MainCard({ data }: { data: TodayData }) {
           <>
             {seg?.can_read && !paper && (
               <button className="btn primary" onClick={() => nav.push({ name: "read", params: { d: seg.day_number } })}>
-                Читать главу
+                Читать отрезок
               </button>
             )}
             <button
@@ -377,7 +377,7 @@ function WeekCard({ data }: { data: TodayData }) {
     <div className="card">
       <div className="row between">
         <b>Эта неделя</b>
-        <span className="link row" style={{ gap: 4 }}>
+        <span className="small row" style={{ gap: 4, color: "var(--frozen-text)" }}>
           <ISnow size={14} />
           {data.freezes_left} {plural(data.freezes_left, "заморозка", "заморозки", "заморозок")} в запасе
         </span>
@@ -402,7 +402,8 @@ function PartnerCard({ data, reload }: { data: TodayData; reload: () => void }) 
   const p = data.partner;
   const [nudged, setNudged] = useState(false);
   if (!p) {
-    if (!data.run || data.state === "no_run") return null;
+    // позвать напарника можно, пока забег идёт; после финиша приглашения нет
+    if (!data.run || ["no_run", "finished", "expired", "refunded"].includes(data.state)) return null;
     return (
       <button className="card row" style={{ width: "100%", textAlign: "left" }} onClick={() => nav.tab("friends")}>
         <div className="avatars-stack">
@@ -418,7 +419,7 @@ function PartnerCard({ data, reload }: { data: TodayData; reload: () => void }) 
   }
   const done = p.today === "done";
   const myDone = data.done_today;
-  const status = done ? (myDone ? "оба сдали сегодня" : "твоя очередь") : myDone ? "ждём напарника" : "ещё читаете оба";
+  const status = done ? (myDone ? "сегодня сдано у вас двоих" : "твоя очередь") : myDone ? "ждём напарника" : "вы ещё читаете";
   return (
     <div className="card partner-row">
       <div className="avatars-stack">
@@ -426,7 +427,7 @@ function PartnerCard({ data, reload }: { data: TodayData; reload: () => void }) 
         <Avatar name={p.name} url={p.photo_url} size={42} seed={p.id} />
       </div>
       <div className="grow">
-        <b>{done ? `${firstName(p.name)}: день сдан` : `${firstName(p.name)} ещё читает`}</b>
+        <b>{done ? `${firstName(p.name)}: день сдан` : `${firstName(p.name)}: ${STATUS_TEXT[p.today] ?? "ещё читает"}`}</b>
         <div className="small muted">
           Общий стрик {p.pair_streak} · {status}
         </div>
@@ -435,7 +436,7 @@ function PartnerCard({ data, reload }: { data: TodayData; reload: () => void }) 
         <span className="check-circle">
           <ICheck size={18} />
         </span>
-      ) : myDone && !nudged ? (
+      ) : myDone && !nudged && p.can_nudge ? (
         <button
           className="icon-btn"
           aria-label="Напомнить"
@@ -443,7 +444,7 @@ function PartnerCard({ data, reload }: { data: TodayData; reload: () => void }) 
             haptic("light");
             const r = await api.post<{ result: string }>("/pair/nudge").catch(() => ({ result: "error" }));
             setNudged(true);
-            toast(r.result === "ok" ? "Напоминание отправлено" : r.result === "already" ? "Сегодня уже напоминали" : "Не получилось");
+            toast(nudgeToast(r.result, firstName(p.name), true));
             reload();
           }}
         >

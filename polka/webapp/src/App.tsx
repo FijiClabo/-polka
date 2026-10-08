@@ -111,7 +111,7 @@ export default function App() {
         <Welcome
           onDone={() => {
             setSkipWelcome(true);
-            api.patch("/me", { webapp_onboarded: true }).then((m) => setMe(m as Me)).catch(() => {});
+            api.patch<Me>("/me", { webapp_onboarded: true }).then((m) => setMe((prev) => ({ ...(prev as Me), ...m }))).catch(() => {});
             track("onboarding_seen");
           }}
         />

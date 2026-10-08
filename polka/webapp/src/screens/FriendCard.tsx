@@ -2,9 +2,10 @@ import { useState } from "react";
 import { api, type Achievement, type FriendStatus, type ShelfData } from "../api";
 import { AchIcon, IFlameSolid, IHand } from "../components/Icons";
 import { Avatar, ErrorState, ScreenSkeleton, Shelf, toast } from "../components/ui";
-import { STATUS_TEXT, firstName, plural } from "../format";
-import { useApi } from "../hooks";
-import { haptic } from "../tg";
+import { STATUS_TEXT, firstName, nudgeToast, plural } from "../format";
+import { invalidate, useApi } from "../hooks";
+import { useNav } from "../nav";
+import { confirmDialog, haptic } from "../tg";
 
 interface Card {
   status: FriendStatus;
@@ -13,6 +14,7 @@ interface Card {
 }
 
 export default function FriendCard({ id }: { id: number }) {
+  const nav = useNav();
   const { data, error, loading, reload } = useApi<Card>(`/friends/${id}`);
   const [sent, setSent] = useState(false);
   if (error && !data) return <ErrorState message={error} onRetry={reload} />;
@@ -24,7 +26,7 @@ export default function FriendCard({ id }: { id: number }) {
     <div className="screen no-tabs">
       <div className="col" style={{ alignItems: "center", textAlign: "center", marginTop: 10 }}>
         <Avatar name={s.name} url={s.photo_url} size={88} seed={s.user_id} ring={s.today === "done" ? "green" : undefined} />
-        <h2 style={{ margin: "8px 0 0" }}>{s.name}</h2>
+        <h2 className="h-title" style={{ margin: "10px 0 0", fontSize: 30 }}>{s.name}</h2>
         <div className="small muted">{STATUS_TEXT[s.today]}{s.done_at ? ` в ${s.done_at}` : ""}</div>
       </div>
       <div className="stats3 mt-24">
@@ -41,7 +43,7 @@ export default function FriendCard({ id }: { id: number }) {
         </div>
         <div className="stat">
           <div className="v">{data.achievements.filter((a) => a.earned).length}</div>
-          <div className="l">значков</div>
+          <div className="l">{plural(data.achievements.filter((a) => a.earned).length, "значок", "значка", "значков")}</div>
         </div>
       </div>
       {s.book_title && (
@@ -60,7 +62,7 @@ export default function FriendCard({ id }: { id: number }) {
             haptic("light");
             const r = await api.post<{ result: string }>(`/friends/${id}/nudge`).catch(() => ({ result: "error" }));
             setSent(true);
-            toast(r.result === "ok" ? `${firstName(s.name)} получит толчок` : r.result === "disabled" ? "Толчки отключены" : "Сегодня уже толкали");
+            toast(nudgeToast(r.result, firstName(s.name)));
           }}
         >
           <IHand size={18} /> Толкнуть
@@ -84,6 +86,21 @@ export default function FriendCard({ id }: { id: number }) {
         ))}
       </div>
       <p className="tiny muted center mt-16">Пересказы не хранятся и никому не видны. Друзьям видны книга, стрик, значки и полка.</p>
+      <button
+        className="link block tiny mt-8"
+        onClick={async () => {
+          if (!(await confirmDialog(`Убрать ${firstName(s.name)} из друзей? Вы перестанете видеть книги и стрик друг друга.`))) return;
+          try {
+            await api.del(`/friends/${id}`);
+            invalidate("/friends");
+            nav.back();
+          } catch (e) {
+            toast((e as Error).message);
+          }
+        }}
+      >
+        Убрать из друзей
+      </button>
     </div>
   );
 }

@@ -22,6 +22,15 @@ log = logging.getLogger(__name__)
 
 SPINE_COLORS = ["#C9644F", "#7E9C7A", "#4F6F9F", "#E2B84F", "#8A6A85", "#4E6B57", "#B98B6E", "#3D4B66", "#D49A8C"]  # спокойные «книжные» корешки
 
+# яркие цвета корешков из первой версии → спокойная палитра (книги, добавленные до смены дизайна)
+_LEGACY_SPINES = {"#e2553f": "#C9644F", "#3e8e6e": "#7E9C7A", "#e98a6b": "#D49A8C", "#5b63d6": "#4F6F9F",
+                  "#f2c14e": "#E2B84F", "#8c5bd6": "#8A6A85", "#2f7fb8": "#3D4B66", "#c2410c": "#B98B6E",
+                  "#4d7c0f": "#4E6B57"}
+
+
+def calm_color(color: str | None) -> str:
+    return _LEGACY_SPINES.get((color or "").lower(), color or SPINE_COLORS[0])
+
 
 def pick_spine_color(seed: int) -> str:
     return SPINE_COLORS[seed % len(SPINE_COLORS)]

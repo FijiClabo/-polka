@@ -16,6 +16,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+from services.books import calm_color
 from settings import get_settings
 
 FONTS = Path(__file__).parent / "fonts"
@@ -295,9 +296,10 @@ def card_finish(*, name: str, book_title: str, plan_days: int, start: date | Non
     spines = []
     rnd = random.Random(len(shelf))
     for color, pages in shelf[-5:]:
-        spines.append((hex_rgb(color), min(1.0, 0.55 + min(pages, 700) / 1600 + rnd.random() * 0.1)))
+        spines.append((hex_rgb(calm_color(color)), min(1.0, 0.55 + min(pages, 700) / 1600 + rnd.random() * 0.1)))
     _shelf(img, 90, base, w - 180, spines or [(TERRACOTTA, 0.8)], new_last=True)
-    stats = [(str(best_streak), "дней подряд", TERRACOTTA), (str(retells), "пересказов", TEXT)]
+    stats = [(str(best_streak), _days_label(best_streak), TERRACOTTA),
+             (str(retells), _plural(retells, "пересказ", "пересказа", "пересказов"), TEXT)]
     if partner:
         stats.append((partner[:8], "напарник", BLUE))
     y = _stat_boxes(img, base + 70, w, stats)
@@ -307,6 +309,13 @@ def card_finish(*, name: str, book_title: str, plan_days: int, start: date | Non
         _center_lines(d, y + 90, lines, F_TITLE(56), TEXT_2, w, 10)
     _footer(img, f"{name} · {get_settings().project_name}")
     return _png(img)
+
+
+def _plural(n: int, one: str, few: str, many: str) -> str:
+    n2, n1 = abs(n) % 100, abs(n) % 10
+    if 11 <= n2 <= 14:
+        return many
+    return one if n1 == 1 else few if 2 <= n1 <= 4 else many
 
 
 def _days_word(n: int) -> str:
@@ -334,7 +343,7 @@ def card_pair(*, name: str, partner: str, pair_streak: int, size: str = "story")
         tw = d.textlength(nm, font=f)
         d.text((cx - tw / 2, cy + 160), nm, font=f, fill=TEXT)
     y = cy + 300
-    lines = _wrap(d, "Читаем каждый свою книгу. Стрик растёт, только если сдали оба.", F_TITLE(64), w - 180, 3)
+    lines = _wrap(d, "Читаем каждый свою книгу. Стрик растёт, только если день сдан у нас двоих.", F_TITLE(64), w - 180, 3)
     _center_lines(d, y, lines, F_TITLE(64), TEXT_2, w, 14)
     _footer(img, get_settings().project_name)
     return _png(img)

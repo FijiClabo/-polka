@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type RetellResult, type Today } from "../api";
-import { AchIcon, ICheck, IClose, IFlameSolid, IMic, IRefresh } from "../components/Icons";
+import { AchIcon, ICheck, IClose, IFlameSolid, IMic, IRefresh, IText } from "../components/Icons";
 import { BookStackIll, CupIll, OpenBookIll } from "../components/Illustrations";
 import { BARS, fmtTime, useRecorder } from "../components/recorder";
 import { ErrorState, ScreenSkeleton } from "../components/ui";
@@ -97,7 +97,18 @@ export default function Retell() {
 
   // ------------------------------------------------------------------ результат
   if (phase === "result" && result) {
-    return <ResultView r={result} onAgain={() => { setResult(null); setPhase("compose"); }} />;
+    return (
+      <ResultView
+        r={result}
+        onAgain={() => {
+          // новый отрезок или повтор: старый уточняющий вопрос и прошлый отрезок не тянем за собой
+          if (result.status !== "clarify") setQuestion(null);
+          if (result.status === "accepted") today.reload();
+          setResult(null);
+          setPhase("compose");
+        }}
+      />
+    );
   }
 
   // ------------------------------------------------------------------ недоступно
@@ -134,7 +145,7 @@ export default function Retell() {
       {phase === "sending" ? (
         <div className="state" style={{ paddingTop: 30 }}>
           <div className="rec-btn on" style={{ margin: "0 auto 26px", width: 84, height: 84 }}>
-            <IFlameSolid size={34} />
+            {mode === "voice" ? <MicGlyph /> : <IText size={30} />}
           </div>
           <h3>{mode === "voice" ? "Слушаю…" : "Читаю…"}</h3>
           <p>Пара секунд — сверяюсь с отрезком.</p>
@@ -371,7 +382,13 @@ function ResultView({ r, onAgain }: { r: RetellResult; onAgain: () => void }) {
     <div className="retell">
       <div className="state" style={{ paddingTop: 80 }}>
         <div className="ill">{r.status === "too_short" ? <OpenBookIll /> : <BookStackIll />}</div>
-        <h3>{r.status === "queued" ? "Пересказ получен" : r.status === "too_short" ? "Чуть подробнее" : "Готово"}</h3>
+        <h3>
+          {r.status === "queued" ? "Пересказ получен"
+            : r.status === "too_short" ? "Чуть подробнее"
+              : r.status === "rate_limited" ? "Сделаем паузу"
+                : r.status === "checking" ? "Ещё проверяю"
+                  : "Сейчас не получится"}
+        </h3>
         <p>{r.message}</p>
         <button className="btn primary" onClick={r.status === "too_short" ? onAgain : () => nav.tab("today")}>
           {r.status === "too_short" ? "Дописать" : "Хорошо"}

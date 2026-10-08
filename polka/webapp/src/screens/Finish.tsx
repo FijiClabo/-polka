@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api, type FinishData } from "../api";
 import { Confetti, ErrorState, ScreenSkeleton, Sheet, Shelf, toast, type SpineItem } from "../components/ui";
-import { dayMonth, days, firstName } from "../format";
+import { dayMonth, days, firstName, plural } from "../format";
 import { invalidate, useApi } from "../hooks";
 import { useNav } from "../nav";
 import { canShareStory, haptic, shareStory } from "../tg";
@@ -57,11 +57,11 @@ export default function Finish() {
       <div className="stats-row mt-24">
         <div className="stat">
           <div className="v" style={{ color: "var(--accent-1)" }}>{data.best_streak}</div>
-          <div className="l">дней подряд</div>
+          <div className="l">{plural(data.best_streak, "день подряд", "дня подряд", "дней подряд")}</div>
         </div>
         <div className="stat">
           <div className="v">{data.retellings}</div>
-          <div className="l">пересказов</div>
+          <div className="l">{plural(data.retellings, "пересказ", "пересказа", "пересказов")}</div>
         </div>
         <div className="stat">
           <div className="v" style={{ color: "var(--blue)", fontSize: data.partner ? 22 : 26 }}>{data.partner ? firstName(data.partner.name) : "соло"}</div>

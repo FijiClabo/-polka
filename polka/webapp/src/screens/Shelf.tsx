@@ -41,7 +41,7 @@ export default function Shelf() {
       <div className="row between small mt-16">
         <span className="muted">{spines.length ? "Новая книга встанет на свободное место" : "Здесь появится первая дочитанная книга"}</span>
         {data.current && (
-          <span style={{ color: "var(--accent)", fontWeight: 600 }}>Читаю · {Math.round(data.current.progress * 100)}%</span>
+          <span style={{ color: "var(--accent-text)", fontWeight: 600 }}>Читаю · {Math.round(data.current.progress * 100)}%</span>
         )}
       </div>
 
@@ -52,7 +52,7 @@ export default function Shelf() {
           </div>
           <div className="h-title" style={{ fontSize: 30, marginTop: 6 }}>{sel.title}</div>
           <div className="small muted" style={{ marginTop: 6 }}>
-            {[sel.author, sel.plan_days ? `${sel.plan_days} ${plural(sel.plan_days, "день", "дня", "дней")}${sel.no_skips ? " без пропусков" : ""}` : null, sel.partner ? `с ${sel.partner}` : null]
+            {[sel.author, sel.plan_days ? `${sel.plan_days} ${plural(sel.plan_days, "день", "дня", "дней")}${sel.no_skips ? " без пропусков" : ""}` : null, sel.partner ? `напарник: ${sel.partner}` : null]
               .filter(Boolean)
               .join(" · ")}
           </div>
@@ -62,7 +62,7 @@ export default function Shelf() {
                 className="btn primary"
                 onClick={async () => {
                   try {
-                    await api.post("/share/finish/send");
+                    await api.post(`/share/finish/send?book=${sel.book_id}`);
                     toast("Карточка в чате — перешли её друзьям");
                   } catch (e) {
                     toast((e as Error).message);

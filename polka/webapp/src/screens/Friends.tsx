@@ -3,10 +3,10 @@ import { api, type FriendStatus, type PairData } from "../api";
 import { IFlameSolid, IHand, IPlus } from "../components/Icons";
 import { BookStackIll } from "../components/Illustrations";
 import { Avatar, Empty, ErrorState, ScreenSkeleton, Skeleton, toast } from "../components/ui";
-import { firstName, STATUS_TEXT } from "../format";
+import { firstName, nudgeToast, STATUS_TEXT } from "../format";
 import { invalidate, useApi } from "../hooks";
 import { useNav } from "../nav";
-import { haptic, openTgLink } from "../tg";
+import { confirmDialog, haptic, openTgLink } from "../tg";
 
 interface FriendsData {
   items: FriendStatus[];
@@ -80,7 +80,7 @@ function FriendRow({ f, onOpen, onNudged }: { f: FriendStatus; onOpen: () => voi
             haptic("light");
             const r = await api.post<{ result: string }>(`/friends/${f.user_id}/nudge`).catch(() => ({ result: "error" }));
             setSent(true);
-            toast(r.result === "ok" ? `${firstName(f.name)} получит толчок` : r.result === "disabled" ? "Толчки отключены" : "Сегодня уже толкали");
+            toast(nudgeToast(r.result, firstName(f.name)));
             invalidate("/friends");
             onNudged();
           }}
@@ -89,8 +89,8 @@ function FriendRow({ f, onOpen, onNudged }: { f: FriendStatus; onOpen: () => voi
         </button>
       ) : null}
       <span className={`streak-mini${f.streak ? "" : " zero"}`}>
-        {f.streak ? <IFlameSolid size={15} /> : <span style={{ fontSize: 14 }}>○</span>}
-        {f.streak || ""}
+        {f.streak ? <IFlameSolid size={15} /> : null}
+        {f.streak || 0}
       </span>
     </div>
   );
@@ -110,7 +110,7 @@ function PairBlock({ data, reload }: { data: PairData; reload: () => void }) {
           <div className="grow">
             <b style={{ fontSize: 18 }}>Читать вдвоём проще</b>
             <p className="small" style={{ color: "var(--text-2)", margin: "6px 0 0" }}>
-              Общий стрик растёт, только если сдали оба. Каждый читает свою книгу.
+              Общий стрик растёт, только если день сдан у вас двоих. Каждый читает свою книгу.
             </p>
           </div>
         </div>
@@ -156,7 +156,7 @@ function PairBlock({ data, reload }: { data: PairData; reload: () => void }) {
             setBusy(true);
             haptic("light");
             const r = await api.post<{ result: string }>("/pair/nudge").catch(() => ({ result: "error" }));
-            toast(r.result === "ok" ? "Напоминание отправлено" : "Сегодня уже напоминали");
+            toast(nudgeToast(r.result, firstName(p.name), true));
             reload();
             setBusy(false);
           }}
@@ -164,6 +164,26 @@ function PairBlock({ data, reload }: { data: PairData; reload: () => void }) {
           <IHand size={18} /> Напомнить напарнику
         </button>
       )}
+      <button
+        className="link block tiny mt-12"
+        disabled={busy}
+        onClick={async () => {
+          if (!(await confirmDialog("Выйти из пары? Общий стрик закончится, каждый будет читать дальше сам."))) return;
+          setBusy(true);
+          try {
+            await api.post("/pair/leave");
+            invalidate("/pair");
+            invalidate("/today");
+            reload();
+          } catch (e) {
+            toast((e as Error).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        Выйти из пары
+      </button>
     </div>
   );
 }

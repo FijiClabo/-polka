@@ -277,7 +277,7 @@ img {
 
 .badge.ok {
   background: var(--success-bg);
-  color: var(--green);
+  color: var(--green-text);
 }
 
 .badge.frozen {
@@ -292,11 +292,11 @@ img {
 
 .badge.accent {
   background: var(--accent-soft);
-  color: var(--accent-2);
+  color: var(--accent-text);
 }
 
 .link {
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 500;
   font-size: 14px;
   text-decoration: underline;
@@ -350,6 +350,7 @@ img {
   font-weight: 600;
   font-size: 22px;
   color: var(--accent-2);
+  font-variant-numeric: lining-nums tabular-nums;
 }
 
 .streak-pill.bump {
@@ -440,15 +441,17 @@ img {
   font-weight: 700;
   letter-spacing: 1.4px;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.92);
+  color: currentColor;
   z-index: 2;
+  opacity: 0.85;
 }
 
 .cover .c-sun {
   position: absolute;
   border-radius: 50%;
-  background: #f2bf4e;
+  background: currentColor;
   z-index: 1;
+  opacity: 0.14;
 }
 
 .cover .c-title {
@@ -461,7 +464,7 @@ img {
   font-weight: 600;
   font-size: 17px;
   line-height: 1;
-  color: #fffaf2;
+  color: currentColor;
   z-index: 2;
 }
 
@@ -607,7 +610,7 @@ img {
   align-items: center;
   justify-content: center;
   background: var(--success-bg);
-  color: var(--green);
+  color: var(--green-text);
   flex-shrink: 0;
 }
 
@@ -667,6 +670,7 @@ img {
   font-weight: 600;
   font-size: 60px;
   line-height: 0.9;
+  font-variant-numeric: lining-nums tabular-nums;
 }
 
 .partner-card .foot {
@@ -716,6 +720,7 @@ img {
   font-weight: 600;
   font-size: 22px;
   color: var(--accent-2);
+  font-variant-numeric: lining-nums tabular-nums;
 }
 
 .streak-mini.zero {
@@ -742,6 +747,7 @@ img {
   font-weight: 600;
   font-size: 30px;
   line-height: 1.05;
+  font-variant-numeric: lining-nums tabular-nums;
 }
 
 .stat .v small {
@@ -1300,7 +1306,7 @@ img {
 }
 
 .counter.ok {
-  color: var(--green);
+  color: var(--green-text);
 }
 
 /* ---------------------------------------------------------------- результат */
@@ -1412,6 +1418,7 @@ img {
   position: relative;
   transition: background 0.2s;
   flex-shrink: 0;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 
 .switch::after {
@@ -1422,13 +1429,14 @@ img {
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: var(--surface);
+  background: var(--knob);
   transition: transform 0.2s var(--ease);
   box-shadow: 0 1px 3px rgba(42, 38, 35, 0.2);
 }
 
 .switch.on {
   background: var(--green);
+  box-shadow: none;
 }
 
 .switch.on::after {
@@ -1461,7 +1469,7 @@ img {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  border: 1.5px solid var(--faint);
+  border: 1.5px solid var(--muted);
   flex-shrink: 0;
   position: relative;
 }
@@ -1624,7 +1632,7 @@ img {
 .sheet-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(42, 38, 35, 0.35);
+  background: var(--scrim);
   z-index: 80;
   animation: fade 0.2s;
 }
@@ -1635,7 +1643,7 @@ img {
   right: 0;
   bottom: 0;
   z-index: 90;
-  background: var(--bg);
+  background: var(--sheet-bg);
   border-radius: 24px 24px 0 0;
   padding: 10px var(--pad) calc(20px + var(--safe-bottom));
   max-width: 520px;
@@ -1744,7 +1752,7 @@ img {
   z-index: 0;
 }
 
-.finish > *:not(.confetti) {
+.finish > *:not(.confetti):not(.sheet):not(.sheet-backdrop) {
   position: relative;
   z-index: 1;
 }
@@ -1804,7 +1812,7 @@ img {
   place-items: center;
   flex-shrink: 0;
   background: var(--sage-soft);
-  color: var(--green);
+  color: var(--green-text);
 }
 
 .link.block {
@@ -1915,4 +1923,20 @@ img {
 
 .state .ill svg {
   display: block;
+}
+
+/* ---------------------------------------------------------------- бесконечный прогресс (разбор книги) */
+
+.progress .fill.indeterminate {
+  width: 35%;
+  animation: indeterminate 1.6s infinite var(--ease);
+}
+
+@keyframes indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
 }

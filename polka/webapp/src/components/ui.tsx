@@ -14,13 +14,26 @@ const CALM: Record<string, string> = {
 
 export const calmColor = (c: string): string => CALM[(c || "").toLowerCase()] || c || "#B98B6E";
 
+// светлый фон (горчица, шалфей, пыльно-розовый) — тёмный текст, иначе — светлый: так читается в обоих случаях
+export function isLight(hex: string): boolean {
+  const m = hex.replace("#", "");
+  const full = m.length === 3 ? m.split("").map((c) => c + c).join("") : m;
+  const n = parseInt(full, 16);
+  if (Number.isNaN(n)) return false;
+  const ch = (v: number) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * ch(n >> 16) + 0.7152 * ch((n >> 8) & 255) + 0.0722 * ch(n & 255) > 0.25;
+}
+
 export function Avatar({ name, url, size = 44, ring, seed }: { name: string; url?: string | null; size?: number; ring?: "accent" | "green" | "grey"; seed?: number }) {
   const [broken, setBroken] = useState(false);
   const letter = (name || "?").trim().charAt(0).toUpperCase();
   const idx = Math.abs(seed ?? [...(name || "")].reduce((a, c) => a + c.charCodeAt(0), 0)) % AVATAR_COLORS.length;
   const cls = ["avatar", ring === "accent" ? "ring" : ring === "green" ? "ring-green" : ring === "grey" ? "ring-grey" : ""].join(" ");
   return (
-    <span className={cls} style={{ width: size, height: size, background: AVATAR_COLORS[idx], fontSize: size * 0.42 }}>
+    <span className={cls} style={{ width: size, height: size, background: AVATAR_COLORS[idx], color: isLight(AVATAR_COLORS[idx]) ? "#2a2623" : "#fbf8f3", fontSize: size * 0.42 }}>
       {url && !broken ? <img src={url} alt="" onError={() => setBroken(true)} /> : letter}
     </span>
   );
@@ -41,22 +54,12 @@ export function Cover({ title, author, color, small }: { title: string; author: 
   const right = -(h % (small ? 14 : 22));
   const surname = (author || "").split(/[ ,]/).filter(Boolean).slice(-1)[0] || author;
   return (
-    <div className={`cover${small ? " small" : ""}`} style={{ background: calmColor(color) }}>
+    <div className={`cover${small ? " small" : ""}`} style={{ background: calmColor(color), color: isLight(calmColor(color)) ? "#2a2623" : "#fbf8f3" }}>
       <div className="c-author">{surname}</div>
       <div className="c-sun" style={{ width: size, height: size, top, right }} />
       <div className="c-title">{title}</div>
     </div>
   );
-}
-
-export function shade(hex: string, pct: number): string {
-  const m = hex.replace("#", "");
-  const full = m.length === 3 ? m.split("").map((c) => c + c).join("") : m;
-  const n = parseInt(full, 16);
-  if (Number.isNaN(n)) return hex;
-  const f = (c: number) => Math.max(0, Math.min(255, Math.round(c + (pct / 100) * 255)));
-  const r = f(n >> 16), g = f((n >> 8) & 255), b = f(n & 255);
-  return `#${((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1)}`;
 }
 
 // ------------------------------------------------------------------ полка

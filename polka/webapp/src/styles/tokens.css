@@ -30,7 +30,7 @@
   --line-strong: rgba(42, 38, 35, 0.24);
   --text: #2a2623;
   --text-2: #4a433d;
-  --muted: #857b71;
+  --muted: #6f665e;
   --faint: #bdb2a5;
   --chip: #ece5d9;
 
@@ -41,30 +41,35 @@
   --accent-1: #c9644f;
   --accent-2: #b5573f;
   --accent-soft: #f4e3dc;
+  --accent-text: #a9503d; /* терракота для мелкого текста и ссылок — контраст не ниже 4,5 */
   --accent-grad: var(--ink);
   --accent-glow: none;
   --mustard: #e2b84f;
   --mustard-soft: #f6ebc8;
   --green: #6f9469;
+  --green-text: #4e6b4a;
   --sage-soft: #e3ece0;
   --blue: #4f6f9f;
   --blue-soft: #e4eaf3;
   --violet: #4f6f9f;
   --danger: #b5573f;
 
-  --done-bg: #7e9c7a;
+  --done-bg: #5f7d5b;
   --done-text: #fbf8f3;
   --frozen-bg: #dfe7f1;
   --frozen-text: #4f6f9f;
   --missed-bg: #f2e1da;
   --missed-text: #b5573f;
   --future-bg: transparent;
-  --future-text: #a89d90;
+  --future-text: #6f665e;
   --success-bg: #e3ece0;
   --streak-pill-bg: #f4e3dc;
   --streak-pill-border: transparent;
   --partner-grad: #e4eaf3;
   --partner-text: #2a2623;
+  --scrim: rgba(42, 38, 35, 0.35);
+  --sheet-bg: var(--bg);
+  --knob: #fbf8f3;
   --reader-bg: #fbf7ef;
   --reader-text: #2a2623;
   --shadow: 0 10px 30px -20px rgba(42, 38, 35, 0.35);
@@ -92,11 +97,13 @@
   --accent-1: #dc8a73;
   --accent-2: #c9644f;
   --accent-soft: #3d2d26;
+  --accent-text: #dc8a73;
   --accent-grad: var(--ink);
   --accent-glow: none;
   --mustard: #e8c66a;
   --mustard-soft: #3a3322;
   --green: #9cba97;
+  --green-text: #9cba97;
   --sage-soft: #2c3529;
   --blue: #96acd2;
   --blue-soft: #2a313d;
@@ -110,12 +117,15 @@
   --missed-bg: #3d2d26;
   --missed-text: #dc8a73;
   --future-bg: transparent;
-  --future-text: #6b6258;
+  --future-text: #a3988a;
   --success-bg: #2c3529;
   --streak-pill-bg: #3d2d26;
   --streak-pill-border: transparent;
   --partner-grad: #2a313d;
   --partner-text: #f1eadf;
+  --scrim: rgba(0, 0, 0, 0.55);
+  --sheet-bg: var(--surface);
+  --knob: #d8cfc2;
   --reader-bg: #221e19;
   --reader-text: #ece4d6;
   --shadow: 0 10px 30px -18px rgba(0, 0, 0, 0.6);

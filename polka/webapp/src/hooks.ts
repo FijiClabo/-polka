@@ -17,24 +17,29 @@ export function useApi<T>(path: string | null, deps: unknown[] = []): Loadable<T
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(!!path && !cache.has(path));
   const [tick, setTick] = useState(0);
-  const alive = useRef(true);
+  const shownPath = useRef(path);
 
   useEffect(() => {
-    alive.current = true;
+    // свой флаг на каждый запрос: ответ на старый путь (другой день в календаре) не перезапишет новый
+    let cancelled = false;
     if (!path) return;
+    if (shownPath.current !== path) {
+      shownPath.current = path;
+      setData((cache.get(path) as T) ?? null);
+    }
     setLoading(!cache.has(path));
     setError(null);
     api
       .get<T>(path)
       .then((d) => {
-        if (!alive.current) return;
+        if (cancelled) return;
         cache.set(path, d);
         setData(d);
       })
-      .catch((e: ApiError) => alive.current && setError(e.message))
-      .finally(() => alive.current && setLoading(false));
+      .catch((e: ApiError) => !cancelled && setError(e.message))
+      .finally(() => !cancelled && setLoading(false));
     return () => {
-      alive.current = false;
+      cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, tick, ...deps]);

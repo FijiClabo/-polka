@@ -68,7 +68,7 @@ export default function AddBook() {
           <div className="ill-wrap"><OpenBookIll size={140} /></div>
           <div className="seg-title">Разбираю книгу…</div>
           <p className="meta">Делю на главы и отрезки. Обычно меньше минуты — результат продублирую в чат.</p>
-          <div className="progress"><div className="bar"><div className="fill" style={{ width: "55%" }} /></div></div>
+          <div className="progress"><div className="bar"><div className="fill indeterminate" /></div></div>
         </div>
       </div>
     );
@@ -82,7 +82,7 @@ export default function AddBook() {
         <h1 className="h-display">Своя книга</h1>
         <p className="muted">Файл или бумажная — как удобнее. Текст файла видишь только ты.</p>
         {book?.parse_status === "failed" && (
-          <div className="card mt-12" style={{ border: "1px solid rgba(255,107,107,.35)" }}>
+          <div className="card mt-12" style={{ background: "var(--missed-bg)", borderColor: "transparent" }}>
             <b>Не получилось разобрать файл</b>
             <p className="small muted" style={{ margin: "6px 0 0" }}>{data.parse_error || "Попробуй другой файл или добавь книгу как бумажную."}</p>
           </div>
@@ -203,7 +203,7 @@ function PlanPicker({ onConfirmed }: { onConfirmed: (awaitingPayment: boolean) =
               {o.recommended && <span className="badge accent">рекомендуем</span>}
             </div>
             <div className="small muted">{decimal(o.pages_per_day)} стр. · ≈ {o.minutes_per_day} мин в день</div>
-            {o.warning && <div className="tiny" style={{ color: "var(--accent)", marginTop: 4 }}>{o.warning}</div>}
+            {o.warning && <div className="tiny" style={{ color: "var(--accent-text)", marginTop: 4 }}>{o.warning}</div>}
           </div>
         </button>
       ))}

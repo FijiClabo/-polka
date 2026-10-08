@@ -62,7 +62,7 @@ export default function Profile() {
     <div className="screen no-tabs">
       <div className="col" style={{ alignItems: "center", textAlign: "center", marginTop: 6 }}>
         <Avatar name={u.name} url={u.photo_url} size={84} seed={u.id} ring="accent" />
-        <h2 style={{ margin: "10px 0 0" }}>{u.name}</h2>
+        <h2 className="h-title" style={{ margin: "10px 0 0", fontSize: 30 }}>{u.name}</h2>
         {me.access.run && <div className="small muted">{me.access.run.title}</div>}
       </div>
 

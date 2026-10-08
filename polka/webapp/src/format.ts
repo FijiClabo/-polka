@@ -64,3 +64,11 @@ export const STATUS_TEXT: Record<string, string> = {
   finished: "книга дочитана",
   waiting: "ждёт старта",
 };
+
+export function nudgeToast(result: string, name: string, partner = false): string {
+  if (result === "ok") return partner ? "Напоминание отправлено" : `${name} получит толчок`;
+  if (result === "already") return partner ? "Сегодня уже напоминали" : "Сегодня уже толкали";
+  if (result === "done") return "Там день уже сдан";
+  if (result === "idle") return "Сейчас читать нечего — толчок не нужен";
+  return "Не получилось, попробуй позже";
+}
