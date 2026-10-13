@@ -57,7 +57,8 @@ async def check_bot(s) -> None:
             me = (await c.get(f"{base}/bot{s.bot_token}/getMe")).json()
         except httpx.HTTPError as e:
             say(BAD, f"Нет связи с {base}: {e.__class__.__name__}",
-                "Сервер должен иметь доступ к Telegram (или укажи TELEGRAM_API_BASE)")
+                "С российских серверов Telegram часто недоступен. Поставь релей за рубежом: "
+                "bash scripts/relay_setup.sh (инструкция в PILOT.md), затем TELEGRAM_API_BASE и BOT_MODE=polling в .env")
             return
         if not me.get("ok"):
             say(BAD, "Токен бота не принят Telegram", "Проверь BOT_TOKEN (без пробелов и кавычек)")

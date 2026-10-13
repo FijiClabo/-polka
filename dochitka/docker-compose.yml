@@ -24,7 +24,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://dochitka:${POSTGRES_PASSWORD:-dochitka}@db:5432/dochitka
       DATA_DIR: /app/data
-      BOT_MODE: ${BOT_MODE:-webhook}
+      BOT_MODE: ${BOT_MODE:-polling}
     volumes:
       - ./data:/app/data
     depends_on:
