@@ -422,7 +422,7 @@ def together_offer(name: str, title: str, days: int) -> str:
 
 
 def together_joined(name: str, title: str, days: int) -> str:
-    return (f"Готово: «{e(title)}», {days} {_days_word(days)} — тот же план, что у {e(name)}. Каждый день пришлю, "
+    return (f"Готово: «{e(title)}», {days} {_days_word(days)} — тот же план, что у напарника ({e(name)}). Каждый день пришлю, "
             "с каких слов начать и на каких закончить, — так место легко найти в любом издании. "
             "Есть свой файл этой книги? Пришли его — проверка станет полной, со сверкой с текстом.")
 

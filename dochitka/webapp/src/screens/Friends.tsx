@@ -199,7 +199,7 @@ function PairBlock({ data, reload }: { data: PairData; reload: () => void }) {
             }
           }}
         >
-          Позвать {firstName(p.name)} в друзья
+          Позвать напарника в друзья
         </button>
       )}
       <button

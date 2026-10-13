@@ -59,9 +59,9 @@ export default function FriendCard({ id }: { id: number }) {
       )}
       {data.can_join_book && s.book_title && (
         <div className="card mt-12 together-card">
-          <b>Читать «{s.book_title}» вместе с {firstName(s.name)}</b>
+          <b>Читать «{s.book_title}» вместе</b>
           <p className="small muted" style={{ margin: "6px 0 0" }}>
-            Получишь тот же план: те же главы в те же дни. Читаешь по своему экземпляру — бумажному, в любом приложении или файлом.
+            {firstName(s.name)} читает эту книгу. Получишь тот же план: те же главы в те же дни. Читаешь по своему экземпляру — бумажному, в любом приложении или файлом.
           </p>
           <button
             className="btn primary block mt-12"

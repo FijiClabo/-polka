@@ -137,7 +137,7 @@ function ClubView({ club, reload }: { club: ClubData; reload: () => void }) {
         )}
       </div>
       {club.is_host && (
-        <p className="tiny muted mt-8">«Напомнить» отправит сообщение тем, кто сегодня ещё не сдал. Каждому — не чаще раза в день.</p>
+        <p className="tiny muted mt-8">«Напомнить» отправит сообщение тем, у кого сегодняшний день ещё не сдан. Каждому — не чаще раза в день.</p>
       )}
 
       <div className="section-title">
@@ -186,7 +186,7 @@ function MemberRow({ m, onChanged }: { m: ClubMember; onChanged: () => void }) {
           {m.is_host && <span className="badge accent">ведущий</span>}
         </div>
         <div className="sub ellipsis">
-          {[m.plan_day && m.plan_days ? `день ${Math.min(m.plan_day, m.plan_days)} из ${m.plan_days}` : "ещё не начал", status].filter(Boolean).join(" · ")}
+          {[m.plan_day && m.plan_days ? `день ${Math.min(m.plan_day, m.plan_days)} из ${m.plan_days}` : "план ещё не начат", status].filter(Boolean).join(" · ")}
         </div>
         <div className="hbar-track mt-8"><i style={{ width: `${Math.max(0, Math.min(100, m.progress))}%` }} /></div>
       </div>
