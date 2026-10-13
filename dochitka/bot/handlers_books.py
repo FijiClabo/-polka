@@ -13,7 +13,7 @@ from aiogram.types import CallbackQuery, Message
 
 import texts
 from books.parse import detect_format, file_hash, is_other_book_format
-from books.plan import PlanError
+from books.plan import PlanError, total_minutes
 from books.types import BookParseError
 from bot.common import Flow, load_user
 from bot.ui import flush, kb
@@ -26,8 +26,8 @@ from services.books import (
     create_pending_book,
     has_progress,
     mark_failed,
-    options_for,
     parse_file,
+    plan_choices,
     save_parsed,
     store_upload,
 )
@@ -131,9 +131,9 @@ async def handle_parse(bot: Bot, chat_id: int, user_id: int, book_id: int, name:
             enr = await _enrollment_for_book(s, user)
             if enr is not None:
                 await attach_book(s, enr, book)
-                opts = options_for(book, enr)
+                opts = await plan_choices(s, user, book, enr)
             else:
-                opts = []
+                opts = None
             text = texts.book_parsed(book.title, book.author, book.total_pages, book.chapters_count,
                                      parsed.reading_minutes)
         else:
@@ -146,25 +146,57 @@ async def handle_parse(bot: Bot, chat_id: int, user_id: int, book_id: int, name:
         await bot.send_message(chat_id, text, reply_markup=kb([[{"text": "Читать без файла", "callback": "book:paper"}]]))
 
 
-def plan_kb(opts) -> object:
+def plan_kb(choices: dict | None) -> object:
+    """Готовые сроки, а ниже — «своё время в день» и «глава в день»."""
     rows = []
-    for o in opts or []:
-        rec = " · советуем" if o.recommended else ""
-        ppd = f"{o.pages_per_day:g}".replace(".", ",")
-        rows.append([{"text": f"{texts.days_word(o.days)} · {ppd} стр. · {o.minutes_per_day} мин{rec}",
-                      "callback": f"plan:{o.days}"}])
+    for o in (choices or {}).get("options", []):
+        rec = " · советуем" if o["recommended"] else ""
+        ppd = f"{o['pages_per_day']:g}".replace(".", ",")
+        rows.append([{"text": f"{texts.days_word(o['days'])} · {ppd} стр. · {o['minutes_per_day']} мин{rec}",
+                      "callback": f"plan:{o['days']}"}])
+    if choices and choices.get("minute_options"):
+        rows.append([{"text": "Своё время в день", "callback": "pm:menu"}])
+    ch = (choices or {}).get("chapters")
+    if ch:
+        rows.append([{"text": f"Глава в день · {texts.days_word(ch['days'])}, {ch['min_minutes']}–{ch['max_minutes']} мин",
+                      "callback": "plan:ch"}])
     rows.append([{"text": "Настроить план в приложении", "webapp": "book"}])
     return kb(rows)
 
 
-@router.callback_query(F.data.startswith("plan:"))
+def minutes_kb(choices: dict) -> object:
+    rows = [[{"text": f"{o['minutes']} мин в день · {texts.days_word(o['days'])}", "callback": f"pm:{o['minutes']}"}]
+            for o in choices.get("minute_options", [])]
+    rows.append([{"text": "Назад к срокам", "callback": "pm:back"}])
+    return kb(rows)
+
+
+@router.callback_query(F.data.in_({"pm:menu", "pm:back"}))
+async def cb_plan_minutes_menu(call: CallbackQuery) -> None:
+    await call.answer()
+    async with session_scope() as s:
+        user, _ = await load_user(s, call.from_user)
+        enr = await current_enrollment(s, user.id)
+        book = await s.get(Book, enr.book_id) if enr and enr.book_id else None
+        if book is None:
+            await call.message.answer("Сначала добавь книгу.")
+            return
+        choices = await plan_choices(s, user, book, enr)
+    markup = minutes_kb(choices) if call.data == "pm:menu" else plan_kb(choices)
+    try:
+        await call.message.edit_reply_markup(reply_markup=markup)
+    except Exception:  # сообщение слишком старое — пришлём новое
+        await call.message.answer("Выбери срок:", reply_markup=markup)
+
+
+@router.callback_query(F.data.startswith("plan:") | F.data.regexp(r"^pm:\d+$"))
 async def cb_plan(call: CallbackQuery, bot: Bot) -> None:
     from bot.handlers_start import consent_gate
 
     await call.answer()
     if not await consent_gate(call.message, call.from_user):
         return
-    days = int(call.data.split(":")[1])
+    kind, value = call.data.split(":")
     outbox = Outbox()
     async with session_scope() as s:
         user, _ = await load_user(s, call.from_user)
@@ -173,16 +205,23 @@ async def cb_plan(call: CallbackQuery, bot: Bot) -> None:
             await call.message.answer("Сначала добавь книгу.")
             return
         try:
-            await confirm_plan(s, user, enr, days)
+            if kind == "pm":
+                await confirm_plan(s, user, enr, minutes=int(value))
+            elif value == "ch":
+                await confirm_plan(s, user, enr, by_chapter=True)
+            else:
+                await confirm_plan(s, user, enr, int(value))
         except PlanError as e:
             await call.message.edit_reply_markup(reply_markup=None)
             await call.message.answer(f"Не получилось: {texts.e(str(e))}")
             return
         book = await s.get(Book, enr.book_id)
-        opt = next((o for o in options_for(book, enr) if o.days == days), None)
-        text = texts.plan_ready(book.title, days, enr.plan_start_date, opt.pages_per_day if opt else 0,
-                                opt.minutes_per_day if opt else 0, run_start=enr.run.start_date,
-                                awaiting_payment=enr.status == "invited")
+        days = enr.plan_days
+        paper = book.source == "paper"
+        total = total_minutes(book.total_pages, book.total_words, paper)
+        text = texts.plan_ready(book.title, days, enr.plan_start_date, round(book.total_pages / days, 1),
+                                max(1, round(total / days)), run_start=enr.run.start_date,
+                                awaiting_payment=enr.status == "invited", by_chapter=value == "ch")
         uid = user.id
         invite = None
         if enr.pair_id is None and enr.club_id is None:
@@ -287,6 +326,6 @@ async def msg_paper_pages(message: Message, state: FSMContext) -> None:
         user, _ = await load_user(s, message.from_user)
         enr = await _enrollment_for_book(s, user)
         book = await add_paper_book(s, user, enr, data.get("paper_title", "Книга"), data.get("paper_author", ""), int(raw))
-        opts = options_for(book, enr)
+        opts = await plan_choices(s, user, book, enr)
         title = book.title
     await message.answer(f"Записано: «{texts.e(title)}», {raw} стр. Выбери срок:", reply_markup=plan_kb(opts))

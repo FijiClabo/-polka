@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type BookState, type PlanOption } from "../api";
+import { api, type BookState, type PlanChoices } from "../api";
 import { IBook, IUpload } from "../components/Icons";
 import { OpenBookIll } from "../components/Illustrations";
 import { Cover, ErrorState, ScreenSkeleton, toast } from "../components/ui";
-import { dayMonth, days as fmtDays, decimal, hm, pages, plural } from "../format";
+import { dayMonth, days as fmtDays, decimal, hm, pages, parseDate, plural } from "../format";
 import { invalidate, useApi, usePoll } from "../hooks";
 import { useNav } from "../nav";
 import { closeApp, confirmDialog, haptic } from "../tg";
@@ -199,19 +199,29 @@ function BookMeta({ data, onChange }: { data: BookState; onChange: () => void })
   );
 }
 
+type PlanChoice = { kind: "days"; days: number } | { kind: "minutes"; minutes: number } | { kind: "chapter" } | { kind: "date"; date: string };
+
 function PlanPicker({ onConfirmed }: { onConfirmed: (awaitingPayment: boolean) => void }) {
-  const opts = useApi<{ options: PlanOption[] }>("/book/plan-options");
-  const [days, setDays] = useState<number | null>(null);
+  const opts = useApi<PlanChoices>("/book/plan-options");
+  const [choice, setChoice] = useState<PlanChoice | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
-    if (opts.data && days === null) setDays(opts.data.options.find((o) => o.recommended)?.days ?? opts.data.options[0]?.days ?? null);
-  }, [opts.data, days]);
+    if (opts.data && choice === null) {
+      const rec = opts.data.options.find((o) => o.recommended)?.days ?? opts.data.options[0]?.days;
+      if (rec) setChoice({ kind: "days", days: rec });
+    }
+  }, [opts.data, choice]);
   if (!opts.data) return <div className="mt-24"><ScreenSkeleton /></div>;
+  const c = opts.data;
+  const start = c.expected_start;
+  const dateDays = choice?.kind === "date" && start ? Math.round((parseDate(choice.date).getTime() - parseDate(start).getTime()) / 86400000) + 1 : null;
+  const dateBad = dateDays !== null && (dateDays < c.min_days || dateDays > c.max_days);
+  const pick = (ch: PlanChoice) => { haptic("select"); setChoice(ch); };
   return (
     <>
       <div className="section-title">Выбери срок</div>
-      {opts.data.options.map((o) => (
-        <button key={o.days} className={`option${days === o.days ? " on" : ""}`} onClick={() => { haptic("select"); setDays(o.days); }}>
+      {c.options.map((o) => (
+        <button key={o.days} className={`option${choice?.kind === "days" && choice.days === o.days ? " on" : ""}`} onClick={() => pick({ kind: "days", days: o.days })}>
           <span className="radio" />
           <div className="grow">
             <div className="row" style={{ gap: 8 }}>
@@ -223,13 +233,69 @@ function PlanPicker({ onConfirmed }: { onConfirmed: (awaitingPayment: boolean) =
           </div>
         </button>
       ))}
+
+      {c.custom && c.minute_options.length > 0 && (
+        <>
+          <div className="section-title">Или своё время в день</div>
+          <div className="pace-grid">
+            {c.minute_options.map((o) => (
+              <button
+                key={o.minutes}
+                className={`pace-chip${choice?.kind === "minutes" && choice.minutes === o.minutes ? " on" : ""}`}
+                onClick={() => pick({ kind: "minutes", minutes: o.minutes })}
+              >
+                <b>{o.minutes} мин</b>
+                <span>{fmtDays(o.days)}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      {c.custom && c.chapters && (
+        <button className={`option mt-12${choice?.kind === "chapter" ? " on" : ""}`} onClick={() => pick({ kind: "chapter" })}>
+          <span className="radio" />
+          <div className="grow">
+            <b>Глава в день</b>
+            <div className="small muted">{fmtDays(c.chapters.days)}, от {c.chapters.min_minutes} до {c.chapters.max_minutes} мин — каждый день целая глава</div>
+          </div>
+        </button>
+      )}
+      {c.custom && start && (
+        <button
+          className={`option mt-8${choice?.kind === "date" ? " on" : ""}`}
+          onClick={() => choice?.kind !== "date" && pick({ kind: "date", date: addDaysIso(start, 29) })}
+        >
+          <span className="radio" />
+          <div className="grow">
+            <b>Дочитать к дате</b>
+            <div className="small muted">К встрече клуба, экзамену или отпуску</div>
+            {choice?.kind === "date" && (
+              <>
+                <input className="input mt-8" type="date" value={choice.date} min={start} onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => setChoice({ kind: "date", date: e.target.value })} />
+                {dateDays !== null && (
+                  <div className="small mt-8" style={dateBad ? { color: "var(--accent-text)" } : undefined}>
+                    {dateBad
+                      ? `Нужно от ${c.min_days} до ${c.max_days} дней`
+                      : `${fmtDays(dateDays)} · ≈ ${Math.max(1, Math.round(c.total_minutes / dateDays))} мин в день`}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </button>
+      )}
+
       <button
         className="btn primary block mt-16"
-        disabled={!days || busy}
+        disabled={!choice || busy || dateBad}
         onClick={async () => {
+          if (!choice) return;
           setBusy(true);
           try {
-            const r = await api.post<{ start: string | null; awaiting_payment: boolean }>("/book/plan", { days });
+            const body = choice.kind === "days" ? { days: choice.days } : choice.kind === "minutes" ? { minutes: choice.minutes }
+              : choice.kind === "chapter" ? { by_chapter: true } : { finish: choice.date };
+            const r = await api.post<{ start: string | null; awaiting_payment: boolean }>("/book/plan", body);
             toast(r.start ? `План готов. Старт — ${dayMonth(r.start)}` : "План готов");
             onConfirmed(r.awaiting_payment);
           } catch (e) {
@@ -241,9 +307,15 @@ function PlanPicker({ onConfirmed }: { onConfirmed: (awaitingPayment: boolean) =
       >
         Подтвердить план
       </button>
-      <p className="tiny muted center mt-12">Нагрузка — до 20 страниц в день. Лучше всего держится 10–12.</p>
+      <p className="tiny muted center mt-12">Лучше всего держится 15–20 минут в день. Темп можно поменять в любой момент.</p>
     </>
   );
+}
+
+function addDaysIso(iso: string, n: number): string {
+  const d = parseDate(iso);
+  d.setDate(d.getDate() + n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function PlanSummary({ data, onReplan, onReplace }: { data: BookState; onReplan: () => void; onReplace: () => void }) {
@@ -265,8 +337,9 @@ function PlanSummary({ data, onReplan, onReplace }: { data: BookState; onReplan:
           загрузи его, и проверка станет полной, со сверкой с текстом.
         </p>
       )}
-      <div className="btn-row mt-16">
-        <button className="btn secondary" onClick={onReplace}>{data.book?.source === "shared" ? "Загрузить свой файл" : "Заменить книгу"}</button>
+      <button className="btn secondary block mt-16" onClick={() => nav.push({ name: "pace" })}>Свой темп: минуты в день, пауза</button>
+      <div className="btn-row mt-8">
+        <button className="btn ghost" onClick={onReplace}>{data.book?.source === "shared" ? "Загрузить свой файл" : "Заменить книгу"}</button>
         <button
           className="btn ghost"
           disabled={busy}

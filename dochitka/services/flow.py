@@ -79,7 +79,8 @@ def verdict_text(out: RetellOutcome) -> str:
     if out.status == "accepted":
         return texts.accepted(out.reply, out.question, out.streak, out.streak_grew, verified=out.verified,
                               partner_name=out.partner_name, partner_done=out.partner_done,
-                              pair_streak=out.pair_streak, can_more=out.can_submit_more, next_title=out.next_title)
+                              pair_streak=out.pair_streak, can_more=out.can_submit_more, next_title=out.next_title,
+                              can_read_more=out.can_read_more, behind=out.behind)
     if out.status == "clarify":
         return texts.clarify(out.reply, out.question)
     if out.status == "rejected":

@@ -141,7 +141,7 @@ export interface WeekDay {
   date: string;
   weekday: string;
   day: number;
-  state: "done" | "frozen" | "missed" | "today" | "future" | "none";
+  state: "done" | "frozen" | "missed" | "ahead" | "today" | "future" | "none";
   is_today: boolean;
   plan_day: number | null;
 }
@@ -163,6 +163,11 @@ export interface Today {
   accepted_today: number;
   limit: number;
   catching_up: boolean;
+  extra: "" | "more" | "ahead";
+  behind: number;
+  ahead: number;
+  can_read_more: boolean;
+  can_split: boolean;
   open_retelling: { id: number; verdict: string; reply: string | null; question: string | null } | null;
   starts_on: string | null;
   deadline: string | null;
@@ -191,6 +196,9 @@ export interface RetellResult {
   finished: boolean;
   verified: boolean;
   can_submit_more: boolean;
+  can_read_more: boolean;
+  behind: number;
+  ahead: number;
   next_title: string | null;
   message: string | null;
   heard?: string;
@@ -204,14 +212,16 @@ export interface RunData {
   finish?: string | null;
   deadline?: string | null;
   today_n?: number | null;
-  days: { n: number; date: string | null; state: string; grace: boolean }[];
-  stats?: { done: number; segments_done: number; streak: number; freezes_left: number };
+  days: { n: number; date: string | null; state: string; grace: boolean; plan_day: number | null }[];
+  stats?: { done: number; segments_done: number; streak: number; freezes_left: number; behind: number; ahead: number };
 }
 
 export interface RunDay {
   n: number;
   date: string;
   state: string | null;
+  plan_day: number | null;
+  segments_today: number;
   segment: SegBrief | null;
   retelling: { verdict: string; question: string | null; verified: boolean; source: string } | null;
 }
@@ -292,6 +302,44 @@ export interface PlanOption {
   minutes_per_day: number;
   recommended: boolean;
   warning: string | null;
+}
+
+export interface PlanChoices {
+  options: PlanOption[];
+  total_minutes: number;
+  custom: boolean;
+  minute_options: { minutes: number; days: number }[];
+  chapters: { days: number; min_minutes: number; max_minutes: number } | null;
+  min_days: number;
+  max_days: number;
+  expected_start: string | null;
+}
+
+export interface PaceInfo {
+  plan_days: number;
+  done: number;
+  left: number;
+  paper: boolean;
+  minutes_left: number;
+  minutes_per_day: number;
+  first_day: string;
+  finish: string | null;
+  plan_finish: string | null;
+  deadline: string | null;
+  behind: number;
+  ahead: number;
+  started: boolean;
+  can_pause: boolean;
+  minute_options: { minutes: number; days: number; finish: string }[];
+  pause_options: { days: number; finish: string }[];
+  chapters: { days: number; min_minutes: number; max_minutes: number; finish: string } | null;
+  pair: { name: string } | null;
+  club: { title: string; meet_date: string | null } | null;
+  today: {
+    segment: SegBrief | null;
+    partial: { quarter: number; label: string; page?: number }[];
+    has_next: boolean;
+  };
 }
 
 export interface BookState {

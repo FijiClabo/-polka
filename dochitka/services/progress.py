@@ -39,6 +39,16 @@ class DayView:
     freezes_left: int = 0
     catching_up: bool = False
     today_result: str | None = None
+    # extra: "" — отрезок дня; "more" — сегодняшний уже сдан, человек читает дальше; "ahead" — сегодня по плану
+    # ничего не нужно (всё сдано заранее), открыт следующий отрезок
+    extra: str = ""
+    behind: int = 0  # сколько отрезков по плану не сдано, включая сегодняшний
+    ahead: int = 0  # на сколько отрезков впереди плана
+
+    @property
+    def can_read_more(self) -> bool:
+        """День сдан, но можно пересказать ещё отрезок: прочитано больше или догоняем."""
+        return self.state == "done_today" and self.next_segment is not None and rules.can_submit_more_today(self.accepted_today)
 
     @property
     def done_today(self) -> bool:
@@ -139,27 +149,37 @@ async def load_view(session: AsyncSession, user: User, enr: Enrollment | None) -
         )
     )
     v.accepted_today = len({r.segment_id for r in today_rows if r.verdict == "accepted"})
-    v.limit = rules.daily_limit(plan_day, enr.plan_days)
+    v.limit = rules.MAX_SEGMENTS_PER_DAY
     tr = await session.scalar(select(DayResult.result).where(DayResult.enrollment_id == enr.id, DayResult.user_day == v.today))
     v.today_result = tr
 
-    next_day = rules.next_segment_day(set(v.accepted), enr.plan_days, plan_day)
-    if next_day is None:
-        if rules.all_segments_done(set(v.accepted), enr.plan_days):
-            v.state = "finished"
-            return v
-        v.state = "done_today"
-        nd = min(plan_day + 1, enr.plan_days)
-        v.next_segment = await segment_by_day(session, book.id, nd) if plan_day < enr.plan_days else None
+    acc = set(v.accepted)
+    if rules.all_segments_done(acc, enr.plan_days):
+        v.state = "finished"
         return v
-    seg = await segment_by_day(session, book.id, next_day)
+    v.behind = rules.behind_by(acc, enr.plan_days, plan_day)
+    v.ahead = rules.ahead_by(acc, plan_day)
+    due = rules.next_segment_day(acc, enr.plan_days, plan_day)
+    nxt = rules.first_open_day(acc, enr.plan_days)
+    v.next_segment = await segment_by_day(session, book.id, nxt) if nxt else None
+    room = rules.can_submit_more_today(v.accepted_today)
+    if due is not None and v.accepted_today == 0:
+        seg = await segment_by_day(session, book.id, due)
+        v.catching_up = due < plan_day
+    elif room and v.accepted_today == 0:
+        seg, v.extra = v.next_segment, "ahead"  # по плану сегодня ничего, но можно читать дальше
+    elif room and (enr.more_day == v.today or due is not None):
+        # догоняем план — следующий открыт сразу; читать вперёд — по просьбе («Перескажу ещё один»)
+        seg, v.extra = v.next_segment, "more"
+        v.catching_up = due is not None
+    else:
+        v.state = "done_today"
+        return v
+    if seg is None:
+        v.state = "done_today"
+        return v
     v.segment = seg
-    v.catching_up = next_day < plan_day
-    if v.accepted_today >= v.limit:
-        v.state = "done_today"
-        v.next_segment = seg
-        return v
-    open_r = next((r for r in reversed(today_rows) if seg and r.segment_id == seg.id), None)
+    open_r = next((r for r in reversed(today_rows) if r.segment_id == seg.id), None)
     if open_r and open_r.verdict == "clarify":
         v.state = "clarify"
         v.open_retelling = open_r
@@ -187,6 +207,7 @@ async def close_pending_days(session: AsyncSession, enr: Enrollment, user: User,
     deadline = deadline_day(enr.plan_start_date, enr.plan_days, enr.run.grace_days)
     start = enr.plan_start_date if enr.last_closed_day is None else max(enr.last_closed_day + timedelta(days=1), enr.plan_start_date)
     d = start
+    when_accepted: dict[int, date] | None = None
     while d < today:
         if d > deadline:
             break
@@ -205,13 +226,20 @@ async def close_pending_days(session: AsyncSession, enr: Enrollment, user: User,
 
             for r in pending:
                 await force_accept_pending(session, r, enr, user, outbox)
+            when_accepted = None
         plan_day = plan_day_number(enr.plan_start_date, d)
         enr.freezes_left, enr.freezes_week_start = rules.refresh_freezes(
             enr.freezes_left, enr.freezes_week_start, plan_day, enr.freezes_per_week or 1
         )
         existing = await _day_result(session, enr.id, d)
         had_done = existing is not None and existing.result == rules.DONE
-        res = rules.close_day(had_done, enr.streak, enr.freezes_left)
+        banked = False
+        if not had_done:
+            if when_accepted is None:
+                when_accepted = {n: r.user_day for n, r in (await accepted_by_day(session, enr)).items()}
+            due = range(1, min(plan_day, enr.plan_days) + 1)
+            banked = all(n in when_accepted and when_accepted[n] < d for n in due)  # всё к этому дню сдано заранее
+        res = rules.close_day(had_done, enr.streak, enr.freezes_left, banked)
         if existing is None:
             session.add(DayResult(enrollment_id=enr.id, user_day=d, result=res.result))
         enr.streak = res.streak
@@ -220,6 +248,8 @@ async def close_pending_days(session: AsyncSession, enr: Enrollment, user: User,
         results.append(res.result)
         if res.result == rules.FROZEN:
             await log_event(session, "day_frozen", user.id, enr.run_id, day=d.isoformat())
+        elif res.result == rules.AHEAD:
+            await log_event(session, "day_ahead", user.id, enr.run_id, day=d.isoformat())
         elif res.result == rules.MISSED:
             await log_event(session, "day_missed", user.id, enr.run_id, day=d.isoformat())
             if res.streak_lost:

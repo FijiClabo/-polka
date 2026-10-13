@@ -8,7 +8,15 @@ from datetime import datetime, timedelta
 import pytest
 from aiogram import Bot
 from aiogram.client.session.base import BaseSession
-from aiogram.methods import GetFile, GetMe, SendDocument, SendMessage, SendPhoto, TelegramMethod
+from aiogram.methods import (
+    EditMessageReplyMarkup,
+    GetFile,
+    GetMe,
+    SendDocument,
+    SendMessage,
+    SendPhoto,
+    TelegramMethod,
+)
 from aiogram.types import CallbackQuery, Chat, Document, File, Message, Update, User
 from sqlalchemy import select
 
@@ -48,7 +56,8 @@ class MockSession(BaseSession):
 
     def last_markup_callbacks(self) -> list[str]:
         for m in reversed(self.sent):
-            if isinstance(m, SendMessage) and m.reply_markup is not None and hasattr(m.reply_markup, "inline_keyboard"):
+            if isinstance(m, (SendMessage, EditMessageReplyMarkup)) and m.reply_markup is not None \
+                    and hasattr(m.reply_markup, "inline_keyboard"):
                 return [b.callback_data for row in m.reply_markup.inline_keyboard for b in row if b.callback_data]
         return []
 
@@ -167,7 +176,15 @@ async def test_full_flow(env):
     await send_text(bot, dp, U, RETELL_OK)
     assert any("Засчитано" in t and "Стрик: <b>1</b>" in t for t in session.texts())
     await send_text(bot, dp, U, RETELL_OK)
-    assert "На сегодня хватит" in session.texts()[-1]
+    assert "Это пересказ следующего" in session.texts()[-1]  # день сдан — спрашиваем, а не гадаем
+    await press(bot, dp, U, "more:yes")
+    assert any("Засчитано" in t and "Стрик" not in t for t in session.texts()[-3:])  # засчитан заранее, стрик тот же
+
+    # свой темп: экран /pace и другое время в день
+    await send_text(bot, dp, U, "/pace")
+    assert "Темп сейчас" in session.texts()[-1]
+    await press(bot, dp, U, "pace:m:30")
+    assert "Готово: ≈" in session.texts()[-1] and "Сданное и стрик на месте" in session.texts()[-1]
 
     # социальное
     await send_text(bot, dp, U, "/friends")
@@ -213,9 +230,13 @@ async def test_paper_book_flow(env):
     assert "Нужно число" in session.texts()[-1]
     await send_text(bot, dp, 601, "480")
     assert "Выбери срок" in session.texts()[-1]
-    assert "plan:45" in session.last_markup_callbacks()
-    await press(bot, dp, 601, "plan:45")
-    assert any("План готов" in t for t in session.texts())
+    assert "plan:45" in session.last_markup_callbacks() and "pm:menu" in session.last_markup_callbacks()
+    await press(bot, dp, 601, "pm:menu")  # своё время в день
+    assert "pm:20" in session.last_markup_callbacks()
+    await press(bot, dp, 601, "pm:20")
+    assert any("План готов" in t and "32 дня" in t for t in session.texts())  # 480 стр. ≈ 624 мин: по 20 минут — 32 дня
+    await press(bot, dp, 601, "plan:45")  # план ещё не начался — срок можно выбрать заново
+    assert any("План готов" in t and "45 дней" in t for t in session.texts())
 
 
 async def test_self_serve_paid_flow(env, monkeypatch):

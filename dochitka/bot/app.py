@@ -22,6 +22,7 @@ from bot import (
     handlers_books,
     handlers_day,
     handlers_misc,
+    handlers_pace,
     handlers_pay,
     handlers_social,
     handlers_start,
@@ -34,6 +35,7 @@ log = logging.getLogger(__name__)
 USER_COMMANDS = [
     BotCommand(command="today", description="Отрезок на сегодня"),
     BotCommand(command="book", description="Моя книга"),
+    BotCommand(command="pace", description="Свой темп: минуты в день, пауза"),
     BotCommand(command="pair", description="Напарник и «читаем вместе»"),
     BotCommand(command="club", description="Книжный клуб"),
     BotCommand(command="friends", description="Друзья и личная ссылка"),
@@ -91,7 +93,7 @@ def create_dispatcher() -> Dispatcher:
     dp = Dispatcher(storage=MemoryStorage())
     routers = [
         errors_router, handlers_admin.router, handlers_pay.router, handlers_start.router, handlers_misc.router,
-        handlers_social.router, handlers_books.router,
+        handlers_social.router, handlers_books.router, handlers_pace.router,
         handlers_day.router,  # последним: ловит любой текст как пересказ
     ]
     for r in routers:

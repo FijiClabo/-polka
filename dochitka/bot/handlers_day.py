@@ -14,7 +14,8 @@ import texts
 from ai.stt import STTError, transcribe_audio
 from books.plan import anchors_of, segment_minutes, segment_place
 from bot.common import Flow, load_user
-from bot.ui import app_kb, flush, kb
+from bot.ui import flush, kb
+from core import rules
 from db.session import session_scope
 from services.common import Outbox
 from services.flow import submit_retelling, verdict_text
@@ -27,25 +28,42 @@ log = logging.getLogger(__name__)
 router = Router(name="day")
 
 
+def seg_text(seg, book) -> str:
+    """Блок отрезка: название, где он в книге, минуты и — у книги с текстом — первые и последние слова."""
+    paper = book is not None and book.source == "paper"
+    place = segment_place(seg.page_from, seg.page_to, seg.pos_from, seg.pos_to, paper)
+    minutes = segment_minutes(seg.word_count, seg.page_to - seg.page_from + 1, paper)
+    return texts.seg_block(seg.title, place, minutes, None if paper else anchors_of(seg.text, seg.start_words, seg.end_words))
+
+
 def today_text(v: DayView) -> str:
     seg = v.segment if v.state in ("to_read", "clarify", "checking") else v.next_segment
     if v.state == "done_today":
-        return texts.state_message("done_today", next_title=seg.title if seg else None)
+        text = texts.state_message("done_today", next_title=seg.title if seg else None)
+        if v.can_read_more:
+            text += "\n\nПрочитано больше — нажми «Перескажу ещё один»."
+        return text
     if seg is None:
         return texts.state_message(v.state, start=v.starts_on)
     paper = v.book is not None and v.book.source == "paper"
-    place = segment_place(seg.page_from, seg.page_to, seg.pos_from, seg.pos_to, paper)
-    minutes = segment_minutes(seg.word_count, seg.page_to - seg.page_from + 1, paper)
-    head = f"День {v.plan_day} из {v.plan_days}"
-    if v.catching_up:
-        head += " · догоняем вчерашний отрезок"
-    text = f"{head}\n{texts.seg_block(seg.title, place, minutes, None if paper else anchors_of(seg.text, seg.start_words, seg.end_words))}"
+    block = seg_text(seg, v.book)
+    if v.extra == "ahead" and v.state == "to_read":
+        return texts.morning_ahead(v.plan_day, v.plan_days, block, v.ahead, paper)
+    if v.extra == "more":
+        head = "Следующий отрезок" + (" · догоняем план" if v.catching_up else " · заранее")
+    else:
+        head = f"День {v.plan_day} из {v.plan_days}"
+        if v.catching_up:
+            head += " · догоняем вчерашний отрезок"
+    text = f"{head}\n{block}"
     if v.state == "clarify" and v.open_retelling is not None:
         text += f"\n\nЖду ответ на вопрос: <b>{texts.e(v.open_retelling.ai_question or '')}</b>"
     elif v.state == "checking":
         text += "\n\n" + texts.CHECKING
     else:
         text += "\n\n" + texts.retell_hint(paper)
+        if v.behind > 1 and not v.extra:
+            text += "\n\n" + texts.behind_line(v.behind)
     return text
 
 
@@ -54,6 +72,12 @@ def today_kb(v: DayView):
     rows = []
     if seg is not None and v.book is not None and v.book.has_text and v.state in ("to_read", "clarify"):
         rows.append([{"text": "Читать отрезок", "webapp": f"read?d={seg.day_number}"}])
+    if v.state == "to_read" and not v.extra and seg is not None:
+        rows.append([{"text": "Прочитано не всё", "callback": "part:menu"}])
+    if v.can_read_more:
+        rows.append([{"text": "Перескажу ещё один", "callback": "more:on"}])
+    if v.behind > 1:
+        rows.append([{"text": "Свой темп", "callback": "pace:menu"}])
     rows.append([{"text": "Открыть приложение", "webapp": "today"}])
     return kb(rows)
 
@@ -88,9 +112,11 @@ async def reply_outcome(message: Message, out: RetellOutcome, bot: Bot, user_id:
     text = verdict_text(out)
     markup = None
     if out.status == "accepted" and not out.finished:
-        markup = app_kb("Открыть приложение")
-    elif out.status in ("rejected",):
-        markup = None
+        rows = []
+        if out.can_read_more and not out.can_submit_more:
+            rows.append([{"text": "Перескажу ещё один", "callback": "more:on"}])
+        rows.append([{"text": "Открыть приложение", "webapp": "today"}])
+        markup = kb(rows)
     await message.answer(text, reply_markup=markup)
     if out.finished:
         from bot.handlers_social import send_finish
@@ -99,11 +125,11 @@ async def reply_outcome(message: Message, out: RetellOutcome, bot: Bot, user_id:
 
 
 async def _retell(message: Message, bot: Bot, text: str, *, source: str, voice_id: str | None = None,
-                  duration: int | None = None) -> None:
+                  duration: int | None = None, state: FSMContext | None = None, tg_user=None) -> None:
     from bot.handlers_start import require_consent
 
     async with session_scope() as s:
-        user, _ = await load_user(s, message.from_user)
+        user, _ = await load_user(s, tg_user or message.from_user)
         uid = user.id
         if not await require_consent(message, user, s):
             return
@@ -113,6 +139,14 @@ async def _retell(message: Message, bot: Bot, text: str, *, source: str, voice_i
                                  voice_duration=duration, outbox=outbox)
     if out.status == "too_short" and source == "text":
         await message.answer(texts.too_short_hint(out.segment_title))
+    elif out.status == "done_today" and out.can_read_more and out.next_title and state is not None \
+            and rules.is_retell_attempt(text):
+        # день уже сдан, а пришёл ещё пересказ — скорее всего, прочитано больше. Спросим, а не будем гадать
+        await state.update_data(more_text=text, more_source=source, more_voice=voice_id, more_duration=duration)
+        await message.answer(texts.more_question(out.next_title), reply_markup=kb([
+            [{"text": "Да, засчитать заранее", "callback": "more:yes"}],
+            [{"text": "Нет", "callback": "more:no"}],
+        ]))
     else:
         await reply_outcome(message, out, bot, uid)
     await flush(bot, outbox)
@@ -158,7 +192,7 @@ async def handle_voice(message: Message, bot: Bot, state: FSMContext, trial: boo
 
         await trial_answer(message, state, text)
         return
-    await _retell(message, bot, text, source="voice", voice_id=media.file_id, duration=duration)
+    await _retell(message, bot, text, source="voice", voice_id=media.file_id, duration=duration, state=state)
 
 
 @router.message(Flow.trial, F.text)
@@ -171,6 +205,6 @@ async def msg_trial_text(message: Message, state: FSMContext) -> None:
 
 
 @router.message(StateFilter(None), F.text & ~F.text.startswith("/"))
-async def msg_text(message: Message, bot: Bot) -> None:
+async def msg_text(message: Message, bot: Bot, state: FSMContext) -> None:
     """Любой текст длиннее 50 знаков в активном забеге — попытка сдачи; ответ на уточнение — любой длины."""
-    await _retell(message, bot, message.text, source="text")
+    await _retell(message, bot, message.text, source="text", state=state)

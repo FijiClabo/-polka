@@ -196,6 +196,7 @@ class Enrollment(Base):
     club_id: Mapped[int | None] = mapped_column(ForeignKey("clubs.id", ondelete="SET NULL"), index=True)
     purchase_id: Mapped[int | None] = mapped_column(ForeignKey("purchases.id", ondelete="SET NULL"))
     last_closed_day: Mapped[date | None] = mapped_column(Date)
+    more_day: Mapped[date | None] = mapped_column(Date)  # день, когда человек попросил пересказать ещё отрезок
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     conspect_intro: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _now_col()

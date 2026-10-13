@@ -4,14 +4,29 @@ from __future__ import annotations
 
 import logging
 import secrets
+from datetime import date
 from pathlib import Path
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from books.parse import parse_book
-from books.plan import PlanError, PlanOption, build_paper_plan, build_plan, plan_options
-from books.types import BookParseError, ParsedBook, ParsedChapter
+from books.plan import (
+    MAX_PLAN_DAYS,
+    MIN_PLAN_DAYS,
+    MINUTE_CHOICES,
+    PlanError,
+    PlanOption,
+    build_chapter_plan,
+    build_paper_plan,
+    build_plan,
+    chapter_groups,
+    check_days,
+    days_for_minutes,
+    plan_options,
+    total_minutes,
+)
+from books.types import WORDS_PER_MINUTE, BookParseError, ParsedBook, ParsedChapter
 from core.rules import normalize_author, normalize_text
 from db.models import Book, Chapter, Enrollment, Retelling, Segment, User
 from services.common import log_event, now, today_for
@@ -159,8 +174,47 @@ def options_for(book: Book, enr: Enrollment) -> list[PlanOption]:
     )
 
 
-async def confirm_plan(session: AsyncSession, user: User, enr: Enrollment, plan_days: int) -> list[Segment]:
-    """Подтвердить срок и построить отрезки. До подтверждения хранятся только главы."""
+async def _parsed_chapters(session: AsyncSession, book: Book) -> list[ParsedChapter]:
+    chapters = list(await session.scalars(select(Chapter).where(Chapter.book_id == book.id).order_by(Chapter.order_no)))
+    return [ParsedChapter(c.title, c.text.split("\n") if c.text else []) for c in chapters]
+
+
+def custom_allowed(book: Book, enr: Enrollment) -> bool:
+    """Своё время в день и «глава в день» — везде, кроме бесплатного спринта (он ровно на неделю)."""
+    return enr.run.kind != "sprint" and book.source != "shared"
+
+
+async def plan_choices(session: AsyncSession, user: User, book: Book, enr: Enrollment) -> dict:
+    """Всё для выбора срока: готовые сроки, своё время в день, «глава в день»."""
+    paper = book.source == "paper"
+    total = total_minutes(book.total_pages, book.total_words, paper)
+    out: dict = {"options": [o.__dict__ for o in options_for(book, enr)], "total_minutes": total,
+                 "custom": custom_allowed(book, enr), "minute_options": [], "chapters": None,
+                 "min_days": MIN_PLAN_DAYS, "max_days": min(MAX_PLAN_DAYS, book.total_pages) if paper else MAX_PLAN_DAYS,
+                 "expected_start": None}
+    if not out["custom"]:
+        return out
+    start = plan_start_for(enr.run, user) or today_for(user)
+    out["expected_start"] = start.isoformat()
+    for m in MINUTE_CHOICES:
+        days = days_for_minutes(total, m)
+        if MIN_PLAN_DAYS <= days <= out["max_days"]:
+            out["minute_options"].append({"minutes": m, "days": days})
+    if not paper and book.chapters_count >= 3:
+        chapters = await _parsed_chapters(session, book)
+        groups = chapter_groups(chapters)
+        if MIN_PLAN_DAYS <= len(groups) <= MAX_PLAN_DAYS:
+            mins = [max(1, round(sum(chapters[i].word_count for i in g) / WORDS_PER_MINUTE)) for g in groups]
+            out["chapters"] = {"days": len(groups), "min_minutes": min(mins), "max_minutes": max(mins)}
+    return out
+
+
+async def confirm_plan(session: AsyncSession, user: User, enr: Enrollment, plan_days: int | None = None, *,
+                       minutes: int | None = None, finish: date | None = None, by_chapter: bool = False) -> list[Segment]:
+    """Подтвердить срок и построить отрезки. До подтверждения хранятся только главы.
+
+    Срок задаётся одним из способов: готовый вариант (plan_days), минуты в день, дата финиша или «глава в день».
+    """
     book = await session.get(Book, enr.book_id) if enr.book_id else None
     if book is None or book.parse_status != "ok":
         raise PlanError("Нет книги")
@@ -168,20 +222,38 @@ async def confirm_plan(session: AsyncSession, user: User, enr: Enrollment, plan_
         raise PlanError("Этот забег уже закончен — начни новый с этой или другой книгой")
     if enr.plan_start_date is not None and (today_for(user) > enr.plan_start_date or await has_progress(session, enr)):
         # старая кнопка в чате не должна пересобрать идущий план и обнулить прогресс
-        raise PlanError("План уже идёт — срок поменять нельзя. Чтобы начать заново, замени книгу")
+        raise PlanError("План уже идёт — поменять темп можно на экране «Темп» (/pace)")
     if book.source == "shared":
         raise PlanError("Это план напарника: срок такой же, как у него. Свой срок можно выбрать, если загрузить свой файл "
                         "книги или добавить её без файла.")
-    allowed = {o.days for o in options_for(book, enr)}
-    if plan_days not in allowed:
+    paper = book.source == "paper"
+    custom = minutes is not None or finish is not None or by_chapter
+    if custom and not custom_allowed(book, enr):
+        raise PlanError("Спринт идёт ровно неделю — своё время в день появится в обычном забеге")
+    if by_chapter and paper:
+        raise PlanError("«Глава в день» работает для книг с файлом")
+    mode = "days"
+    if minutes is not None:
+        plan_days, mode = check_days(days_for_minutes(total_minutes(book.total_pages, book.total_words, paper), minutes)), "minutes"
+    elif finish is not None:
+        start = plan_start_for(enr.run, user) or today_for(user)
+        plan_days, mode = check_days((finish - start).days + 1), "date"
+    elif by_chapter:
+        mode = "chapter"
+    elif plan_days not in {o.days for o in options_for(book, enr)}:
         raise PlanError("Такой срок для этой книги недоступен")
+    if paper and plan_days and plan_days > book.total_pages:
+        raise PlanError("Дней получилось больше, чем страниц — выбери больше минут в день")
     await session.execute(delete(Segment).where(Segment.book_id == book.id))
-    if book.source == "paper":
+    if paper:
         planned = build_paper_plan(book.total_pages, plan_days)
     else:
-        chapters = list(await session.scalars(select(Chapter).where(Chapter.book_id == book.id).order_by(Chapter.order_no)))
-        parsed = [ParsedChapter(c.title, c.text.split("\n") if c.text else []) for c in chapters]
-        planned = build_plan(parsed, plan_days, has_chapters=book.chapters_count > 0)
+        parsed = await _parsed_chapters(session, book)
+        if by_chapter:
+            planned = build_chapter_plan(parsed)
+            plan_days = check_days(len(planned))
+        else:
+            planned = build_plan(parsed, plan_days, has_chapters=book.chapters_count > 0)
     segs = []
     for p in planned:
         s = Segment(
@@ -204,7 +276,8 @@ async def confirm_plan(session: AsyncSession, user: User, enr: Enrollment, plan_
         enr.pair_code = random_code(10)
     await session.flush()
     ppd = round(book.total_pages / plan_days, 1)
-    await log_event(session, "plan_confirmed", user.id, enr.run_id, days=plan_days, pages_per_day=ppd)
+    await log_event(session, "plan_confirmed", user.id, enr.run_id, days=plan_days, pages_per_day=ppd, mode=mode,
+                    minutes=minutes)
     return segs
 
 

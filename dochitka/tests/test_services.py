@@ -131,8 +131,13 @@ async def test_catch_up_yesterday_and_comeback(world):
     assert res.status == "accepted"
     assert res.day_number == 3  # догоняем самый ранний несданный
     assert "comeback" in res.achievements
+    assert res.can_submit_more  # отстаём — следующий открыт сразу
     res2, _ = await submit(ids["a"])
-    assert res2.status == "done_today"
+    assert res2.status == "accepted" and res2.day_number == 4 and not res2.streak_grew
+    res3, _ = await submit(ids["a"])
+    assert res3.day_number == 5 and not res3.can_submit_more and res3.can_read_more
+    res4, _ = await submit(ids["a"])
+    assert res4.status == "done_today"  # план догнан: читать вперёд — только по просьбе
 
 
 async def test_day_boundary_4am(world):

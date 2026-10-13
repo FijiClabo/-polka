@@ -12,6 +12,7 @@ const STATE_BADGE: Record<string, [string, string]> = {
   done: ["ok", "засчитан"],
   frozen: ["frozen", "заморозка"],
   missed: ["missed", "пропущен"],
+  ahead: ["ok", "сдан заранее"],
   today: ["accent", "сегодня"],
 };
 
@@ -55,10 +56,10 @@ export default function Run() {
       <div className="stats3 mt-16">
         <div className="stat">
           <div className="v">
-            {st.done}
+            {st.segments_done}
             <small>/{data.plan_days}</small>
           </div>
-          <div className="l">{plural(st.done, "день сдан", "дня сдано", "дней сдано")}</div>
+          <div className="l">{plural(st.segments_done, "отрезок сдан", "отрезка сдано", "отрезков сдано")}</div>
         </div>
         <div className="stat">
           <div className="v" style={{ color: "var(--accent-1)" }}>{st.streak}</div>
@@ -81,12 +82,28 @@ export default function Run() {
                 setSel(d.n);
               }}
             >
-              {d.state === "frozen" ? <ISnow size={16} /> : d.n}
+              {d.state === "frozen" ? <ISnow size={16} /> : d.plan_day ?? "–"}
             </button>
           ))}
         </div>
-        {data.days.some((d) => d.grace) && <p className="tiny muted mt-12">Точки — дни отсрочки: можно догнать и сдавать по два отрезка в день.</p>}
+        {data.days.some((d) => d.grace) && <p className="tiny muted mt-12">Точки — дни отсрочки: можно догнать, сдавая по несколько отрезков в день.</p>}
+        {data.days.some((d) => d.state === "ahead") && <p className="tiny muted mt-8">Светлая галочка — отрезок дня был сдан заранее: день не сгорел.</p>}
       </div>
+
+      {data.state !== "finished" && data.state !== "expired" && (
+        <button className="card row" style={{ width: "100%", textAlign: "left" }} onClick={() => nav.push({ name: "pace" })}>
+          <div className="grow">
+            <b>Свой темп</b>
+            <div className="small muted">
+              {st.behind > 1
+                ? `Позади ${st.behind - 1} ${plural(st.behind - 1, "отрезок", "отрезка", "отрезков")} — пересобери план или поставь паузу`
+                : st.ahead > 0
+                  ? `Впереди плана на ${st.ahead} ${plural(st.ahead, "отрезок", "отрезка", "отрезков")}`
+                  : "Минуты в день, глава в день, к дате или пауза"}
+            </div>
+          </div>
+        </button>
+      )}
 
       {sel !== null && <DayDetail n={sel} />}
     </div>
@@ -103,7 +120,7 @@ function DayDetail({ n }: { n: number }) {
     <div className="card">
       <div className="row between">
         <b>
-          День {n}
+          {data.plan_day ? `День ${data.plan_day}` : "Вне плана"}
           {data.segment ? ` · ${data.segment.title}` : ""}
         </b>
         {badge && <span className={`badge ${badge[0]}`}>{badge[1]}</span>}
@@ -115,7 +132,7 @@ function DayDetail({ n }: { n: number }) {
             {r.verdict === "accepted" ? <span className="check-mini"><ICheck size={14} /></span> : <span className="flame-avatar" style={{ width: 22, height: 22 }}><IFlameSolid size={12} /></span>}
             <span>
               {r.verdict === "accepted"
-                ? `Пересказ засчитан${r.source === "voice" ? " · голосом" : " · текстом"}`
+                ? `Пересказ засчитан${r.source === "voice" ? " · голосом" : " · текстом"}${data.segments_today > 1 ? ` · за день ${data.segments_today} ${plural(data.segments_today, "отрезок", "отрезка", "отрезков")}` : ""}`
                 : r.verdict === "clarify"
                   ? "Ждём ответ на уточняющий вопрос"
                   : r.verdict === "rejected"
@@ -138,8 +155,12 @@ function DayDetail({ n }: { n: number }) {
         <p className="small muted mt-8">
           {data.state === "frozen"
             ? "Этот день прикрыла заморозка — стрик не сгорел."
+            : data.state === "ahead"
+              ? "Отрезок этого дня был сдан заранее — день не сгорел, стрик цел."
+              : !data.plan_day
+                ? "Пауза или сдвиг плана — этот день не считается."
             : data.state === "missed"
-              ? "Пересказа не было. Отрезок можно догнать — он остаётся первым в очереди."
+              ? "Пересказа не было. Отрезок можно догнать — он остаётся первым в очереди, или пересобрать план в «Свой темп»."
               : data.segment
                 ? `${data.segment.place} · ≈ ${data.segment.minutes} мин`
                 : "Этот день ещё впереди."}

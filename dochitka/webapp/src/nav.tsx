@@ -14,7 +14,8 @@ export type RouteName =
   | "finish"
   | "pay"
   | "admin"
-  | "club";
+  | "club"
+  | "pace";
 
 export interface Route {
   name: RouteName;

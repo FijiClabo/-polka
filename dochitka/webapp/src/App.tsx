@@ -10,6 +10,7 @@ import Consent from "./screens/Consent";
 import Finish from "./screens/Finish";
 import FriendCard from "./screens/FriendCard";
 import Friends from "./screens/Friends";
+import Pace from "./screens/Pace";
 import Pay from "./screens/Pay";
 import Profile from "./screens/Profile";
 import Read from "./screens/Read";
@@ -23,7 +24,7 @@ import { inTelegram, initTelegram, onThemeChange, paintChrome, setBackButton, se
 function initialRoute(): Route {
   const p = startParams();
   const s = p.get("s") || "today";
-  const known = ["today", "run", "friends", "shelf", "read", "retell", "profile", "book", "finish", "pay", "admin", "club"];
+  const known = ["today", "run", "friends", "shelf", "read", "retell", "profile", "book", "finish", "pay", "admin", "club", "pace"];
   if (!known.includes(s)) return { name: "today" };
   const params: Record<string, string> = {};
   p.forEach((v, k) => {
@@ -146,6 +147,7 @@ export default function App() {
     case "pay": screen = <Pay />; break;
     case "admin": screen = me.user.is_admin ? <Admin /> : <Today />; break;
     case "club": screen = <Club />; break;
+    case "pace": screen = <Pace focus={route.params?.focus ? String(route.params.focus) : undefined} />; break;
     default: screen = <Today />;
   }
 

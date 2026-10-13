@@ -158,22 +158,44 @@ function MainCard({ data }: { data: TodayData }) {
             </>
           ) : s === "done_today" ? (
             <>
-              <div className="eyebrow" style={{ color: "var(--green-text)" }}>Сегодня сдано</div>
-              <div className="seg-title">{seg ? `Завтра: ${seg.title}` : "Все отрезки на сегодня сданы"}</div>
+              <div className="eyebrow" style={{ color: "var(--green-text)" }}>
+                Сегодня сдано{data.accepted_today > 1 ? ` · ${data.accepted_today} ${plural(data.accepted_today, "отрезок", "отрезка", "отрезков")}` : ""}
+              </div>
+              <div className="seg-title">{seg ? `Дальше: ${seg.title}` : "Все отрезки на сегодня сданы"}</div>
               {seg && <div className="meta">{seg.place}</div>}
+            </>
+          ) : data.extra === "ahead" && s === "to_read" ? (
+            <>
+              <div className="eyebrow" style={{ color: "var(--green-text)" }}>Сегодня можно отдохнуть</div>
+              <div className="seg-title">{seg?.title}</div>
+              <div className="meta">
+                Отрезок дня сдан заранее{data.ahead > 0 ? ` и ещё ${data.ahead} вперёд` : ""}. Читаешь дальше — перескажи этот, засчитаю заранее.
+              </div>
+              {seg && (
+                <div className="chips">
+                  <span className="chip">{seg.place}</span>
+                  <span className="chip">≈ {seg.minutes} мин</span>
+                </div>
+              )}
             </>
           ) : (
             <>
               <div className="eyebrow">
-                День {data.plan_day! > (data.plan_days || 0) ? `${data.plan_day} · отсрочка` : `${data.plan_day} из ${data.plan_days}`}
+                {data.extra === "more"
+                  ? data.catching_up ? "Догоняем план · следующий отрезок" : "Следующий отрезок · заранее"
+                  : `День ${data.plan_day! > (data.plan_days || 0) ? `${data.plan_day} · отсрочка` : `${data.plan_day} из ${data.plan_days}`}`}
               </div>
               <div className="seg-title">{seg?.title}</div>
-              {seg && <div className="meta">{seg.place}</div>}
+              {seg && seg.place !== seg.title && <div className="meta">{seg.place}</div>}
               {seg && (
                 <div className="chips">
                   <span className="chip">≈ {seg.minutes} мин</span>
                   {paper && <span className="chip">{seg.pages} стр.</span>}
-                  {data.catching_up && <span className="chip" style={{ color: "var(--accent-text)" }}>догоняем</span>}
+                  {data.catching_up && !data.extra && (
+                    <span className="chip" style={{ color: "var(--accent-text)" }}>
+                      {data.behind > 1 ? `позади ${data.behind - 1}` : "догоняем"}
+                    </span>
+                  )}
                 </div>
               )}
             </>
@@ -224,10 +246,17 @@ function MainCard({ data }: { data: TodayData }) {
             </button>
           </>
         ) : s === "done_today" ? (
-          <>
-            <button className="btn secondary" onClick={() => nav.tab("run")}>Мой забег</button>
-            <ShareStreak streak={data.streak} />
-          </>
+          data.can_read_more ? (
+            <>
+              <MoreButton />
+              <ShareStreak streak={data.streak} primary={false} />
+            </>
+          ) : (
+            <>
+              <button className="btn secondary" onClick={() => nav.tab("run")}>Мой забег</button>
+              <ShareStreak streak={data.streak} />
+            </>
+          )
         ) : notStarted ? (
           <button className="btn secondary" onClick={() => nav.push({ name: "book" })}>Книга и план</button>
         ) : null}
@@ -244,10 +273,46 @@ function MainCard({ data }: { data: TodayData }) {
           <div className="small"><span className="muted">Конец:</span> «{seg.anchors[1]}»</div>
         </div>
       )}
-      {s === "to_read" && data.limit > 1 && (
-        <p className="tiny muted mt-12 center">Финишная прямая: сегодня можно сдать до {data.limit} отрезков.</p>
+      {s === "done_today" && data.can_read_more && (
+        <p className="tiny muted mt-12 center">Прочитано больше? Перескажи следующий — засчитаю заранее.</p>
+      )}
+      {(data.can_split || data.behind > 1) && (
+        <div className="row mt-12" style={{ justifyContent: "center", gap: 18 }}>
+          {data.can_split && (
+            <button className="link tiny" onClick={() => nav.push({ name: "pace", params: { focus: "partial" } })}>Прочитано не всё?</button>
+          )}
+          {data.behind > 1 && (
+            <button className="link tiny" onClick={() => nav.push({ name: "pace" })}>Свой темп</button>
+          )}
+        </div>
       )}
     </div>
+  );
+}
+
+function MoreButton() {
+  const nav = useNav();
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      className="btn primary"
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        try {
+          await api.post("/today/more");
+          haptic("light");
+          invalidate("/today");
+          nav.push({ name: "retell" });
+        } catch (e) {
+          toast((e as Error).message);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      Ещё отрезок
+    </button>
   );
 }
 
@@ -258,11 +323,11 @@ function startsIn(start: string, today: string): string {
   return `Через ${days(n)}. Первый отрезок придёт утром`;
 }
 
-function ShareStreak({ streak }: { streak: number }) {
+function ShareStreak({ streak, primary = true }: { streak: number; primary?: boolean }) {
   const [busy, setBusy] = useState(false);
   return (
     <button
-      className="btn primary"
+      className={`btn ${primary ? "primary" : "secondary"}`}
       disabled={busy || streak < 1}
       onClick={async () => {
         setBusy(true);
@@ -395,7 +460,7 @@ function WeekCard({ data }: { data: TodayData }) {
         {data.week.map((d) => (
           <div key={d.date}>
             <div className="wd">{d.weekday}</div>
-            <div className={`dot ${d.state}`}>{d.state === "done" ? <ICheck size={18} /> : d.state === "frozen" ? <ISnow size={16} /> : d.day}</div>
+            <div className={`dot ${d.state}`}>{d.state === "done" || d.state === "ahead" ? <ICheck size={18} /> : d.state === "frozen" ? <ISnow size={16} /> : d.day}</div>
           </div>
         ))}
       </div>

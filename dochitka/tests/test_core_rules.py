@@ -3,15 +3,18 @@ from datetime import date
 import pytest
 
 from core.rules import (
+    AHEAD,
     DONE,
     FROZEN,
     MISSED,
+    ahead_by,
     all_segments_done,
+    behind_by,
     can_nudge,
     can_submit_more_today,
     close_day,
-    daily_limit,
     finish_in_time,
+    first_open_day,
     friendship_key,
     is_past_deadline,
     is_retell_attempt,
@@ -49,21 +52,25 @@ def test_nothing_before_start():
     assert next_segment_day(set(), 30, 0) is None
 
 
-# ------------------------------------------------------------------ лимит в день
+# ------------------------------------------------------------------ сколько за день, впереди и позади
 
 
-def test_one_segment_per_day_normally():
-    assert daily_limit(10, 30) == 1
-    assert can_submit_more_today(0, 10, 30)
-    assert not can_submit_more_today(1, 10, 30)
+def test_up_to_five_segments_a_day():
+    assert can_submit_more_today(0)
+    assert can_submit_more_today(4)
+    assert not can_submit_more_today(5)
 
 
-def test_two_segments_in_last_days_and_grace():
-    assert daily_limit(28, 30) == 2
-    assert daily_limit(30, 30) == 2
-    assert daily_limit(32, 30) == 2
-    assert can_submit_more_today(1, 31, 30)
-    assert not can_submit_more_today(2, 31, 30)
+def test_first_open_day_goes_ahead_of_plan():
+    assert first_open_day({1, 2, 3, 4}, 30) == 5
+    assert first_open_day(set(range(1, 31)), 30) is None
+
+
+def test_behind_and_ahead():
+    assert behind_by({1, 2}, 30, 5) == 3  # не сданы 3, 4 и сегодняшний 5
+    assert behind_by({1, 2, 3, 4, 5}, 30, 5) == 0
+    assert ahead_by({1, 2, 3, 4, 5, 6, 7}, 5) == 2
+    assert behind_by(set(), 30, 40) == 30  # отсрочка: не больше числа отрезков
 
 
 # ------------------------------------------------------------------ закрытие дня
@@ -72,6 +79,16 @@ def test_two_segments_in_last_days_and_grace():
 def test_close_done_day_keeps_streak():
     r = close_day(True, 5, 1)
     assert (r.result, r.streak, r.freezes_left, r.streak_lost) == (DONE, 5, 1, False)
+
+
+def test_close_banked_day_keeps_streak_and_freeze():
+    r = close_day(False, 5, 1, banked=True)
+    assert (r.result, r.streak, r.freezes_left, r.streak_lost) == (AHEAD, 5, 1, False)
+
+
+def test_pair_streak_ahead_counts_as_frozen():
+    assert pair_streak_after_day(AHEAD, DONE, 4) == 4
+    assert pair_streak_after_day(AHEAD, MISSED, 4) == 0
 
 
 def test_close_missed_day_uses_freeze():

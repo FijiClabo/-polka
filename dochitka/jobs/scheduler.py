@@ -121,10 +121,21 @@ async def _morning_evening(s, enr: Enrollment, user: User, outbox: Outbox) -> No
         return
 
     if _due(user, user.morning_time) and view.state in ("to_read", "clarify") and view.segment:
+        if view.extra == "more":
+            return  # день уже сдан, человек сам открыл следующий — утром не беспокоим
         if await allow_initiative(s, user, "morning"):
             seg = view.segment
             book = view.book
             paper = book.source == "paper"
+            if view.extra == "ahead":
+                from bot.handlers_day import seg_text
+
+                rows = [[{"text": "Читать дальше", "webapp": f"read?d={seg.day_number}"}]] if book.has_text else []
+                rows.append([{"text": "Открыть приложение", "webapp": "today"}])
+                outbox.add(OutMsg(user.tg_id, texts.morning_ahead(view.plan_day, enr.plan_days, seg_text(seg, book),
+                                                                   view.ahead, paper), buttons=rows, kind="morning"))
+                await log_event(s, "segment_sent", user.id, enr.run_id, day=seg.day_number, ahead=True)
+                return
             minutes = segment_minutes(seg.word_count, seg.page_to - seg.page_from + 1, paper)
             yesterday = await s.scalar(
                 select(DayResult.result).where(DayResult.enrollment_id == enr.id, DayResult.user_day == today - timedelta(days=1))
@@ -137,6 +148,8 @@ async def _morning_evening(s, enr: Enrollment, user: User, outbox: Outbox) -> No
                 streak=enr.streak, partner=partner.display_name if partner else None, run_started=view.plan_day == 1,
                 anchors=None if paper else anchors_of(seg.text, seg.start_words, seg.end_words), paper=paper,
             )
+            if view.behind > 1:
+                text += "\n\n" + texts.behind_line(view.behind)
             rows = []
             if book.has_text:
                 rows.append([{"text": "Читать отрезок", "webapp": f"read?d={seg.day_number}"}])
@@ -145,15 +158,19 @@ async def _morning_evening(s, enr: Enrollment, user: User, outbox: Outbox) -> No
             await log_event(s, "segment_sent", user.id, enr.run_id, day=seg.day_number)
         return
 
-    if _due(user, user.evening_time) and view.state in ("to_read", "clarify") and not view.done_today:
+    if _due(user, user.evening_time) and view.state in ("to_read", "clarify") and not view.done_today \
+            and not view.extra:
         if await allow_initiative(s, user, "evening"):
             _, partner, _ = await get_pair_for(s, enr)
             p_done = False
             if partner:
                 st = await public_status(s, partner)
                 p_done = st.today == "done"
+            rows = [[{"text": "Открыть отрезок", "webapp": "today"}]]
+            if view.state == "to_read":
+                rows.append([{"text": "Прочитано не всё", "callback": "part:menu"}])
             outbox.add(OutMsg(user.tg_id, texts.evening(partner.display_name if partner else None, p_done),
-                              buttons=[[{"text": "Открыть отрезок", "webapp": "today"}]], kind="evening"))
+                              buttons=rows, kind="evening"))
 
 
 async def _sales(outbox: Outbox) -> None:

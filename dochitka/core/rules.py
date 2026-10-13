@@ -12,12 +12,13 @@ from datetime import date
 from core.days import deadline_day, week_index
 
 FREEZES_PER_WEEK = 1
-LAST_DAYS_DOUBLE = 3  # в последние N дней плана и в дни отсрочки можно сдавать по два отрезка
+MAX_SEGMENTS_PER_DAY = 5  # сколько отрезков можно сдать за день: свой, догоняя или вперёд по плану
 MIN_RETELL_CHARS = 50  # текст короче — обычное сообщение, а не попытка сдачи
 MAX_CLARIFY = 2  # максимум уточнений на одну сдачу
 MAX_ATTEMPTS_PER_HOUR = 10
 
 DONE, FROZEN, MISSED = "done", "frozen", "missed"
+AHEAD = "ahead"  # пересказа в этот день не было, но отрезок дня сдан заранее: план не отстаёт, стрик цел
 
 
 # --------------------------------------------------------------------------- отрезки
@@ -36,15 +37,26 @@ def next_segment_day(accepted_days: set[int], plan_days: int, current_plan_day: 
     return None
 
 
-def daily_limit(current_plan_day: int, plan_days: int) -> int:
-    """Сколько отрезков можно сдать за день: обычно один, в конце забега — два."""
-    if current_plan_day > plan_days - LAST_DAYS_DOUBLE:
-        return 2
-    return 1
+def first_open_day(accepted_days: set[int], plan_days: int) -> int | None:
+    """Следующий несданный отрезок по порядку — его можно прочитать заранее или им догнать план."""
+    for n in range(1, plan_days + 1):
+        if n not in accepted_days:
+            return n
+    return None
 
 
-def can_submit_more_today(accepted_today: int, current_plan_day: int, plan_days: int) -> bool:
-    return accepted_today < daily_limit(current_plan_day, plan_days)
+def behind_by(accepted_days: set[int], plan_days: int, current_plan_day: int) -> int:
+    """Сколько отрезков по плану уже пора было сдать (включая сегодняшний), а они не сданы."""
+    return sum(1 for n in range(1, min(current_plan_day, plan_days) + 1) if n not in accepted_days)
+
+
+def ahead_by(accepted_days: set[int], current_plan_day: int) -> int:
+    """На сколько отрезков человек впереди плана."""
+    return sum(1 for n in accepted_days if n > current_plan_day)
+
+
+def can_submit_more_today(accepted_today: int) -> bool:
+    return accepted_today < MAX_SEGMENTS_PER_DAY
 
 
 # --------------------------------------------------------------------------- день и стрик
@@ -52,7 +64,7 @@ def can_submit_more_today(accepted_today: int, current_plan_day: int, plan_days:
 
 @dataclass(frozen=True)
 class DayClose:
-    result: str  # done | frozen | missed
+    result: str  # done | frozen | missed | ahead
     streak: int
     freezes_left: int
     streak_lost: bool  # стрик был больше нуля и сгорел
@@ -68,10 +80,15 @@ def refresh_freezes(
     return freezes_left, freezes_week
 
 
-def close_day(had_accepted: bool, streak: int, freezes_left: int) -> DayClose:
-    """Итог дня в 04:00. Стрик за сданный день уже увеличен в момент сдачи."""
+def close_day(had_accepted: bool, streak: int, freezes_left: int, banked: bool = False) -> DayClose:
+    """Итог дня в 04:00. Стрик за сданный день уже увеличен в момент сдачи.
+
+    banked — отрезок этого дня сдан заранее: день не сдан, но и не пропущен — заморозка не тратится, стрик цел.
+    """
     if had_accepted:
         return DayClose(DONE, streak, freezes_left, False)
+    if banked:
+        return DayClose(AHEAD, streak, freezes_left, False)
     if freezes_left > 0:
         return DayClose(FROZEN, streak, freezes_left - 1, False)
     return DayClose(MISSED, 0, freezes_left, streak > 0)
@@ -89,10 +106,11 @@ def pair_streak_after_day(result_a: str | None, result_b: str | None, streak: in
     """Общий стрик пары при закрытии дня.
 
     оба done → +1; кто-то frozen, второй done/frozen → без изменений; хоть один missed → 0.
-    None (у участника в этот день нет обязательств: план ещё не начался) считается как frozen.
+    None (у участника в этот день нет обязательств: план ещё не начался) и ahead (отрезок сдан заранее)
+    считаются как frozen.
     """
-    a = result_a or FROZEN
-    b = result_b or FROZEN
+    a = FROZEN if result_a in (None, AHEAD) else result_a
+    b = FROZEN if result_b in (None, AHEAD) else result_b
     if MISSED in (a, b):
         return 0
     if a == DONE and b == DONE:

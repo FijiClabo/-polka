@@ -119,8 +119,17 @@ export default function Retell() {
         <div className="state">
           <div className="ill">{t.state === "done_today" ? <CupIll /> : <BookStackIll />}</div>
           <h3>{t.state === "done_today" ? "На сегодня всё сдано" : "Сейчас пересказывать нечего"}</h3>
-          <p>{t.state === "done_today" ? (t.next_segment ? `Завтра: «${t.next_segment.title}».` : "Можно отдыхать.") : "Загляни на главный экран — там видно, что дальше."}</p>
-          <button className="btn secondary" onClick={nav.back}>Назад</button>
+          <p>{t.state === "done_today" ? (t.next_segment ? `Дальше: «${t.next_segment.title}».` : "Можно отдыхать.") : "Загляни на главный экран — там видно, что дальше."}</p>
+          {t.can_read_more ? (
+            <div className="col" style={{ gap: 8 }}>
+              <button className="btn primary" onClick={async () => { await api.post("/today/more").catch(() => null); today.reload(); }}>
+                Перескажу ещё один
+              </button>
+              <button className="btn ghost" onClick={nav.back}>Назад</button>
+            </div>
+          ) : (
+            <button className="btn secondary" onClick={nav.back}>Назад</button>
+          )}
         </div>
       </div>
     );
@@ -141,7 +150,9 @@ export default function Retell() {
         <span className="flame-avatar">
           <IFlameSolid size={16} />
         </span>
-        <span className="small muted">{answering ? "Уточнение" : `Вопрос по отрезку · ${seg?.title ?? ""}`}</span>
+        <span className="small muted">
+          {answering ? "Уточнение" : `${t.extra === "more" || t.extra === "ahead" ? "Заранее" : "Вопрос по отрезку"} · ${seg?.title ?? ""}`}
+        </span>
       </div>
       <div className="prompt">{prompt}</div>
 
@@ -334,10 +345,23 @@ function ResultView({ r, onAgain }: { r: RetellResult; onAgain: () => void }) {
         ) : (
           <div className="col mt-16">
             {r.can_submit_more && (
-              <button className="btn secondary block" onClick={onAgain}>Сдать ещё один отрезок</button>
+              <button className="btn secondary block" onClick={onAgain}>
+                {r.behind ? "Догнать: следующий отрезок" : "Пересказать следующий"}
+              </button>
+            )}
+            {!r.can_submit_more && r.can_read_more && (
+              <button
+                className="btn secondary block"
+                onClick={async () => {
+                  await api.post("/today/more").catch(() => null);
+                  onAgain();
+                }}
+              >
+                Прочитано больше — перескажу ещё один
+              </button>
             )}
             <button className="btn primary block" onClick={() => nav.tab("today")}>Готово</button>
-            {r.next_title && !r.can_submit_more && <p className="tiny muted center">Завтра: «{r.next_title}»</p>}
+            {r.next_title && !r.can_submit_more && <p className="tiny muted center">Дальше: «{r.next_title}»</p>}
           </div>
         )}
       </div>

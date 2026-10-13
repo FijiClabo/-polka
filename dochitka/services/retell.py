@@ -56,7 +56,10 @@ class RetellOutcome:
     achievements: list[str] = field(default_factory=list)
     finished: bool = False
     verified: bool = True
-    can_submit_more: bool = False
+    can_submit_more: bool = False  # открыт следующий отрезок: можно сразу пересказать ещё
+    can_read_more: bool = False  # день сдан, но можно попросить ещё отрезок — прочитано больше или догоняем
+    behind: int = 0
+    ahead: int = 0
     next_title: str | None = None
 
 
@@ -70,7 +73,16 @@ async def build_check_input(session: AsyncSession, r: Retelling) -> CheckInput:
     summary = seg.summary if seg else None
     # «Читаем вместе»: у копии плана нет текста — берём краткие содержания отрезков исходной книги (не текст)
     summary_book_id = book.shared_from_id if (book and book.source == "shared" and book.shared_from_id) else (book.id if book else None)
-    if seg and summary_book_id:
+    if seg and summary_book_id and summary_book_id != book.id:
+        # у копии плана дни могли сдвинуться (свой темп, «прочитано не всё») — сопоставляем по месту в книге
+        eps = 1e-6
+        src = list(await session.scalars(
+            select(Segment).where(Segment.book_id == summary_book_id, Segment.summary.is_not(None)).order_by(Segment.pos_from)
+        ))
+        prev = [x.summary for x in src if x.pos_to <= seg.pos_from + eps]
+        cur = [x.summary for x in src if x.pos_from < seg.pos_to - eps and x.pos_to > seg.pos_from + eps]
+        summary = "\n".join(cur) or None
+    elif seg and summary_book_id:
         prev = list(
             await session.scalars(
                 select(Segment.summary)
@@ -78,10 +90,6 @@ async def build_check_input(session: AsyncSession, r: Retelling) -> CheckInput:
                 .order_by(Segment.day_number)
             )
         )
-        if summary_book_id != book.id:
-            summary = await session.scalar(
-                select(Segment.summary).where(Segment.book_id == summary_book_id, Segment.day_number == seg.day_number)
-            )
     turns = list(await session.scalars(select(DialogTurn).where(DialogTurn.retelling_id == r.id).order_by(DialogTurn.id)))
     dialog = [(t.role, t.text) for t in turns]
     last_user = next((t for t in reversed(dialog) if t[0] == "user"), ("user", r.raw_text))
@@ -116,7 +124,8 @@ async def start_submission(
     await close_pending_days(session, enr, user, outbox)
     view = await load_view(session, user, enr)
     if view.state in NOT_SUBMITTABLE:
-        out = RetellOutcome(view.state, streak=enr.streak)
+        out = RetellOutcome(view.state, streak=enr.streak, can_read_more=view.can_read_more, behind=view.behind,
+                            ahead=view.ahead)
         nxt = view.next_segment
         out.next_title = nxt.title if nxt else None
         return out
@@ -244,6 +253,9 @@ async def apply_verdict(
     base.partner_name = info.get("partner_name")
     base.partner_done = info.get("partner_done")
     base.can_submit_more = info.get("can_submit_more", False)
+    base.can_read_more = info.get("can_read_more", False)
+    base.behind = info.get("behind", 0)
+    base.ahead = info.get("ahead", 0)
     base.next_title = info.get("next_title")
     return base
 
@@ -349,7 +361,9 @@ async def on_accepted(session: AsyncSession, enr: Enrollment, user: User, r: Ret
         info["finished"] = True
     else:
         view = await load_view(session, user, enr)
-        info["can_submit_more"] = view.state in ("to_read",)
+        info["can_submit_more"] = view.state == "to_read"
+        info["can_read_more"] = view.can_read_more
+        info["behind"], info["ahead"] = view.behind, view.ahead
         nxt = view.segment if view.state == "to_read" else view.next_segment
         info["next_title"] = nxt.title if nxt else None
     return info

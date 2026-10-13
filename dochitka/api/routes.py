@@ -38,7 +38,7 @@ from services.books import (
     create_pending_book,
     delete_book,
     has_progress,
-    options_for,
+    plan_choices,
     store_upload,
     update_book_meta,
 )
@@ -132,7 +132,8 @@ def outcome_json(o: RetellOutcome) -> dict:
         "segment_title": o.segment_title, "day_number": o.day_number, "streak": o.streak,
         "streak_grew": o.streak_grew, "pair_streak": o.pair_streak, "partner_name": o.partner_name,
         "partner_done": o.partner_done, "achievements": o.achievements, "finished": o.finished,
-        "verified": o.verified, "can_submit_more": o.can_submit_more, "next_title": o.next_title,
+        "verified": o.verified, "can_submit_more": o.can_submit_more, "can_read_more": o.can_read_more,
+        "behind": o.behind, "ahead": o.ahead, "next_title": o.next_title,
         "message": _status_message(o),
     }
 
@@ -296,7 +297,9 @@ async def get_today(user: User = Depends(current_user), s: AsyncSession = Depend
         "freezes_left": v.freezes_left if enr else 0,
         "progress": round(v.progress, 3),
         "done_today": v.done_today, "accepted_today": v.accepted_today, "limit": v.limit,
-        "catching_up": v.catching_up,
+        "catching_up": v.catching_up, "extra": v.extra, "behind": v.behind, "ahead": v.ahead,
+        "can_read_more": v.can_read_more,
+        "can_split": v.state == "to_read" and not v.extra and v.segment is not None,
         "open_retelling": {
             "id": v.open_retelling.id, "verdict": v.open_retelling.verdict, "reply": v.open_retelling.ai_reply,
             "question": v.open_retelling.ai_question,
@@ -324,6 +327,14 @@ def _now():
 # --------------------------------------------------------------------------- забег
 
 
+async def _calendar_start(s: AsyncSession, enr: Enrollment) -> date | None:
+    """Первый день календаря забега: старт плана или самый ранний итог дня (если старт потом сдвигался)."""
+    if enr.plan_start_date is None:
+        return None
+    first = await s.scalar(select(func.min(DayResult.user_day)).where(DayResult.enrollment_id == enr.id))
+    return min(enr.plan_start_date, first) if first else enr.plan_start_date
+
+
 @router.get("/run")
 async def get_run(user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
     enr = await current_enrollment(s, user.id)
@@ -336,29 +347,42 @@ async def get_run(user: User = Depends(current_user), s: AsyncSession = Depends(
         results = {r.user_day: r for r in rows}
     today = v.today or today_for(user)
     days = []
-    total_days = enr.plan_days + (enr.run.grace_days if v.state in ("expired",) or (v.plan_day or 0) > enr.plan_days else 0)
-    for n in range(1, total_days + 1):
-        d = enr.plan_start_date + timedelta(days=n - 1) if enr.plan_start_date else None
-        r = results.get(d) if d else None
-        if r is not None:
-            st = r.result
-        elif d is None or d > today:
-            st = "future"
-        elif d == today:
-            st = "today"
-        else:
-            st = "missed"
-        days.append({"n": n, "date": d.isoformat() if d else None, "state": st, "grace": n > enr.plan_days})
-    done = sum(1 for x in days if x["state"] == "done")
+    base = await _calendar_start(s, enr)
     last_day = enr.plan_start_date + timedelta(days=enr.plan_days - 1) if enr.plan_start_date else None
+    if base is None:
+        for n in range(1, enr.plan_days + 1):
+            days.append({"n": n, "date": None, "state": "future", "grace": False, "plan_day": n})
+    else:
+        end = last_day
+        if v.state == "expired" or (v.plan_day or 0) > enr.plan_days:
+            end = last_day + timedelta(days=enr.run.grace_days)
+        n_days = (end - base).days + 1
+        for i in range(n_days):
+            d = base + timedelta(days=i)
+            r = results.get(d)
+            pd = plan_day_number(enr.plan_start_date, d)
+            if r is not None:
+                st = r.result
+            elif d > today:
+                st = "future"
+            elif d == today:
+                st = "today"
+            elif pd < 1:
+                st = "none"  # пауза или сдвиг старта: день вне плана
+            else:
+                st = "missed"
+            days.append({"n": i + 1, "date": d.isoformat(), "state": st, "grace": d > last_day,
+                         "plan_day": pd if pd >= 1 else None})
+    done = sum(1 for x in days if x["state"] == "done")
+    today_n = next((x["n"] for x in days if x["date"] == today.isoformat()), None)
     return {
         "state": v.state, "book": book_brief(v.book), "plan_days": enr.plan_days,
         "start": enr.plan_start_date.isoformat() if enr.plan_start_date else None,
         "finish": last_day.isoformat() if last_day else None,
         "deadline": v.deadline.isoformat() if v.deadline else None,
-        "today_n": v.plan_day, "days": days,
+        "today_n": today_n, "days": days,
         "stats": {"done": done, "segments_done": len(v.accepted), "streak": enr.streak,
-                  "freezes_left": effective_freezes(enr, v.plan_day)},
+                  "freezes_left": effective_freezes(enr, v.plan_day), "behind": v.behind, "ahead": v.ahead},
     }
 
 
@@ -367,7 +391,7 @@ async def get_run_day(n: int, user: User = Depends(current_user), s: AsyncSessio
     enr = await current_enrollment(s, user.id)
     if enr is None or not enr.plan_days or not enr.plan_start_date or enr.book_id is None:
         raise HTTPException(404, "Нет плана")
-    d = enr.plan_start_date + timedelta(days=n - 1)
+    d = await _calendar_start(s, enr) + timedelta(days=n - 1)
     book = await s.get(Book, enr.book_id)
     dr = await s.scalar(select(DayResult).where(DayResult.enrollment_id == enr.id, DayResult.user_day == d))
     rets = list(await s.scalars(
@@ -376,11 +400,12 @@ async def get_run_day(n: int, user: User = Depends(current_user), s: AsyncSessio
     accepted = [r for r in rets if r.verdict == "accepted"]
     shown = accepted[0] if accepted else (rets[-1] if rets else None)
     seg = await s.get(Segment, shown.segment_id) if shown and shown.segment_id else None
-    if seg is None:
-        seg = await s.scalar(select(Segment).where(Segment.book_id == book.id, Segment.day_number == min(n, enr.plan_days)))
+    pd = plan_day_number(enr.plan_start_date, d)
+    if seg is None and pd >= 1:
+        seg = await s.scalar(select(Segment).where(Segment.book_id == book.id, Segment.day_number == min(pd, enr.plan_days)))
     return {
-        "n": n, "date": d.isoformat(), "state": dr.result if dr else None,
-        "segment": seg_brief(seg, book),
+        "n": n, "date": d.isoformat(), "state": dr.result if dr else None, "plan_day": pd if pd >= 1 else None,
+        "segment": seg_brief(seg, book), "segments_today": len(accepted),
         # текст пересказа не хранится — только результат
         "retelling": {"verdict": shown.verdict, "verified": shown.verified, "source": shown.source,
                       "question": shown.ai_question if shown.verdict == "clarify" else None} if shown else None,
@@ -475,7 +500,10 @@ class PaperBook(BaseModel):
 
 
 class PlanBody(BaseModel):
-    days: int
+    days: int | None = None
+    minutes: int | None = Field(default=None, ge=5, le=180)
+    finish: date | None = None
+    by_chapter: bool = False
 
 
 async def _book_enrollment(s: AsyncSession, user: User) -> Enrollment:
@@ -721,8 +749,7 @@ async def get_plan_options(user: User = Depends(current_user), s: AsyncSession =
     book = await s.get(Book, enr.book_id) if enr and enr.book_id else None
     if book is None or book.parse_status != "ok":
         raise HTTPException(404, "Нет книги")
-    opts = options_for(book, enr)
-    return {"options": [o.__dict__ for o in opts], "book": book_brief(book), "run": run_brief(enr)}
+    return {**await plan_choices(s, user, book, enr), "book": book_brief(book), "run": run_brief(enr)}
 
 
 @router.post("/book/plan")
@@ -731,7 +758,7 @@ async def post_plan(body: PlanBody, user: User = Depends(need_consent), s: Async
     if enr is None or enr.book_id is None:
         raise HTTPException(404, "Нет книги")
     try:
-        await confirm_plan(s, user, enr, body.days)
+        await confirm_plan(s, user, enr, body.days, minutes=body.minutes, finish=body.finish, by_chapter=body.by_chapter)
     except PlanError as e:
         raise HTTPException(400, str(e)) from e
     return {"ok": True, "plan_days": enr.plan_days,
@@ -763,7 +790,8 @@ async def get_read(day_number: int, user: User = Depends(current_user), s: Async
         raise HTTPException(404, "Текст недоступен")
     accepted = await accepted_by_day(s, enr)
     current = plan_day_number(enr.plan_start_date, today_for(user)) if enr.plan_start_date else 0
-    allowed = day_number <= current or day_number in accepted or enr.status == "finished"
+    upto = max(current, max(accepted, default=0) + 1)  # следующий по порядку — можно читать заранее
+    allowed = day_number <= upto or day_number in accepted or enr.status == "finished"
     if not allowed or day_number < 1 or day_number > enr.plan_days:
         raise HTTPException(403, "Этот отрезок откроется в свой день")
     seg = await s.scalar(select(Segment).where(Segment.book_id == book.id, Segment.day_number == day_number))

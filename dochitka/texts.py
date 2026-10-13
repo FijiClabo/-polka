@@ -132,7 +132,7 @@ def book_replace_confirm(title: str) -> str:
 
 
 def plan_ready(title: str, days: int, start: date | None, ppd: float, minutes: int, *,
-               run_start: date | None = None, awaiting_payment: bool = False) -> str:
+               run_start: date | None = None, awaiting_payment: bool = False, by_chapter: bool = False) -> str:
     if start:
         when = f"Старт — {d(start)}."
     elif run_start:
@@ -142,7 +142,11 @@ def plan_ready(title: str, days: int, start: date | None, ppd: float, minutes: i
     else:
         when = "Старт — в день начала забега."
     ppd_s = f"{ppd:g}".replace(".", ",")
-    return f"План готов: «{e(title)}» за {days_word(days)}, примерно {ppd_s} стр. и {minutes} мин в день.\n{when}"
+    if by_chapter:
+        return (f"План готов: «{e(title)}» за {days_word(days)}, глава в день — в среднем {minutes} мин.\n{when}\n\n"
+                "Темп можно поменять в любой момент: /pace")
+    return (f"План готов: «{e(title)}» за {days_word(days)}, примерно {ppd_s} стр. и {minutes} мин в день.\n{when}\n\n"
+            "Темп можно поменять в любой момент: /pace")
 
 
 PAPER_ASK_TITLE = "Как называется книга?"
@@ -234,8 +238,86 @@ def morning(name: str, day_n: int, plan_days: int, title: str, place: str, minut
     return "\n\n".join(lines)
 
 
+def behind_line(behind: int) -> str:
+    """Отстаёт больше чем на сегодняшний отрезок — подсказать, как догнать."""
+    if behind < 2:
+        return ""
+    late = behind - 1
+    return (f"Позади {late} {plural(late, 'отрезок', 'отрезка', 'отрезков')}: можно сдавать подряд, сколько успеешь, "
+            "или /pace — пересобрать план под свой темп.")
+
+
+def morning_ahead(day_n: int, plan_days: int, block: str, ahead: int, paper: bool) -> str:
+    more = f" и ещё {ahead} вперёд" if ahead else ""
+    return (f"День {day_n} из {plan_days}. Отрезок на сегодня уже сдан заранее{more} — можно отдохнуть.\n\n"
+            f"Читаешь дальше? Следующий:\n{block}\n\n{retell_hint(paper)} Засчитаю заранее.")
+
+
+def more_question(next_title: str) -> str:
+    return (f"Сегодняшний отрезок уже сдан. Это пересказ следующего — «{e(next_title)}»? "
+            "Засчитаю его заранее.")
+
+
+def more_opened(block: str, paper: bool) -> str:
+    return f"Следующий отрезок открыт до конца дня:\n\n{block}\n\n{retell_hint(paper)}"
+
+
+MORE_CLOSED = "Сегодня больше отрезков не открыть: либо всё сдано, либо на сегодня их уже пять."
+PARTIAL_ASK = "Не беда. Сколько из сегодняшнего отрезка прочитано? Сегодня перескажешь только это."
+
+
+def partial_rest_ask(has_next: bool) -> str:
+    lines = ["Куда деть остаток?"]
+    if has_next:
+        lines.append("• К следующему отрезку — финиш не сдвинется, следующий станет чуть длиннее.")
+    lines.append("• Отдельным днём — план на день длиннее, финиш на день позже.")
+    return "\n".join(lines)
+
+
+def partial_done(block: str, rest: str, finish: date | None, paper: bool) -> str:
+    where = "к следующему отрезку" if rest == "tomorrow" else "отдельным днём"
+    fin = f" Финиш — {d(finish)}." if finish else ""
+    return f"Готово. Сегодня перескажи прочитанное:\n\n{block}\n\nОстаток — {where}.{fin}\n\n{retell_hint(paper)}"
+
+
+def pace_text(info: dict) -> str:
+    left = info.get("left") or 0
+    if not left:
+        return "Все отрезки уже сданы."
+    lines = [f"<b>Темп сейчас</b>: ≈ {info['minutes_per_day']} мин в день, осталось {left} "
+             f"{plural(left, 'отрезок', 'отрезка', 'отрезков')}, финиш — {d(date.fromisoformat(info['finish']))}."]
+    if info.get("behind", 0) > 1:
+        lines.append(f"Позади {info['behind'] - 1} {plural(info['behind'] - 1, 'отрезок', 'отрезка', 'отрезков')} — "
+                     "новый темп начнётся с первого несданного, без долгов.")
+    elif info.get("ahead"):
+        lines.append(f"Ты впереди плана на {info['ahead']} {plural(info['ahead'], 'отрезок', 'отрезка', 'отрезков')}.")
+    lines.append("Выбери, сколько минут в день читать дальше, — остаток книги перестроится. Сданные отрезки и стрик "
+                 "останутся на месте. Пауза сдвигает план целиком: дни паузы не сгорают.")
+    if info.get("pair"):
+        lines.append(f"Напарник ({e(info['pair']['name'])}) останется на своём плане — дни у вас разойдутся, "
+                     "но прогресс друг друга будет виден.")
+    club = info.get("club")
+    if club and club.get("meet_date"):
+        lines.append(f"Встреча клуба «{e(club['title'])}» — {d(date.fromisoformat(club['meet_date']))}: смотри, чтобы финиш был не позже.")
+    return "\n\n".join(lines)
+
+
+def pace_changed(info: dict) -> str:
+    left = info.get("left") or 0
+    if not left:
+        return "Готово."
+    return (f"Готово: ≈ {info['minutes_per_day']} мин в день, {left} {plural(left, 'отрезок', 'отрезка', 'отрезков')}, "
+            f"финиш — {d(date.fromisoformat(info['finish']))}. Сданное и стрик на месте.")
+
+
+def paused(days: int, finish: date) -> str:
+    return (f"Пауза на {days_word(days)}: план сдвинут, финиш — {d(finish)}. Эти дни не сгорят, "
+            "стрик и заморозки целы. Если захочется почитать раньше — следующий отрезок открыт.")
+
+
 def evening(partner_name: str | None, partner_done: bool) -> str:
-    base = "Сегодняшний отрезок ещё ждёт пересказа. Минуты хватит."
+    base = ("Сегодняшний отрезок ещё ждёт пересказа. Минуты хватит. Прочитано не всё — перескажи прочитанное, "
+            "остаток перенесём.")
     if partner_name and partner_done:
         base = f"{e(partner_name)}: день уже сдан. Твоя очередь — минуты хватит."
     return base
@@ -273,7 +355,7 @@ def heard(text: str) -> str:
 
 def accepted(reply: str, question: str | None, streak: int, streak_grew: bool, *, verified: bool,
              partner_name: str | None, partner_done: bool | None, pair_streak: int | None,
-             can_more: bool, next_title: str | None) -> str:
+             can_more: bool, next_title: str | None, can_read_more: bool = False, behind: int = 0) -> str:
     parts = [f"<b>Засчитано.</b> {e(reply)}"]
     if question:
         parts.append(f"<i>Подумать:</i> {e(question)}")
@@ -285,9 +367,15 @@ def accepted(reply: str, question: str | None, streak: int, streak_grew: bool, *
         else:
             parts.append(f"{e(partner_name)} получит весточку — теперь очередь напарника.")
     if can_more and next_title:
-        parts.append(f"Финишная прямая: сегодня можно сдать ещё один отрезок — «{e(next_title)}».")
+        if behind:
+            parts.append(f"Догоняем план: можно сразу сдать следующий — «{e(next_title)}».")
+        else:
+            parts.append(f"Можно сдать и следующий — «{e(next_title)}».")
     elif next_title:
-        parts.append(f"Завтра: «{e(next_title)}».")
+        line = f"Завтра: «{e(next_title)}»."
+        if can_read_more:
+            line += " Прочитано больше — нажми «Перескажу ещё один»."
+        parts.append(line)
     return "\n\n".join(parts)
 
 
@@ -335,8 +423,8 @@ def state_message(state: str, *, next_title: str | None = None, start: date | No
         "finished": "Книга дочитана. Она уже на полке.",
         "expired": "Срок забега вышел. Дочитать можно в следующем забеге — с этой же книгой или с другой.",
         "refunded": "Участие отменено. Будем рады видеть снова.",
-        "done_today": (f"На сегодня хватит — завтра следующий: «{e(next_title)}»." if next_title
-                       else "На сегодня хватит — завтра следующий отрезок."),
+        "done_today": (f"На сегодня всё сдано. Завтра: «{e(next_title)}»." if next_title
+                       else "На сегодня всё сдано."),
     }.get(state, "Загляни в приложение — там всё видно.")
 
 
@@ -366,10 +454,13 @@ def help_text() -> str:
         "• Утром приходит отрезок на день.\n"
         "• Прочитано — перескажи мне голосом или текстом (длиннее 50 знаков).\n"
         "• Засчитанный день = +1 к стрику. Раз в неделю — заморозка.\n"
-        "• Вчерашний отрезок можно догнать сегодня.\n\n"
+        "• Вчерашний отрезок можно догнать сегодня, прочитанное заранее — пересказать вперёд.\n"
+        "• Прочитано не всё — кнопка «Прочитано не всё»: перескажешь только прочитанное.\n"
+        "• Свой темп в любой момент: /pace — минуты в день, глава в день или пауза.\n\n"
         "<b>Команды</b>\n"
         "/today — отрезок на сегодня\n"
         "/book — моя книга\n"
+        "/pace — свой темп: минуты в день, пауза\n"
         "/pair — позвать друга читать вместе\n"
         "/club — книжный клуб\n"
         "/friends — друзья и личная ссылка\n"
