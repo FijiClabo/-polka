@@ -91,14 +91,28 @@ async def overview(s: AsyncSession) -> dict:
 
     # --- удержание: сколько дней сдал каждый человек (лучшее участие)
     rows = (await s.execute(
-        select(Enrollment.user_id, func.count(DayResult.id))
+        select(Enrollment.user_id, func.count(DayResult.id), Enrollment.pair_id, Enrollment.club_id)
         .join(DayResult, DayResult.enrollment_id == Enrollment.id)
         .where(DayResult.result == "done").group_by(Enrollment.user_id, Enrollment.id)
     )).all()
     best: dict[int, int] = {}
-    for uid, n in rows:
+    social: dict[int, bool] = {}  # читал ли человек с напарником или в клубе (хотя бы в одном забеге)
+    for uid, n, pair_id, club_id in rows:
         best[uid] = max(best.get(uid, 0), n)
+        social[uid] = social.get(uid, False) or bool(pair_id or club_id)
     retention = [(f"Сдали {k}+ {_days(k)}", sum(1 for v in best.values() if v >= k)) for k in (1, 3, 7, 14, 21)]
+    together_n = sum(1 for u in best if social.get(u))
+    solo_n = len(best) - together_n
+
+    def share(k: int, flag: bool) -> int:
+        base = together_n if flag else solo_n
+        hit = sum(1 for u, v in best.items() if v >= k and social.get(u, False) == flag)
+        return round(hit / base * 100) if base else 0
+
+    retention_split = {
+        "together": together_n, "solo": solo_n,
+        "rows": [{"title": f"{k}+ {_days(k)}", "together": share(k, True), "solo": share(k, False)} for k in (3, 7, 14, 21)],
+    }
     retention.append(("Дочитали книгу", await _users_with(s, "finish")))
 
     # --- продажи
@@ -138,6 +152,7 @@ async def overview(s: AsyncSession) -> dict:
         "access": {"subscriptions": subs_active, "credits": int(credits), "with_access": paid_users},
         "funnel": [{"title": t, "n": n} for t, n in funnel],
         "retention": [{"title": t, "n": n} for t, n in retention],
+        "retention_split": retention_split,
         "sales": sales, "arppu": arppu,
         "sources": sources, "promos": promos, "ai": ai,
         "daily": await daily(s, now),

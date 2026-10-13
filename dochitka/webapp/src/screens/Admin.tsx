@@ -85,6 +85,23 @@ function Stats({ d }: { d: AdminOverview }) {
         <p className="tiny muted mt-8">Сколько дней сдал человек в лучшем забеге. Процент — от сдавших хотя бы день.</p>
       </div>
 
+      <div className="section-title">Вместе или в одиночку</div>
+      <div className="card">
+        <table className="admin-table">
+          <thead>
+            <tr><th>Сдали</th><th>С другом или в клубе</th><th>Одни</th></tr>
+          </thead>
+          <tbody>
+            {d.retention_split.rows.map((r) => (
+              <tr key={r.title}><td>{r.title}</td><td>{r.together}%</td><td>{r.solo}%</td></tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="tiny muted mt-8">
+          Читали вместе: {d.retention_split.together}, одни: {d.retention_split.solo}. Главный вопрос пилота — держит ли «вместе» лучше.
+        </p>
+      </div>
+
       <div className="section-title">Продажи</div>
       <div className="card">
         <table className="admin-table">

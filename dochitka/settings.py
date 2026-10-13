@@ -69,7 +69,7 @@ class Settings(BaseSettings):
     # --- Оплата ---------------------------------------------------------------
     # Кнопка «Оплатить» в боте и мини-приложении ведёт на страницу оплаты ЮKassa (карта, СБП и др.).
     # Пока ключей нет — вместо кнопки показывается текст PAYMENT_INFO (оплата вручную, доступ — /grant).
-    price_run_rub: int = 690
+    price_run_rub: int = 490
     price_month_rub: int = 490
     price_year_rub: int = 3990
     yookassa_shop_id: str = ""  # ЮKassa → Интеграция → shopId

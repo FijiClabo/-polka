@@ -184,11 +184,22 @@ async def cb_plan(call: CallbackQuery, bot: Bot) -> None:
                                 opt.minutes_per_day if opt else 0, run_start=enr.run.start_date,
                                 awaiting_payment=enr.status == "invited")
         uid = user.id
+        invite = None
+        if enr.pair_id is None and enr.club_id is None:
+            from bot.ui import deep_link, share_link
+            from services.social import ensure_pair_code
+
+            link = deep_link(f"t_{await ensure_pair_code(s, enr)}")
+            invite = share_link(link, texts.together_invite_text(user.display_name, book.title, days))
+            title = book.title
     await call.message.edit_reply_markup(reply_markup=None)
     await call.message.answer(text)
+    if invite:
+        await call.message.answer(texts.together_nudge_after_plan(title),
+                                  reply_markup=kb([[{"text": "Позвать друга читать вместе", "url": invite}]]))
     from bot.handlers_start import send_status
 
-    await send_status(bot, call.message.chat.id, uid)
+    await send_status(bot, call.message.chat.id, uid)  # последним — следующий шаг: доступ или старт
     await flush(bot, outbox)
 
 

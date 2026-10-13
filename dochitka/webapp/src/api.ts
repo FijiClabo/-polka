@@ -389,6 +389,7 @@ export interface AdminOverview {
   access: { subscriptions: number; credits: number; with_access: number };
   funnel: { title: string; n: number }[];
   retention: { title: string; n: number }[];
+  retention_split: { together: number; solo: number; rows: { title: string; together: number; solo: number }[] };
   sales: { today: SalesSlice; week: SalesSlice; month: SalesSlice; total: SalesSlice };
   arppu: number;
   sources: { source: string; users: number; payers: number }[];

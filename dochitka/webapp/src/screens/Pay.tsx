@@ -198,18 +198,21 @@ export default function Pay() {
       {!renewing && (
         <PlanOption
           on={product === "run"} onPick={() => setProduct("run")}
-          title="Одна книга" price={p.run} sub="Забег до финиша: план, проверка пересказов, напарник"
+          title="Книга до финиша" price={p.run} sub="План до последней страницы, пересказ каждый день, чтение с другом или клубом"
           extra={perDay ? `≈ ${rub(perDay)} в день` : undefined}
         />
       )}
-      <PlanOption
-        on={product === "month"} onPick={() => setProduct("month")}
-        title="Месяц" price={p.month} suffix="за 30 дней"
-        sub={`Книга за книгой без доплат и ${data.freezes_sub} ${plural(data.freezes_sub, "заморозка", "заморозки", "заморозок")} в неделю`}
-      />
+      {/* месяц на витрине не показываем: для одной книги он путает. Остаётся для продления и промокодов */}
+      {(renewing || p.month.free) && (
+        <PlanOption
+          on={product === "month"} onPick={() => setProduct("month")}
+          title="Месяц" price={p.month} suffix="за 30 дней"
+          sub={`Книга за книгой без доплат и ${data.freezes_sub} ${plural(data.freezes_sub, "заморозка", "заморозки", "заморозок")} в неделю`}
+        />
+      )}
       <PlanOption
         on={product === "year"} onPick={() => setProduct("year")}
-        title="Год" price={p.year} suffix="за 365 дней" sub={`≈ ${rub(yearMonthly)} в месяц — дешевле всего`}
+        title="Год" price={p.year} suffix="за 365 дней" sub={`Книги без ограничений, ≈ ${rub(yearMonthly)} в месяц — для тех, кто читает много`}
         badge={yearMonthly < p.month.rub ? "выгодно" : undefined}
       />
 
