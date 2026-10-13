@@ -136,6 +136,10 @@ export function setSettingsButton(handler: (() => void) | null): void {
   } else sb.hide();
 }
 
+export function openTgProfile(username: string): void {
+  openTgLink(`https://t.me/${username}`);
+}
+
 export function openTgLink(url: string): void {
   if (tg) tg.openTelegramLink(url);
   else window.open(url, "_blank");

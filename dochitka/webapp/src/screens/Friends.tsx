@@ -6,7 +6,7 @@ import { Avatar, Empty, ErrorState, ScreenSkeleton, Skeleton, toast } from "../c
 import { firstName, nudgeToast, STATUS_TEXT } from "../format";
 import { invalidate, useApi } from "../hooks";
 import { useNav } from "../nav";
-import { confirmDialog, haptic, openTgLink } from "../tg";
+import { confirmDialog, haptic, openTgLink, openTgProfile } from "../tg";
 
 interface FriendsData {
   items: FriendStatus[];
@@ -153,6 +153,7 @@ function PairBlock({ data, reload }: { data: PairData; reload: () => void }) {
         <div className="person">
           <Avatar name={p.name} url={p.photo_url} size={64} seed={p.id} ring={pDone ? "green" : "grey"} />
           <div className="who">{firstName(p.name)}</div>
+          {p.tg && <button className="tg-link" onClick={() => openTgProfile(p.tg!)}>@{p.tg}</button>}
           <div className={`st${pDone ? " ok" : ""}`}>{pDone ? (p.done_at ? `сдано в ${p.done_at}` : "сдано") : STATUS_TEXT[p.today] || ""}</div>
         </div>
       </div>

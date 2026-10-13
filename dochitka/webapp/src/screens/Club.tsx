@@ -5,7 +5,7 @@ import { Avatar, Cover, ErrorState, ScreenSkeleton, toast } from "../components/
 import { dayMonth, days as fmtDays, daysUntil, firstName, plural, STATUS_TEXT } from "../format";
 import { invalidate, useApi } from "../hooks";
 import { useNav } from "../nav";
-import { confirmDialog, haptic, openTgLink } from "../tg";
+import { confirmDialog, haptic, openTgLink, openTgProfile } from "../tg";
 
 export default function Club() {
   const { data, error, loading, reload } = useApi<ClubState>("/club");
@@ -148,7 +148,7 @@ function ClubView({ club, reload }: { club: ClubData; reload: () => void }) {
         {club.members.map((m) => <MemberRow key={m.id} m={m} onChanged={reload} />)}
       </div>
       <p className="tiny muted mt-12">
-        Участники клуба видят имена, фото и прогресс друг друга. Пересказы и тексты книг никому не видны.
+        Участники клуба видят имена, фото, ссылки на Telegram и прогресс друг друга — фото и ссылку можно скрыть в профиле. Пересказы и тексты книг никому не видны.
       </p>
 
       <button
@@ -185,6 +185,9 @@ function MemberRow({ m, onChanged }: { m: ClubMember; onChanged: () => void }) {
           <b className="ellipsis">{m.is_me ? "Ты" : m.name}</b>
           {m.is_host && <span className="badge accent">ведущий</span>}
         </div>
+        {!m.is_me && m.tg && (
+          <button className="tg-link" onClick={() => openTgProfile(m.tg!)}>@{m.tg}</button>
+        )}
         <div className="sub ellipsis">
           {[m.plan_day && m.plan_days ? `день ${Math.min(m.plan_day, m.plan_days)} из ${m.plan_days}` : "план ещё не начат", status].filter(Boolean).join(" · ")}
         </div>

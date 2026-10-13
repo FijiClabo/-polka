@@ -49,6 +49,10 @@ class User(Base):
     first_name: Mapped[str] = mapped_column(String(128), default="")
     last_name: Mapped[str | None] = mapped_column(String(128))
     photo_url: Mapped[str | None] = mapped_column(String(512))
+    # как видят другие: telegram — фото профиля Telegram, custom — своё фото, none — без фото (буква)
+    avatar: Mapped[str] = mapped_column(String(16), default="telegram")
+    avatar_token: Mapped[str | None] = mapped_column(String(32))  # имя файла своего фото — случайное, не угадать
+    show_username: Mapped[bool] = mapped_column(Boolean, default=True)  # ссылка на Telegram
     language_code: Mapped[str | None] = mapped_column(String(16))
     timezone: Mapped[str] = mapped_column(String(64), default="Europe/Moscow")
     morning_time: Mapped[time] = mapped_column(Time, default=time(9, 0))

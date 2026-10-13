@@ -38,6 +38,7 @@ from services.runs import (
     sprint_used,
     start_sprint,
 )
+from services.users import who
 
 # --------------------------------------------------------------------------- дружба
 
@@ -79,7 +80,7 @@ async def add_friend_by_code(
         user.invited_by_id = inviter.id
     await log_event(session, "friend_added", user.id, kind="new" if is_new_user else "existing", inviter_id=inviter.id)
     if not inviter.bot_blocked:
-        outbox.add(OutMsg(inviter.tg_id, texts.friend_joined(user.display_name), kind="friend",
+        outbox.add(OutMsg(inviter.tg_id, texts.friend_joined(who(user)), kind="friend",
                           buttons=[[{"text": "Друзья", "webapp": "friends"}]]))
     return inviter
 
@@ -113,7 +114,7 @@ async def request_friend(session: AsyncSession, sender: User, target: User, outb
     if await _requested(session, sender.id, target.id, 1):
         return "requested"
     if not target.bot_blocked:
-        outbox.add(OutMsg(target.tg_id, texts.friend_request(sender.display_name), kind="friend",
+        outbox.add(OutMsg(target.tg_id, texts.friend_request(who(sender)), kind="friend",
                           buttons=[[{"text": "Принять", "callback": f"fr:ok:{sender.id}"}],
                                    [{"text": "Не сейчас", "callback": "fr:no"}]]))
     await log_event(session, "friend_request", sender.id, to=target.id)
@@ -137,7 +138,7 @@ async def accept_friend(session: AsyncSession, user: User, sender_id: int, outbo
         return "already"
     await log_event(session, "friend_added", user.id, kind="request", inviter_id=sender.id)
     if not sender.bot_blocked:
-        outbox.add(OutMsg(sender.tg_id, texts.friend_joined(user.display_name), kind="friend",
+        outbox.add(OutMsg(sender.tg_id, texts.friend_joined(who(user)), kind="friend",
                           buttons=[[{"text": "Друзья", "webapp": "friends"}]]))
     return "ok"
 
@@ -159,11 +160,15 @@ class PublicStatus:
     plan_days: int | None
     done_at: str | None = None
     progress: float = 0.0  # доля книги, которую уже прошёл человек
+    tg: str | None = None  # username в Telegram, если человек его не скрыл
 
 
 async def public_status(session: AsyncSession, user: User) -> PublicStatus:
     enr = await current_enrollment(session, user.id)
-    st = PublicStatus(user.id, user.display_name, user.photo_url, None, None, None, 0, "idle", None, None)
+    from services.users import avatar_url, public_tg
+
+    st = PublicStatus(user.id, user.display_name, avatar_url(user), None, None, None, 0, "idle", None, None,
+                      tg=public_tg(user))
     if enr is None:
         return st
     book = await session.get(Book, enr.book_id) if enr.book_id else None
@@ -328,7 +333,7 @@ async def join_pair_by_code(
     if pair is None:
         return "error", inviter
     pair.together = together
-    outbox.add(OutMsg(inviter.tg_id, texts.pair_joined(user.display_name), kind="pair",
+    outbox.add(OutMsg(inviter.tg_id, texts.pair_joined(who(user)), kind="pair",
                       buttons=[[{"text": "Напарник", "webapp": "friends"}]]))
     # в друзья напарник не добавляется: напарнику виден только прогресс, а друзьям — ещё книга и полка
     return "ok", inviter

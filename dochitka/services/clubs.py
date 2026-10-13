@@ -20,6 +20,7 @@ from services.progress import load_view
 from services.runs import OPEN_STATUSES, current_enrollment, ensure_enrollment
 from services.social import nudge, public_status
 from services.together import _plan_running, copy_plan, same_book, shareable_book
+from services.users import avatar_url, who
 
 MAX_MEMBERS = 300
 
@@ -105,7 +106,7 @@ async def join_club(session: AsyncSession, user: User, code: str, outbox: Outbox
         user.source = f"club:{club.code}"
     host = await session.get(User, club.host_user_id) if club.host_user_id else None
     if host is not None and not host.bot_blocked:
-        outbox.add(OutMsg(host.tg_id, texts.club_member_joined(user.display_name, club.title), kind="club",
+        outbox.add(OutMsg(host.tg_id, texts.club_member_joined(who(user), club.title), kind="club",
                           buttons=[[{"text": "Клуб", "webapp": "club"}]]))
     await log_event(session, "club_joined", user.id, enr.run_id, club=club.id)
     return "ok", club
@@ -125,7 +126,7 @@ async def members(session: AsyncSession, club: Club) -> list[Member]:
         seen.add(u.id)
         st = await public_status(session, u)
         view = await load_view(session, u, enr)  # прогресс — именно по книге клуба
-        out.append(Member(u.id, u.display_name, u.photo_url, view.progress, st.today, view.plan_day, enr.plan_days,
+        out.append(Member(u.id, u.display_name, avatar_url(u), view.progress, st.today, view.plan_day, enr.plan_days,
                           enr.streak, u.id == club.host_user_id))
     out.sort(key=lambda m: (-m.progress, m.name))
     return out

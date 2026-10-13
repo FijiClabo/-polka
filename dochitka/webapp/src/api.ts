@@ -97,6 +97,7 @@ export interface UserBrief {
   id: number;
   name: string;
   photo_url: string | null;
+  tg?: string | null; // username в Telegram, если человек его не скрыл
 }
 
 export interface Me {
@@ -109,6 +110,11 @@ export interface Me {
     nudges_enabled: boolean;
     webapp_onboarded: boolean;
     is_admin: boolean;
+    avatar: "telegram" | "custom" | "none";
+    show_username: boolean;
+    tg_username: string | null;
+    telegram_photo_url: string | null;
+    custom_photo_url: string | null;
   };
   access: { state: string; enrollment_status: string | null; run: RunBrief | null };
   project_name: string;
@@ -238,6 +244,7 @@ export interface FriendStatus {
   plan_day: number | null;
   plan_days: number | null;
   done_at: string | null;
+  tg?: string | null;
   is_me?: boolean;
   can_nudge?: boolean;
   nudged?: boolean;

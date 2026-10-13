@@ -4,7 +4,7 @@ import { AchIcon, IBook, IChevron, IEnvelope, ISettings } from "../components/Ic
 import { Avatar, Skeleton, Switch, toast } from "../components/ui";
 import { useApi } from "../hooks";
 import { useNav } from "../nav";
-import { closeApp, openExternal, openTgLink } from "../tg";
+import { closeApp, haptic, openExternal, openTgLink } from "../tg";
 import { dayMonth } from "../format";
 
 const ZONES: [string, string][] = [
@@ -67,6 +67,8 @@ export default function Profile() {
         <h2 className="h-title" style={{ margin: "10px 0 0", fontSize: 30 }}>{u.name}</h2>
         {me.access.run && <div className="small muted">{me.access.run.title}</div>}
       </div>
+
+      <Visibility me={me} onChange={(m) => { setMe(m); nav.refreshMe(); }} save={save} />
 
       <div className="section-title">Настройки</div>
       <div className="card" style={{ padding: "6px 16px" }}>
@@ -223,6 +225,100 @@ function AccessCard() {
             {data.privacy_url && <button className="link tiny" onClick={() => openExternal(data.privacy_url!)}>Политика данных</button>}
           </div>
         )}
+      </div>
+    </>
+  );
+}
+
+// ------------------------------------------------------------------ как тебя видят
+
+function Visibility({ me, onChange, save }: { me: Me; onChange: (m: Me) => void; save: (p: Record<string, unknown>) => Promise<void> }) {
+  const u = me.user;
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const upload = async (f: File) => {
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("photo", f);
+      onChange(await api.form<Me>("/me/avatar", fd));
+      toast("Фото сохранено");
+    } catch (e) {
+      toast((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const options: { key: Me["user"]["avatar"]; label: string; url: string | null; hint?: string }[] = [
+    { key: "telegram", label: "Из Telegram", url: u.telegram_photo_url, hint: u.telegram_photo_url ? undefined : "фото нет или скрыто" },
+    { key: "custom", label: "Своё фото", url: u.custom_photo_url, hint: u.custom_photo_url ? undefined : "загрузить" },
+    { key: "none", label: "Без фото", url: null },
+  ];
+  return (
+    <>
+      <div className="section-title">Как тебя видят друзья</div>
+      <div className="card">
+        <div className="avatar-choice">
+          {options.map((o) => (
+            <button
+              key={o.key}
+              className={`ac${u.avatar === o.key ? " on" : ""}`}
+              disabled={busy}
+              onClick={() => {
+                haptic("select");
+                if (o.key === "custom" && !u.custom_photo_url) fileRef.current?.click();
+                else if (u.avatar !== o.key) save({ avatar: o.key });
+              }}
+            >
+              <Avatar name={u.name} url={o.key === "none" ? null : o.url} size={56} seed={u.id} />
+              <span className="l">{o.label}</span>
+              {o.hint && <span className="h">{o.hint}</span>}
+            </button>
+          ))}
+        </div>
+        {u.custom_photo_url && (
+          <div className="row mt-8" style={{ justifyContent: "center", gap: 18 }}>
+            <button className="link tiny" disabled={busy} onClick={() => fileRef.current?.click()}>Заменить своё фото</button>
+            <button
+              className="link tiny"
+              disabled={busy}
+              onClick={async () => {
+                try {
+                  onChange(await api.del<Me>("/me/avatar"));
+                } catch (e) {
+                  toast((e as Error).message);
+                }
+              }}
+            >
+              Удалить
+            </button>
+          </div>
+        )}
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/heic"
+          hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            e.target.value = "";
+            if (f) upload(f);
+          }}
+        />
+        <div className="settings-row mt-12" style={{ borderTop: "1px solid var(--line)", paddingTop: 12 }}>
+          <div>
+            Ссылка на мой Telegram
+            <div className="tiny muted">
+              {u.tg_username
+                ? `Друзья, напарник и клуб увидят @${u.tg_username} и смогут написать тебе`
+                : "В Telegram не задано имя пользователя — ссылки не будет. Его можно задать в настройках Telegram"}
+            </div>
+          </div>
+          <Switch on={u.show_username && !!u.tg_username} onChange={(v) => save({ show_username: v })} />
+        </div>
+        <p className="tiny muted" style={{ margin: "8px 0 0" }}>
+          Видят только друзья, напарник и участники твоего клуба. Пересказы и тексты книг не видит никто.
+        </p>
       </div>
     </>
   );

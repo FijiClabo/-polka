@@ -78,9 +78,9 @@ class Settings(BaseSettings):
     receipt_vat_code: int = 1  # 1 — без НДС (УСН, самозанятые)
     receipt_payment_mode: str = "full_payment"  # или full_prepayment — решает бухгалтер
     sub_freezes_per_week: int = 2
-    offer_version: str = "2026-10-08"  # версия оферты и документов — пишется в платёж и журнал согласий
+    offer_version: str = "2026-10-13"  # версия оферты и документов — пишется в платёж и журнал согласий
     # редакция согласия на обработку данных: поменяй, если изменился текст согласия, — бот и приложение спросят его заново
-    consent_version: str = "2026-10-07"
+    consent_version: str = "2026-10-13"
     payment_info: str = "Оплата скоро появится — мы напишем, как только можно будет оплатить."
     sprint_for_everyone: bool = True  # бесплатный 7-дневный спринт для всех новичков, не только по ссылке друга
 
@@ -91,7 +91,7 @@ class Settings(BaseSettings):
     seller_ogrn: str = ""  # для ИП/ООО
     seller_email: str = ""
     seller_phone: str = ""
-    legal_docs_date: date = date(2026, 10, 8)  # дата редакции оферты и политики
+    legal_docs_date: date = date(2026, 10, 13)  # дата редакции оферты и политики
     bot_username: str = ""  # подставляется сам при запуске бота; нужен, только если страницы отдаются без бота
 
     # --- Прочее --------------------------------------------------------------

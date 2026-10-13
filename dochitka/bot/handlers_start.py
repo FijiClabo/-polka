@@ -22,6 +22,7 @@ from services.common import Outbox, OutMsg, log_event, now
 from services.progress import load_view
 from services.runs import current_enrollment, join_cohort, sprint_block, start_sprint
 from services.social import add_friend_by_code, join_pair_by_code
+from services.users import who
 from settings import get_settings
 
 log = logging.getLogger(__name__)
@@ -78,7 +79,7 @@ async def _apply_payload(s, user: User, created: bool, payload: str, outbox: Out
             if not user.source:
                 user.source = "friend"
             if not created and user.onboarding_step == "done":
-                outbox.add(_reply(user, texts.friends_now(inviter.display_name)))
+                outbox.add(_reply(user, texts.friends_now(who(inviter))))
     elif payload.startswith("promo_") or payload.startswith("src_"):
         # метка источника (реклама, блогер) и промокод из ссылки: t.me/<бот>?start=promo_READ20
         from services.billing import normalize_code, valid_promo
@@ -111,7 +112,7 @@ async def _apply_payload(s, user: User, created: bool, payload: str, outbox: Out
         together = payload.startswith("t_")
         status, inviter = await join_pair_by_code(s, user, payload[2:], outbox, together=together)
         if status == "ok" and inviter:
-            outbox.add(_reply(user, texts.pair_joined(inviter.display_name)))
+            outbox.add(_reply(user, texts.pair_joined(who(inviter))))
             if together and user.onboarding_step == "done":
                 # кто ещё в знакомстве, увидит кнопку на шаге «Теперь книга»
                 from services.together import offer_for

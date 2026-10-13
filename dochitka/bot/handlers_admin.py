@@ -27,6 +27,7 @@ from services.common import Outbox, OutMsg, log_event
 from services.retell import override
 from services.runs import current_main_run, grant, refund
 from services.social import auto_pairs, make_pair, public_status
+from services.users import who
 from settings import get_settings
 
 router = Router(name="admin")
@@ -402,8 +403,8 @@ async def cmd_pair_set(message: Message, command: CommandObject, bot: Bot) -> No
         if not pair:
             await message.answer("Не получилось: у кого-то уже есть напарник.")
             return
-        outbox.add(OutMsg(ua.tg_id, texts.pair_joined(ub.display_name)))
-        outbox.add(OutMsg(ub.tg_id, texts.pair_joined(ua.display_name)))
+        outbox.add(OutMsg(ua.tg_id, texts.pair_joined(who(ub))))
+        outbox.add(OutMsg(ub.tg_id, texts.pair_joined(who(ua))))
     await flush(bot, outbox)
     await message.answer("Пара создана.")
 
@@ -421,8 +422,8 @@ async def cmd_pairs_auto(message: Message, bot: Bot) -> None:
         pairs = await auto_pairs(s, run)
         for p in pairs:
             a, b = await s.get(User, p.user_a_id), await s.get(User, p.user_b_id)
-            outbox.add(OutMsg(a.tg_id, texts.pair_joined(b.display_name)))
-            outbox.add(OutMsg(b.tg_id, texts.pair_joined(a.display_name)))
+            outbox.add(OutMsg(a.tg_id, texts.pair_joined(who(b))))
+            outbox.add(OutMsg(b.tg_id, texts.pair_joined(who(a))))
     await flush(bot, outbox)
     await message.answer(f"Создано пар: {len(pairs)}. Остальные участники без пары — контрольная группа.")
 

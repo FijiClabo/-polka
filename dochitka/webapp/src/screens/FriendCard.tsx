@@ -5,7 +5,7 @@ import { Avatar, ErrorState, ScreenSkeleton, Shelf, toast } from "../components/
 import { STATUS_TEXT, firstName, nudgeToast, plural } from "../format";
 import { invalidate, useApi } from "../hooks";
 import { useNav } from "../nav";
-import { confirmDialog, haptic } from "../tg";
+import { confirmDialog, haptic, openTgProfile } from "../tg";
 
 interface Card {
   status: FriendStatus;
@@ -30,6 +30,11 @@ export default function FriendCard({ id }: { id: number }) {
         <Avatar name={s.name} url={s.photo_url} size={88} seed={s.user_id} ring={s.today === "done" ? "green" : undefined} />
         <h2 className="h-title" style={{ margin: "10px 0 0", fontSize: 30 }}>{s.name}</h2>
         <div className="small muted">{STATUS_TEXT[s.today]}{s.done_at ? ` в ${s.done_at}` : ""}</div>
+        {s.tg && (
+          <button className="btn secondary mt-12" onClick={() => openTgProfile(s.tg!)}>
+            Написать в Telegram · @{s.tg}
+          </button>
+        )}
       </div>
       <div className="stats3 mt-24">
         <div className="stat">

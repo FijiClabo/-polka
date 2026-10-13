@@ -229,3 +229,21 @@ async def _after_paid(p, out) -> None:
 @router.get("/robots.txt", include_in_schema=False)
 async def robots():
     return Response("User-agent: *\nDisallow: /api/\nDisallow: /app/\n", media_type="text/plain")
+
+
+@router.get("/a/{token}.jpg", include_in_schema=False)
+async def avatar_file(token: str):
+    """Своё фото пользователя. Адрес случайный и не угадывается; файл удаляется вместе с профилем."""
+    import re
+
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse
+
+    from services.users import avatars_dir
+
+    if not re.fullmatch(r"[0-9a-f]{32}", token):
+        raise HTTPException(404)
+    path = avatars_dir() / f"{token}.jpg"
+    if not path.is_file():
+        raise HTTPException(404)
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=31536000, immutable"})

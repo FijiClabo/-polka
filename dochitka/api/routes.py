@@ -14,6 +14,7 @@ import json
 import logging
 import time as _time
 from datetime import date, time, timedelta
+from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
@@ -60,7 +61,14 @@ from services.social import (
     public_status,
     remove_friend,
 )
-from services.users import valid_timezone
+from services.users import (
+    MAX_AVATAR_BYTES,
+    avatar_url,
+    public_tg,
+    remove_avatar_file,
+    save_avatar,
+    valid_timezone,
+)
 from settings import get_settings
 
 log = logging.getLogger(__name__)
@@ -90,7 +98,8 @@ async def _flush(outbox: Outbox) -> None:
 
 
 def user_brief(u: User) -> dict:
-    return {"id": u.id, "name": u.display_name, "photo_url": u.photo_url}
+    """Как человека видят другие: имя, выбранное фото и ссылка на Telegram, если он её не скрыл."""
+    return {"id": u.id, "name": u.display_name, "photo_url": avatar_url(u), "tg": public_tg(u)}
 
 
 def book_brief(b: Book | None) -> dict | None:
@@ -164,6 +173,8 @@ class MePatch(BaseModel):
     retell_format: str | None = Field(default=None, pattern=r"^(voice|text)$")
     nudges_enabled: bool | None = None
     webapp_onboarded: bool | None = None
+    avatar: Literal["telegram", "custom", "none"] | None = None
+    show_username: bool | None = None
 
 
 def _me(u: User, enr: Enrollment | None, view: DayView | None) -> dict:
@@ -176,6 +187,8 @@ def _me(u: User, enr: Enrollment | None, view: DayView | None) -> dict:
             "morning_time": u.morning_time.strftime("%H:%M"), "evening_time": u.evening_time.strftime("%H:%M"),
             "retell_format": u.retell_format, "nudges_enabled": u.nudges_enabled,
             "webapp_onboarded": u.webapp_onboarded, "is_admin": u.tg_id in s.admin_ids,
+            "avatar": u.avatar, "show_username": u.show_username, "tg_username": u.tg_username,
+            "telegram_photo_url": u.photo_url, "custom_photo_url": f"/a/{u.avatar_token}.jpg" if u.avatar_token else None,
         },
         "access": {"state": view.state if view else "no_run", "enrollment_status": enr.status if enr else None,
                    "run": run_brief(enr)},
@@ -214,6 +227,29 @@ async def need_consent(user: User = Depends(current_user), s: AsyncSession = Dep
     return user
 
 
+@router.post("/me/avatar")
+async def post_avatar(photo: UploadFile = File(...), user: User = Depends(need_consent),
+                      s: AsyncSession = Depends(get_session)):
+    """Своё фото вместо фото из Telegram: квадрат 320×320 без метаданных."""
+    data = await photo.read(MAX_AVATAR_BYTES + 1)
+    try:
+        await asyncio.to_thread(save_avatar, user, data)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    await log_event(s, "profile_avatar", user.id, kind="custom_upload")
+    enr = await current_enrollment(s, user.id)
+    return {**_me(user, enr, await load_view(s, user, enr)), "consent": await has_consent(s, user)}
+
+
+@router.delete("/me/avatar")
+async def delete_avatar(user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
+    remove_avatar_file(user)
+    if user.avatar == "custom":
+        user.avatar = "telegram"
+    enr = await current_enrollment(s, user.id)
+    return {**_me(user, enr, await load_view(s, user, enr)), "consent": await has_consent(s, user)}
+
+
 @router.patch("/me")
 async def patch_me(body: MePatch, user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
     if body.timezone is not None:
@@ -233,6 +269,14 @@ async def patch_me(body: MePatch, user: User = Depends(current_user), s: AsyncSe
         user.nudges_enabled = body.nudges_enabled
     if body.webapp_onboarded is not None:
         user.webapp_onboarded = body.webapp_onboarded
+    if body.avatar is not None:
+        if body.avatar == "custom" and not user.avatar_token:
+            raise HTTPException(400, "Сначала загрузи фото")
+        user.avatar = body.avatar
+        await log_event(s, "profile_avatar", user.id, kind=body.avatar)
+    if body.show_username is not None:
+        user.show_username = body.show_username
+        await log_event(s, "profile_username", user.id, shown=body.show_username)
     enr = await current_enrollment(s, user.id)
     return {**_me(user, enr, await load_view(s, user, enr)), "consent": await has_consent(s, user)}
 

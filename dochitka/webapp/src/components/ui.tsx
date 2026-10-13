@@ -29,6 +29,7 @@ export function isLight(hex: string): boolean {
 
 export function Avatar({ name, url, size = 44, ring, seed }: { name: string; url?: string | null; size?: number; ring?: "accent" | "green" | "grey"; seed?: number }) {
   const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [url]);
   const letter = (name || "?").trim().charAt(0).toUpperCase();
   const idx = Math.abs(seed ?? [...(name || "")].reduce((a, c) => a + c.charCodeAt(0), 0)) % AVATAR_COLORS.length;
   const cls = ["avatar", ring === "accent" ? "ring" : ring === "green" ? "ring-green" : ring === "grey" ? "ring-grey" : ""].join(" ");

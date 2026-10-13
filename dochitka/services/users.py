@@ -88,6 +88,73 @@ async def get_or_create_user(
     return user, created
 
 
+# --------------------------------------------------------------------------- как видят другие
+
+AVATAR_SIZE = 320
+MAX_AVATAR_BYTES = 8 * 1024 * 1024
+
+
+def avatars_dir():
+    return get_settings().data_dir / "avatars"
+
+
+def avatar_url(u: User) -> str | None:
+    """Фото, которое видят другие: своё, из Telegram или никакого (тогда в приложении — буква)."""
+    if u.avatar == "none":
+        return None
+    if u.avatar == "custom" and u.avatar_token:
+        return f"/a/{u.avatar_token}.jpg"
+    return u.photo_url
+
+
+def public_tg(u: User) -> str | None:
+    """Username для друзей, напарника и клуба — если человек его не скрыл."""
+    return u.tg_username if (u.show_username and u.tg_username) else None
+
+
+def who(u: User) -> str:
+    """Имя для сообщений о людях: «Саша (@sasha)» — чтобы было понятно, кто это в Telegram."""
+    tg = public_tg(u)
+    return f"{u.display_name} (@{tg})" if tg else u.display_name
+
+
+def save_avatar(u: User, data: bytes) -> str:
+    """Своё фото: квадрат 320×320, JPEG, без метаданных. Старый файл удаляется."""
+    import io
+    import secrets
+
+    from PIL import Image, ImageOps, UnidentifiedImageError
+
+    if len(data) > MAX_AVATAR_BYTES:
+        raise ValueError("Фото больше 8 МБ — выбери поменьше")
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+    except (UnidentifiedImageError, OSError) as e:
+        raise ValueError("Это не похоже на фото: нужен JPEG, PNG или WebP") from e
+    if img.width * img.height > 40_000_000:
+        raise ValueError("Слишком большое фото")
+    img = ImageOps.exif_transpose(img).convert("RGB")
+    img = ImageOps.fit(img, (AVATAR_SIZE, AVATAR_SIZE), Image.Resampling.LANCZOS)
+    d = avatars_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    token = secrets.token_hex(16)
+    img.save(d / f"{token}.jpg", "JPEG", quality=85)  # метаданные (в том числе геометка) не сохраняются
+    remove_avatar_file(u)
+    u.avatar_token = token
+    u.avatar = "custom"
+    return token
+
+
+def remove_avatar_file(u: User) -> None:
+    if u.avatar_token:
+        try:
+            (avatars_dir() / f"{u.avatar_token}.jpg").unlink(missing_ok=True)
+        except OSError:
+            pass
+        u.avatar_token = None
+
+
 def valid_timezone(tz: str) -> bool:
     try:
         return get_tz(tz).key == tz
@@ -119,4 +186,5 @@ async def delete_user_data(session: AsyncSession, user: User) -> None:
     await session.execute(delete(Consent).where(Consent.user_id == user.id))
     await session.execute(update(User).where(User.invited_by_id == user.id).values(invited_by_id=None))
     await session.execute(delete(Enrollment).where(Enrollment.user_id == user.id))
+    remove_avatar_file(user)
     await session.delete(user)
