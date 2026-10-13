@@ -72,6 +72,7 @@ async def check_retelling(inp: CheckInput) -> Verdict:
         title=inp.title, author=inp.author, segment_title=inp.segment_title, day_number=inp.day_number,
         pages=inp.pages, segment_text=_segment_text_for_prompt(inp.segment_text, inp.segment_summary),
         previous_summary=_previous(inp.previous_summaries),
+        segment_summary=None if inp.segment_text else inp.segment_summary,
     )
     prompt = prompts.verdict_prompt(
         retelling=inp.retelling, dialog=inp.dialog, clarify_count=inp.clarify_count, max_clarify=MAX_CLARIFY

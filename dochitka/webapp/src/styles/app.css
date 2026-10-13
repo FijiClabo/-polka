@@ -2146,3 +2146,44 @@ img {
   padding: 12px 14px;
   line-height: 1.45;
 }
+
+/* ---------------------------------------------------------------- читаем вместе */
+
+.together-card {
+  border-color: var(--line-strong);
+}
+
+.together-progress {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.tp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.tp-row .hbar-track {
+  margin-top: 0;
+}
+
+.tp-who {
+  width: 72px;
+  flex: none;
+  font-size: 13px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tp-pct {
+  width: 40px;
+  flex: none;
+  text-align: right;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}

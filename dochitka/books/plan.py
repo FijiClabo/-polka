@@ -293,6 +293,11 @@ def segment_anchors(text: str | None, words: int = ANCHOR_WORDS) -> tuple[str, s
     return f"{start}…", f"…{end}"
 
 
+def anchors_of(text: str | None, start_words: str | None = None, end_words: str | None = None) -> tuple[str, str] | None:
+    """Метки отрезка: из текста, а у копии плана друга — сохранённые при копировании."""
+    return segment_anchors(text) or ((start_words, end_words) if start_words and end_words else None)
+
+
 def strip_marks(text: str) -> str:
     return "\n".join(line[len(SUBHEADING_MARK):] if line.startswith(SUBHEADING_MARK) else line for line in text.split("\n"))
 

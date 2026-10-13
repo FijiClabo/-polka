@@ -192,6 +192,39 @@ async def cb_plan(call: CallbackQuery, bot: Bot) -> None:
     await flush(bot, outbox)
 
 
+# --------------------------------------------------------------------------- читаем вместе
+
+
+@router.callback_query(F.data == "tg:yes")
+async def cb_together(call: CallbackQuery, bot: Bot) -> None:
+    from bot.handlers_start import consent_gate, send_status
+    from services.together import TogetherError, join_same_book
+
+    await call.answer()
+    if not await consent_gate(call.message, call.from_user):
+        return
+    await call.message.edit_reply_markup(reply_markup=None)
+    async with session_scope() as s:
+        user, _ = await load_user(s, call.from_user)
+        try:
+            book, enr, offer = await join_same_book(s, user)
+        except TogetherError as err:
+            await call.message.answer(str(err))
+            return
+        uid, text = user.id, texts.together_joined(offer.partner_name, book.title, enr.plan_days)
+    await call.message.answer(text)
+    await send_status(bot, call.message.chat.id, uid)
+
+
+@router.callback_query(F.data == "tg:no")
+async def cb_together_no(call: CallbackQuery) -> None:
+    await call.answer()
+    await call.message.edit_reply_markup(reply_markup=None)
+    await call.message.answer(texts.add_book_prompt("Хорошо, своя книга. Есть два способа."),
+                              reply_markup=kb([[{"text": "Читаю без файла", "callback": "book:paper"}],
+                                               [{"text": "Добавить в приложении", "webapp": "book"}]]))
+
+
 # --------------------------------------------------------------------------- бумажная книга
 
 

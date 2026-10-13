@@ -68,7 +68,7 @@ export interface BookBrief {
   title: string;
   author: string;
   spine_color: string;
-  source: "epub" | "fb2" | "paper";
+  source: "epub" | "fb2" | "paper" | "shared";
   pages: number;
   has_text: boolean;
   parse_status: "pending" | "ok" | "failed";
@@ -248,6 +248,10 @@ export interface PairData {
   best_pair_streak?: number;
   can_nudge?: boolean;
   nudged?: boolean;
+  invite_kind?: "together" | "pair";
+  book_title?: string | null;
+  /** Читаете одну книгу: прогресс обоих в процентах. */
+  together?: { title: string; me: number; partner: number } | null;
 }
 
 export interface ShelfItem {
@@ -301,6 +305,8 @@ export interface BookState {
   max_mb: number;
   can_add?: boolean;
   awaiting_payment?: boolean;
+  /** Напарник позвал читать вместе: можно взять его план (без текста) и читать свой экземпляр. */
+  together?: { partner_name: string; title: string; author: string; plan_days: number } | null;
 }
 
 export interface FinishData {

@@ -98,6 +98,7 @@ class PublicStatus:
     plan_day: int | None
     plan_days: int | None
     done_at: str | None = None
+    progress: float = 0.0  # доля книги, которую уже прошёл человек
 
 
 async def public_status(session: AsyncSession, user: User) -> PublicStatus:
@@ -110,7 +111,7 @@ async def public_status(session: AsyncSession, user: User) -> PublicStatus:
         st.book_title, st.book_author, st.spine_color = book.title, book.author, book.spine_color
     st.streak = enr.streak
     view = await load_view(session, user, enr)
-    st.plan_day, st.plan_days = view.plan_day, enr.plan_days
+    st.plan_day, st.plan_days, st.progress = view.plan_day, enr.plan_days, view.progress
     if view.state == "finished":
         st.today = "finished"
     elif view.state in ("to_read", "clarify", "checking"):
@@ -235,7 +236,10 @@ async def release_stale_pair(session: AsyncSession, enr: Enrollment | None) -> N
             other.pair_id = None
 
 
-async def join_pair_by_code(session: AsyncSession, user: User, code: str, outbox: Outbox) -> tuple[str, User | None]:
+async def join_pair_by_code(
+    session: AsyncSession, user: User, code: str, outbox: Outbox, *, together: bool = False
+) -> tuple[str, User | None]:
+    """Вступить в пару по ссылке. together — ссылка «читать вместе»: напарник видит книгу и может взять тот же план."""
     inviter_enr = await session.scalar(select(Enrollment).where(Enrollment.pair_code == code))
     if inviter_enr is None:
         return "not_found", None
@@ -244,6 +248,10 @@ async def join_pair_by_code(session: AsyncSession, user: User, code: str, outbox
         return "self", None
     await release_stale_pair(session, inviter_enr)
     if inviter_enr.pair_id:
+        pair = await session.get(Pair, inviter_enr.pair_id)
+        if together and pair is not None and user.id in (pair.user_a_id, pair.user_b_id):
+            pair.together = True  # уже напарники, теперь ещё и читают вместе
+            return "ok", inviter
         return "taken", inviter
     if inviter_enr.status not in OPEN_STATUSES:
         return "not_found", None
@@ -255,6 +263,7 @@ async def join_pair_by_code(session: AsyncSession, user: User, code: str, outbox
     pair = await make_pair(session, run, inviter_enr, my)
     if pair is None:
         return "error", inviter
+    pair.together = together
     outbox.add(OutMsg(inviter.tg_id, texts.pair_joined(user.display_name), kind="pair",
                       buttons=[[{"text": "Напарник", "webapp": "friends"}]]))
     # в друзья напарник не добавляется: напарнику виден только прогресс, а друзьям — ещё книга и полка

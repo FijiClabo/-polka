@@ -26,7 +26,7 @@ from ai.llm import get_llm
 from ai.stt import STTError, build_stt, transcribe_audio
 from api.auth import current_user, get_session
 from books.parse import detect_format, is_other_book_format
-from books.plan import PlanError, segment_anchors, segment_minutes, segment_place
+from books.plan import PlanError, anchors_of, segment_minutes, segment_place
 from books.types import PARSE_ERRORS, SUBHEADING_MARK
 from core.days import local_now, plan_day_number
 from db.models import Book, DayResult, Enrollment, Purchase, Retelling, Segment, User
@@ -114,7 +114,7 @@ def seg_brief(seg: Segment | None, book: Book | None, day: int | None = None) ->
         "pages": pages, "minutes": segment_minutes(seg.word_count, pages, paper),
         "retell_prompt": seg.retell_prompt, "can_read": bool(book and book.has_text and seg.text),
         "pos_to": seg.pos_to, "place": segment_place(seg.page_from, seg.page_to, seg.pos_from, seg.pos_to, paper),
-        "anchors": None if paper else segment_anchors(seg.text),
+        "anchors": None if paper else anchors_of(seg.text, seg.start_words, seg.end_words),
     }
 
 
@@ -395,19 +395,36 @@ async def get_pair(user: User = Depends(current_user), s: AsyncSession = Depends
     enr = await current_enrollment(s, user.id)
     pair, partner, p_enr = await get_pair_for(s, enr)
     if not pair or not partner:
-        link = None
+        link, kind, title = None, "pair", None
         if enr is not None and enr.status in ("invited", "paid", "active"):
-            from bot.ui import deep_link
-
-            link = deep_link(f"p_{await ensure_pair_code(s, enr)}")
-        return {"has_pair": False, "invite_link": link, "invite_text": texts.pair_invite_text(user.display_name)}
+            link, kind, title, text = await _invite(s, user, enr)
+        else:
+            text = texts.pair_invite_text(user.display_name)
+        return {"has_pair": False, "invite_link": link, "invite_text": text, "invite_kind": kind, "book_title": title}
     st = await public_status(s, partner)
     nudged = partner.id in await nudged_today(s, user)
+    from bot.handlers_social import together_view
+
+    together = await together_view(s, user, enr, pair, p_enr, st)
     return {
         "has_pair": True, "partner": {**user_brief(partner), "today": st.today, "done_at": st.done_at,
                                       "plan_day": st.plan_day, "plan_days": st.plan_days, "streak": st.streak},
         "pair_streak": pair.streak, "best_pair_streak": pair.best_streak, "can_nudge": st.today in ("reading", "burned") and not nudged, "nudged": nudged,
+        "together": together,
     }
+
+
+async def _invite(s: AsyncSession, user: User, enr: Enrollment) -> tuple[str, str, str | None, str]:
+    """Ссылка в пару. Есть книга с выбранным сроком — зовём читать её вместе (t_), иначе просто в напарники (p_)."""
+    from bot.ui import deep_link
+    from services.together import shareable_book
+
+    code = await ensure_pair_code(s, enr)
+    book = await shareable_book(s, enr)
+    if book is not None:
+        return (deep_link(f"t_{code}"), "together", book.title,
+                texts.together_invite_text(user.display_name, book.title, enr.plan_days or 0))
+    return deep_link(f"p_{code}"), "pair", None, texts.pair_invite_text(user.display_name)
 
 
 @router.post("/pair/leave")
@@ -433,14 +450,13 @@ async def post_pair_nudge(user: User = Depends(need_consent), s: AsyncSession = 
 
 @router.get("/pair/invite")
 async def get_pair_invite(user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
-    from bot.ui import deep_link, share_link
+    from bot.ui import share_link
 
     enr = await current_enrollment(s, user.id)
     if enr is None:
         raise HTTPException(404, "Нет забега")
-    link = deep_link(f"p_{await ensure_pair_code(s, enr)}")
-    text = texts.pair_invite_text(user.display_name)
-    return {"link": link, "text": text, "share_url": share_link(link, text)}
+    link, kind, title, text = await _invite(s, user, enr)
+    return {"link": link, "text": text, "share_url": share_link(link, text), "kind": kind, "book_title": title}
 
 
 # --------------------------------------------------------------------------- книга
@@ -467,13 +483,23 @@ async def _book_enrollment(s: AsyncSession, user: User) -> Enrollment:
     return await ensure_enrollment(s, user)
 
 
+async def _together_json(s: AsyncSession, user: User) -> dict | None:
+    from services.together import offer_for
+
+    o = await offer_for(s, user)
+    return None if o is None else {"partner_name": o.partner_name, "title": o.title, "author": o.author,
+                                   "plan_days": o.plan_days}
+
+
 @router.get("/book")
 async def get_book(user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
     enr = await current_enrollment(s, user.id)
     book = await s.get(Book, enr.book_id) if enr and enr.book_id else None
     if book is None:
-        return {"book": None, "can_add": True, "max_mb": get_settings().max_book_mb}
+        return {"book": None, "can_add": True, "max_mb": get_settings().max_book_mb,
+                "together": await _together_json(s, user)}
     return {
+        "together": await _together_json(s, user),
         "book": book_brief(book),
         "parse_status": book.parse_status,
         "parse_error": PARSE_ERRORS.get(book.parse_error or "", None) if book.parse_status == "failed" else None,
@@ -499,6 +525,19 @@ async def post_paper(body: PaperBook, user: User = Depends(need_consent), s: Asy
     enr = await _book_enrollment(s, user)
     book = await add_paper_book(s, user, enr, body.title, body.author, body.pages)
     return {"book": book_brief(book)}
+
+
+@router.post("/book/together")
+async def post_book_together(user: User = Depends(need_consent), s: AsyncSession = Depends(get_session)):
+    """«Читаем вместе»: взять план книги напарника (без текста) и читать по своему экземпляру."""
+    from services.together import TogetherError, join_same_book
+
+    try:
+        book, enr, _offer = await join_same_book(s, user)
+    except TogetherError as err:
+        raise HTTPException(409, str(err)) from err
+    return {"book": book_brief(book), "plan_days": enr.plan_days,
+            "awaiting_payment": enr.status == "invited"}
 
 
 @router.post("/sprint")

@@ -67,14 +67,21 @@ async def build_check_input(session: AsyncSession, r: Retelling) -> CheckInput:
     seg = await session.get(Segment, r.segment_id) if r.segment_id else None
     book = await session.get(Book, seg.book_id) if seg else None
     prev: list[str] = []
-    if seg and book:
+    summary = seg.summary if seg else None
+    # «Читаем вместе»: у копии плана нет текста — берём краткие содержания отрезков исходной книги (не текст)
+    summary_book_id = book.shared_from_id if (book and book.source == "shared" and book.shared_from_id) else (book.id if book else None)
+    if seg and summary_book_id:
         prev = list(
             await session.scalars(
                 select(Segment.summary)
-                .where(Segment.book_id == book.id, Segment.day_number < seg.day_number, Segment.summary.is_not(None))
+                .where(Segment.book_id == summary_book_id, Segment.day_number < seg.day_number, Segment.summary.is_not(None))
                 .order_by(Segment.day_number)
             )
         )
+        if summary_book_id != book.id:
+            summary = await session.scalar(
+                select(Segment.summary).where(Segment.book_id == summary_book_id, Segment.day_number == seg.day_number)
+            )
     turns = list(await session.scalars(select(DialogTurn).where(DialogTurn.retelling_id == r.id).order_by(DialogTurn.id)))
     dialog = [(t.role, t.text) for t in turns]
     last_user = next((t for t in reversed(dialog) if t[0] == "user"), ("user", r.raw_text))
@@ -88,7 +95,7 @@ async def build_check_input(session: AsyncSession, r: Retelling) -> CheckInput:
         day_number=seg.day_number if seg else 0,
         pages=pages,
         segment_text=seg.text if (seg and book and book.has_text) else None,
-        segment_summary=seg.summary if seg else None,
+        segment_summary=summary,
         previous_summaries=[p for p in prev if p],
         retelling=last_user[1],
         dialog=dialog,

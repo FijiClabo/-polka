@@ -84,7 +84,7 @@ class Book(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    source: Mapped[str] = mapped_column(String(8))  # epub | fb2 | paper
+    source: Mapped[str] = mapped_column(String(8))  # epub | fb2 | paper | shared (план друга, без текста)
     title: Mapped[str] = mapped_column(String(512), default="")
     author: Mapped[str] = mapped_column(String(512), default="")
     title_norm: Mapped[str] = mapped_column(String(512), default="", index=True)
@@ -101,6 +101,8 @@ class Book(Base):
     parse_error: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = _now_col()
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # «Читаем вместе»: с какой книги друга скопирован план (дни, главы, проценты — без текста)
+    shared_from_id: Mapped[int | None] = mapped_column(ForeignKey("books.id", ondelete="SET NULL"))
 
     chapters: Mapped[list[Chapter]] = relationship(
         back_populates="book", cascade="all, delete-orphan", order_by="Chapter.order_no"
@@ -144,6 +146,9 @@ class Segment(Base):
     pos_to: Mapped[float] = mapped_column(Float)
     word_count: Mapped[int] = mapped_column(Integer, default=0)
     text: Mapped[str | None] = mapped_column(Text)  # у бумажной книги текста нет
+    # первые и последние слова отрезка — для копии плана у друга (у книги с текстом считаются из текста)
+    start_words: Mapped[str | None] = mapped_column(String(200))
+    end_words: Mapped[str | None] = mapped_column(String(200))
     summary: Mapped[str | None] = mapped_column(Text)
     retell_prompt: Mapped[str | None] = mapped_column(String(512))  # вопрос-приглашение к пересказу
 
@@ -208,6 +213,8 @@ class Pair(Base):
     streak: Mapped[int] = mapped_column(Integer, default=0)
     best_streak: Mapped[int] = mapped_column(Integer, default=0)
     last_closed_day: Mapped[date | None] = mapped_column(Date)
+    # пара позвана «читать вместе»: напарник видит название книги и может взять тот же план
+    together: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = _now_col()
 
 

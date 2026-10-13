@@ -12,7 +12,7 @@ from aiogram.types import Message
 
 import texts
 from ai.stt import STTError, transcribe_audio
-from books.plan import segment_anchors, segment_minutes, segment_place
+from books.plan import anchors_of, segment_minutes, segment_place
 from bot.common import Flow, load_user
 from bot.ui import app_kb, flush, kb
 from db.session import session_scope
@@ -39,7 +39,7 @@ def today_text(v: DayView) -> str:
     head = f"День {v.plan_day} из {v.plan_days}"
     if v.catching_up:
         head += " · догоняем вчерашний отрезок"
-    text = f"{head}\n{texts.seg_block(seg.title, place, minutes, None if paper else segment_anchors(seg.text))}"
+    text = f"{head}\n{texts.seg_block(seg.title, place, minutes, None if paper else anchors_of(seg.text, seg.start_words, seg.end_words))}"
     if v.state == "clarify" and v.open_retelling is not None:
         text += f"\n\nЖду ответ на вопрос: <b>{texts.e(v.open_retelling.ai_question or '')}</b>"
     elif v.state == "checking":

@@ -8,6 +8,7 @@ from aiogram import Bot, F, Router
 from aiogram.filters import CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
+from sqlalchemy import select
 
 import texts
 from ai import prompts
@@ -17,7 +18,7 @@ from bot.common import Flow, load_user, parse_time, parse_tz, tz_from_location, 
 from bot.ui import REMOVE_KB, app_kb, flush, kb, location_kb
 from db.models import Run, User
 from db.session import session_scope
-from services.common import Outbox, log_event, now
+from services.common import Outbox, OutMsg, log_event, now
 from services.progress import load_view
 from services.runs import current_enrollment, join_cohort, sprint_block, start_sprint
 from services.social import add_friend_by_code, join_pair_by_code
@@ -63,7 +64,7 @@ async def cmd_start(message: Message, command: CommandObject, state: FSMContext,
 
 
 def _is_social(payload: str) -> bool:
-    return payload.startswith(("f_", "p_")) or payload == "group"
+    return payload.startswith(("f_", "p_", "t_")) or payload == "group"
 
 
 async def _apply_payload(s, user: User, created: bool, payload: str, outbox: Outbox) -> str | None:
@@ -95,10 +96,19 @@ async def _apply_payload(s, user: User, created: bool, payload: str, outbox: Out
         # групповой забег ведущего — только по его ссылке
         status, _enr = await join_cohort(s, user)
         outbox.add(_reply(user, texts.COHORT_JOIN[status]))
-    elif payload.startswith("p_"):
-        status, inviter = await join_pair_by_code(s, user, payload[2:], outbox)
+    elif payload.startswith(("p_", "t_")):
+        together = payload.startswith("t_")
+        status, inviter = await join_pair_by_code(s, user, payload[2:], outbox, together=together)
         if status == "ok" and inviter:
             outbox.add(_reply(user, texts.pair_joined(inviter.display_name)))
+            if together and user.onboarding_step == "done":
+                # кто ещё в знакомстве, увидит кнопку на шаге «Теперь книга»
+                from services.together import offer_for
+
+                offer = await offer_for(s, user)
+                if offer is not None:
+                    outbox.add(OutMsg(user.tg_id, texts.together_offer(offer.partner_name, offer.title, offer.plan_days),
+                                      buttons=together_buttons()))
         elif status == "taken":
             outbox.add(_reply(user, "У этого участника уже есть напарник."))
         elif status == "already_paired":
@@ -107,8 +117,6 @@ async def _apply_payload(s, user: User, created: bool, payload: str, outbox: Out
 
 
 def _reply(user: User, text: str):
-    from services.common import OutMsg
-
     return OutMsg(user.tg_id, text)
 
 
@@ -420,12 +428,28 @@ async def after_onboarding(bot: Bot, chat_id: int, user_id: int, inviter_name: s
                                reply_markup=kb([[{"text": "Начать спринт (бесплатно)", "callback": "sprint:start"}]]))
 
 
+def together_buttons() -> list[list[dict]]:
+    return [[{"text": "Читаем вместе", "callback": "tg:yes"}], [{"text": "Выберу свою книгу", "callback": "tg:no"}]]
+
+
+async def book_prompt_rows(s, tg_id: int) -> tuple[str, list[list[dict]]]:
+    """Шаг «Теперь книга»: если напарник позвал читать вместе — первой кнопкой его книга."""
+    from services.together import offer_for
+
+    rows = [[{"text": "Читаю без файла", "callback": "book:paper"}], [{"text": "Добавить в приложении", "webapp": "book"}]]
+    user = await s.scalar(select(User).where(User.tg_id == tg_id))
+    offer = await offer_for(s, user) if user is not None else None
+    if offer is None:
+        return texts.add_book_prompt(), rows
+    text = (texts.together_offer(offer.partner_name, offer.title, offer.plan_days) + "\n\n"
+            + texts.add_book_prompt("Или своя книга — тогда два способа."))
+    return text, [[{"text": f"Читать «{offer.title[:40]}» вместе", "callback": "tg:yes"}], *rows]
+
+
 async def send_book_prompt(bot: Bot, chat_id: int) -> None:
-    await bot.send_message(
-        chat_id, texts.add_book_prompt(),
-        reply_markup=kb([[{"text": "Читаю без файла", "callback": "book:paper"}],
-                         [{"text": "Добавить в приложении", "webapp": "book"}]]),
-    )
+    async with session_scope() as s:
+        text, rows = await book_prompt_rows(s, chat_id)
+    await bot.send_message(chat_id, text, reply_markup=kb(rows))
 
 
 @router.callback_query(F.data == "sprint:start")

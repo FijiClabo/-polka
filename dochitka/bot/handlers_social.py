@@ -35,11 +35,15 @@ async def cmd_pair(message: Message) -> None:
         pair, partner, p_enr = await get_pair_for(s, enr)
         if pair and partner:
             st = await public_status(s, partner)
-            # напарнику виден только прогресс: день плана, сдан ли сегодня, общий стрик — без книги
+            # напарнику виден только прогресс: день плана, сдан ли сегодня, общий стрик — книга только при «читаем вместе»
             day = f"день {min(st.plan_day, st.plan_days)} из {st.plan_days} · " if st.plan_day and st.plan_days else ""
             text = (f"Твой напарник — <b>{texts.e(partner.display_name)}</b>.\n"
                     f"{day}сегодня: {STATUS_WORD.get(st.today, '')}\n"
                     f"Общий стрик: <b>{pair.streak}</b>")
+            together = await together_view(s, user, enr, pair, p_enr, st)
+            if together:
+                text += f"\n\nЧитаете вместе «{texts.e(together['title'])}»: ты — {together['me']}%, " \
+                        f"{texts.e(partner.display_name)} — {together['partner']}%."
             rows = []
             if st.today in ("reading", "burned"):
                 rows.append([{"text": "Напомнить напарнику", "callback": f"nudge:{partner.id}:p"}])
@@ -48,12 +52,41 @@ async def cmd_pair(message: Message) -> None:
             return
         code = await ensure_pair_code(s, enr)
         name = user.display_name
+        from services.together import shareable_book
+
+        mine = await shareable_book(s, enr)
+        days = enr.plan_days
+    if mine is not None:
+        link = deep_link(f"t_{code}")
+        await message.answer(
+            f"Позови друга читать вместе «{texts.e(mine.title)}»: тот же план на {days} дн., одна и та же глава в один день, "
+            "общий стрик. Книга у каждого своя — бумажная, в любом приложении или файлом; твой файл другу не передаётся. "
+            f"Перешли ссылку:\n{link}",
+            reply_markup=kb([[{"text": "Позвать читать вместе",
+                               "url": share_link(link, texts.together_invite_text(name, mine.title, days))}]]),
+        )
+        return
     link = deep_link(f"p_{code}")
     await message.answer(
         "Позови напарника — книги у вас разные, а стрик общий: он растёт, только если день сдан у вас двоих. "
+        "А если сначала выбрать книгу и срок, друга можно позвать читать ту же книгу вместе. "
         f"Перешли ссылку:\n{link}",
         reply_markup=kb([[{"text": "Отправить приглашение", "url": share_link(link, texts.pair_invite_text(name))}]]),
     )
+
+
+async def together_view(s, user, enr, pair, p_enr, st) -> dict | None:
+    """«Читаем вместе»: одна книга у пары — показываем название и прогресс обоих в процентах."""
+    from services.progress import load_view
+    from services.together import same_book
+
+    if not pair.together or enr is None or p_enr is None or not enr.book_id or not p_enr.book_id:
+        return None
+    mine, theirs = await s.get(Book, enr.book_id), await s.get(Book, p_enr.book_id)
+    if not same_book(mine, theirs):
+        return None
+    me = await load_view(s, user, enr)
+    return {"title": mine.title, "me": round(me.progress * 100), "partner": round(st.progress * 100)}
 
 
 @router.message(Command("friends"))

@@ -89,6 +89,7 @@ export default function AddBook() {
         )}
         {mode === "choose" ? (
           <>
+            {data.together && <TogetherCard offer={data.together} onDone={() => { invalidate(); st.reload(); }} />}
             <div className="drop mt-16" onClick={() => fileRef.current?.click()}>
               <IUpload size={30} />
               <div style={{ fontWeight: 700, marginTop: 8 }}>Есть файл epub или fb2</div>
@@ -162,7 +163,7 @@ function BookMeta({ data, onChange }: { data: BookState; onChange: () => void })
       <div className="row" style={{ gap: 18, alignItems: "flex-end", marginTop: 14 }}>
         <Cover title={title || "Без названия"} author={author} color={color} />
         <div className="grow col" style={{ gap: 6 }}>
-          <span className="eyebrow">{b.source === "paper" ? "Бумажная книга" : b.source.toUpperCase()}</span>
+          <span className="eyebrow">{b.source === "paper" ? "Без файла" : b.source === "shared" ? "План напарника" : b.source.toUpperCase()}</span>
           <span className="small muted">{pages(b.pages)}{b.chapters ? ` · ${b.chapters} ${plural(b.chapters, "глава", "главы", "глав")}` : ""}</span>
           <span className="small muted">≈ {hm(b.reading_minutes)} чтения</span>
         </div>
@@ -249,8 +250,14 @@ function PlanSummary({ data, onReplan, onReplace }: { data: BookState; onReplan:
           Открыть забег
         </button>
       )}
+      {data.book?.source === "shared" && (
+        <p className="small muted mt-12" style={{ marginBottom: 0 }}>
+          Тот же план, что у напарника: те же главы в те же дни. Читаешь по своему экземпляру. Есть свой файл этой книги —
+          загрузи его, и проверка станет полной, со сверкой с текстом.
+        </p>
+      )}
       <div className="btn-row mt-16">
-        <button className="btn secondary" onClick={onReplace}>Заменить книгу</button>
+        <button className="btn secondary" onClick={onReplace}>{data.book?.source === "shared" ? "Загрузить свой файл" : "Заменить книгу"}</button>
         <button
           className="btn ghost"
           disabled={busy}
@@ -273,6 +280,39 @@ function PlanSummary({ data, onReplan, onReplace }: { data: BookState; onReplan:
         </button>
       </div>
       {data.has_progress && <p className="tiny muted mt-12">При замене план начнётся заново со следующего дня, стрик сохранится.</p>}
+    </div>
+  );
+}
+
+function TogetherCard({ offer, onDone }: { offer: NonNullable<BookState["together"]>; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="card mt-16 together-card">
+      <div className="eyebrow">Читать вместе</div>
+      <div className="seg-title" style={{ fontSize: 20, margin: "6px 0" }}>«{offer.title}»</div>
+      <p className="small muted" style={{ margin: 0 }}>
+        {offer.partner_name} зовёт читать эту книгу вместе: тот же план на {fmtDays(offer.plan_days)}, одна и та же глава в один день,
+        общий стрик. Читаешь по своему экземпляру — бумажному, в любом приложении или своим файлом.
+      </p>
+      <button
+        className="btn primary block mt-16"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await api.post("/book/together");
+            haptic("success");
+            onDone();
+          } catch (e) {
+            toast((e as Error).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        Читаем вместе
+      </button>
+      <p className="tiny muted mt-8 center" style={{ marginBottom: 0 }}>Или выбери свою книгу ниже</p>
     </div>
   );
 }

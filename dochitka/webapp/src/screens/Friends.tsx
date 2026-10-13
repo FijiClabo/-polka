@@ -108,14 +108,25 @@ function PairBlock({ data, reload }: { data: PairData; reload: () => void }) {
         <div className="label">НАПАРНИК</div>
         <div className="row mt-12" style={{ alignItems: "flex-start" }}>
           <div className="grow">
-            <b style={{ fontSize: 18 }}>Читать вдвоём проще</b>
-            <p className="small" style={{ color: "var(--text-2)", margin: "6px 0 0" }}>
-              Общий стрик растёт, только если день сдан у вас двоих. Каждый читает свою книгу.
-            </p>
+            {data.invite_kind === "together" ? (
+              <>
+                <b style={{ fontSize: 18 }}>Читать «{data.book_title}» вместе</b>
+                <p className="small" style={{ color: "var(--text-2)", margin: "6px 0 0" }}>
+                  Друг получит тот же план: те же главы в те же дни и общий стрик. Книга у каждого своя — твой файл другу не передаётся.
+                </p>
+              </>
+            ) : (
+              <>
+                <b style={{ fontSize: 18 }}>Читать вдвоём проще</b>
+                <p className="small" style={{ color: "var(--text-2)", margin: "6px 0 0" }}>
+                  Общий стрик растёт, только если день сдан у вас двоих. Выбери книгу и срок — и друга можно позвать читать её вместе.
+                </p>
+              </>
+            )}
           </div>
         </div>
         <button className="btn primary block mt-16" onClick={() => openTgLink(`https://t.me/share/url?url=${encodeURIComponent(data.invite_link!)}&text=${encodeURIComponent(data.invite_text || "")}`)}>
-          Позвать напарника
+          {data.invite_kind === "together" ? "Позвать читать вместе" : "Позвать напарника"}
         </button>
       </div>
     );
@@ -142,12 +153,20 @@ function PairBlock({ data, reload }: { data: PairData; reload: () => void }) {
           <div className={`st${pDone ? " ok" : ""}`}>{pDone ? (p.done_at ? `сдано в ${p.done_at}` : "сдано") : STATUS_TEXT[p.today] || ""}</div>
         </div>
       </div>
-      <div className="foot">
-        {p.plan_day && p.plan_days
-          ? `${firstName(p.name)}: день ${Math.min(p.plan_day, p.plan_days)} из ${p.plan_days}. `
-          : `${firstName(p.name)} ещё настраивает план. `}
-        Каждый читает свою книгу — напарнику виден только прогресс.
-      </div>
+      {data.together ? (
+        <div className="together-progress">
+          <div className="small">Читаете вместе «{data.together.title}»</div>
+          <ProgressRow who="Ты" pct={data.together.me} />
+          <ProgressRow who={firstName(p.name)} pct={data.together.partner} />
+        </div>
+      ) : (
+        <div className="foot">
+          {p.plan_day && p.plan_days
+            ? `${firstName(p.name)}: день ${Math.min(p.plan_day, p.plan_days)} из ${p.plan_days}. `
+            : `${firstName(p.name)} ещё настраивает план. `}
+          Каждый читает свою книгу — напарнику виден только прогресс.
+        </div>
+      )}
       {data.can_nudge && (
         <button
           className="btn secondary block mt-12"
@@ -184,6 +203,16 @@ function PairBlock({ data, reload }: { data: PairData; reload: () => void }) {
       >
         Выйти из пары
       </button>
+    </div>
+  );
+}
+
+function ProgressRow({ who, pct }: { who: string; pct: number }) {
+  return (
+    <div className="tp-row">
+      <span className="tp-who">{who}</span>
+      <div className="hbar-track grow"><i style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} /></div>
+      <b className="tp-pct">{pct}%</b>
     </div>
   );
 }

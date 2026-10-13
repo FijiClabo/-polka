@@ -53,7 +53,7 @@ def verdict_system(project: str) -> str:
 
 def verdict_context(
     *, title: str, author: str, segment_title: str, day_number: int, pages: str,
-    segment_text: str | None, previous_summary: str | None,
+    segment_text: str | None, previous_summary: str | None, segment_summary: str | None = None,
 ) -> str:
     parts = [
         "<book>",
@@ -66,6 +66,12 @@ def verdict_context(
         parts.append(f"<previous_summary>\n{previous_summary}\n</previous_summary>")
     if segment_text:
         parts.append(f"<segment_text>\n{segment_text}\n</segment_text>")
+    elif segment_summary:
+        parts.append(
+            "<segment_summary>\nТекста отрезка нет: человек читает свой экземпляр книги. Ниже краткое содержание этого отрезка — "
+            "сверяй пересказ с ним по смыслу. Издание или перевод могут отличаться, поэтому детали, которых нет в кратком "
+            f"содержании, — не ошибка. Вердикт rejected не используй.\n{segment_summary}\n</segment_summary>"
+        )
     else:
         parts.append(
             "<segment_text>Текста нет: книга без файла (бумажная или в другом приложении), страницы — по изданию человека. "

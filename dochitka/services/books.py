@@ -169,6 +169,9 @@ async def confirm_plan(session: AsyncSession, user: User, enr: Enrollment, plan_
     if enr.plan_start_date is not None and (today_for(user) > enr.plan_start_date or await has_progress(session, enr)):
         # старая кнопка в чате не должна пересобрать идущий план и обнулить прогресс
         raise PlanError("План уже идёт — срок поменять нельзя. Чтобы начать заново, замени книгу")
+    if book.source == "shared":
+        raise PlanError("Это план напарника: срок такой же, как у него. Свой срок можно выбрать, если загрузить свой файл "
+                        "книги или добавить её без файла.")
     allowed = {o.days for o in options_for(book, enr)}
     if plan_days not in allowed:
         raise PlanError("Такой срок для этой книги недоступен")

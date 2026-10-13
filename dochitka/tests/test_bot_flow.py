@@ -173,7 +173,7 @@ async def test_full_flow(env):
     await send_text(bot, dp, U, "/friends")
     assert any("личная ссылка" in t for t in session.texts())
     await send_text(bot, dp, U, "/pair")
-    assert any("Позови напарника" in t for t in session.texts())
+    assert any("Позови друга читать вместе" in t and "?start=t_" in t for t in session.texts())
     await send_text(bot, dp, U, "/settings")
     await press(bot, dp, U, "cfg:nudges")
     assert "Толчки выключены" in session.texts()[-1]
@@ -331,3 +331,31 @@ async def test_takedown_by_rightsholder(env):
         assert texts_left == []
     await send_text(bot, dp, ADMIN, f"/takedown {book_id}", "Админ")
     assert "уже удалён" in session.texts()[-1]
+
+
+async def test_read_together_by_link(env):
+    """Ссылка «читать вместе»: друг получает предложение взять тот же план и берёт его кнопкой."""
+    bot, dp, session = env
+    set_now(datetime.now().date(), 10)
+    A, B = 781, 782
+    for uid in (A, B):
+        await send_text(bot, dp, uid, "/start")
+        for cb in ("ob:1", "ob:2", "ob:go", "consent:pd", "tz:Europe/Moscow", "mt:08:00", "et:21:00"):
+            await press(bot, dp, uid, cb)
+        await send_text(bot, dp, uid, "Червяков в театре чихнул на лысину генерала Бризжалова и сильно смутился, начал думать.")
+    await send_doc(bot, dp, session, A, "book.epub", sample_set()["01_clean_with_toc.epub"])
+    await press(bot, dp, A, "plan:21")
+
+    await send_text(bot, dp, A, "/pair")
+    invite = session.texts()[-1]
+    assert "читать вместе «Аккуратная книга»" in invite and "?start=t_" in invite
+    code = invite.split("?start=t_")[1].split()[0]
+
+    await send_text(bot, dp, B, f"/start t_{code}", "Боря")
+    assert any("читает «Аккуратная книга»" in t for t in session.texts()[-3:])
+    assert "tg:yes" in session.last_markup_callbacks()
+    await press(bot, dp, B, "tg:yes", "Боря")
+    assert any("тот же план" in t for t in session.texts()[-3:])
+
+    await send_text(bot, dp, B, "/book", "Боря")
+    assert "план напарника" in session.texts()[-1]

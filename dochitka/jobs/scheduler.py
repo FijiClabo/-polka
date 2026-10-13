@@ -16,7 +16,7 @@ from sqlalchemy import and_, or_, select
 import texts
 from ai.checker import summarize_segment
 from ai.llm import LLMUnavailable, get_llm
-from books.plan import segment_anchors, segment_minutes, segment_place
+from books.plan import anchors_of, segment_minutes, segment_place
 from bot.ui import flush
 from core import clock
 from core.days import clock_minutes_in_user_day, minutes_since_day_start, plan_day_number
@@ -135,7 +135,7 @@ async def _morning_evening(s, enr: Enrollment, user: User, outbox: Outbox) -> No
                 segment_place(seg.page_from, seg.page_to, seg.pos_from, seg.pos_to, paper), minutes,
                 catching_up=view.catching_up, yesterday=yesterday if yesterday in ("frozen", "missed") else None,
                 streak=enr.streak, partner=partner.display_name if partner else None, run_started=view.plan_day == 1,
-                anchors=None if paper else segment_anchors(seg.text), paper=paper,
+                anchors=None if paper else anchors_of(seg.text, seg.start_words, seg.end_words), paper=paper,
             )
             rows = []
             if book.has_text:
