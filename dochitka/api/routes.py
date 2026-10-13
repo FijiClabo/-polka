@@ -42,7 +42,7 @@ from services.books import (
     store_upload,
     update_book_meta,
 )
-from services.common import Outbox, log_event, today_for
+from services.common import Outbox, OutMsg, log_event, today_for
 from services.consent import give_consent, has_consent
 from services.flow import submit_retelling
 from services.progress import DayView, accepted_by_day, effective_freezes, load_view
@@ -410,7 +410,7 @@ async def get_pair(user: User = Depends(current_user), s: AsyncSession = Depends
         "has_pair": True, "partner": {**user_brief(partner), "today": st.today, "done_at": st.done_at,
                                       "plan_day": st.plan_day, "plan_days": st.plan_days, "streak": st.streak},
         "pair_streak": pair.streak, "best_pair_streak": pair.best_streak, "can_nudge": st.today in ("reading", "burned") and not nudged, "nudged": nudged,
-        "together": together,
+        "together": together, "partner_is_friend": await are_friends(s, user.id, partner.id),
     }
 
 
@@ -869,7 +869,47 @@ async def get_friend(user_id: int, user: User = Depends(current_user), s: AsyncS
         item.pop("retellings", None)  # другу — только полка, ничего о пересказах
         item.pop("partner", None)  # и без имени напарника: это данные третьего человека
     sh.pop("retellings_count", None)
-    return {"status": st.__dict__, "achievements": await achievements_of(s, f.id), "shelf": sh}
+    await log_event(s, "friend_shelf_viewed", user.id, friend=f.id)
+    return {"status": st.__dict__, "achievements": await achievements_of(s, f.id), "shelf": sh,
+            "can_join_book": await _can_join_friend_book(s, user, enr)}
+
+
+async def _can_join_friend_book(s: AsyncSession, user: User, friend_enr: Enrollment | None) -> bool:
+    """Можно взять план текущей книги друга: у друга срок выбран, у меня своя книга ещё не идёт."""
+    from services.together import _plan_running, same_book, shareable_book
+
+    src = await shareable_book(s, friend_enr)
+    if src is None:
+        return False
+    mine_enr = await current_enrollment(s, user.id)
+    mine = await s.get(Book, mine_enr.book_id) if mine_enr and mine_enr.book_id else None
+    if same_book(mine, src):
+        return False
+    return not (mine_enr and await _plan_running(s, user, mine_enr))
+
+
+@router.post("/friends/{user_id}/same-book")
+async def post_friend_same_book(user_id: int, user: User = Depends(need_consent), s: AsyncSession = Depends(get_session)):
+    """Читать ту же книгу, что друг: копия его плана без текста, свой экземпляр. Без пары и общего стрика."""
+    from services.together import copy_plan, shareable_book
+
+    if not await are_friends(s, user.id, user_id):
+        raise HTTPException(404, "Не найдено")
+    f = await s.get(User, user_id)
+    f_enr = await current_enrollment(s, f.id)
+    if not await _can_join_friend_book(s, user, f_enr):
+        raise HTTPException(409, "Сейчас взять эту книгу нельзя: у тебя уже идёт своя или друг ещё не выбрал срок.")
+    src = await shareable_book(s, f_enr)
+    enr = await ensure_enrollment(s, user)
+    book = await copy_plan(s, user, enr, src)
+    await log_event(s, "friend_same_book", user.id, enr.run_id, friend=f.id, source_book=src.id)
+    out = Outbox()
+    if not f.bot_blocked:
+        out.add(OutMsg(f.tg_id, texts.friend_same_book(user.display_name, src.title), kind="friend",
+                       buttons=[[{"text": "Друзья", "webapp": "friends"}]]))
+    await s.commit()
+    await _flush(out)
+    return {"book": book_brief(book), "plan_days": enr.plan_days, "awaiting_payment": enr.status == "invited"}
 
 
 @router.delete("/friends/{user_id}")

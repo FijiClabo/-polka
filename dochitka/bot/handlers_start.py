@@ -16,7 +16,7 @@ from ai.checker import CheckInput, check_retelling
 from ai.llm import LLMUnavailable
 from bot.common import Flow, load_user, parse_time, parse_tz, tz_from_location, tz_label
 from bot.ui import REMOVE_KB, app_kb, flush, kb, location_kb
-from db.models import Run, User
+from db.models import Book, Run, User
 from db.session import session_scope
 from services.common import Outbox, OutMsg, log_event, now
 from services.progress import load_view
@@ -64,7 +64,7 @@ async def cmd_start(message: Message, command: CommandObject, state: FSMContext,
 
 
 def _is_social(payload: str) -> bool:
-    return payload.startswith(("f_", "p_", "t_")) or payload == "group"
+    return payload.startswith(("f_", "p_", "t_", "c_")) or payload == "group"
 
 
 async def _apply_payload(s, user: User, created: bool, payload: str, outbox: Outbox) -> str | None:
@@ -96,6 +96,17 @@ async def _apply_payload(s, user: User, created: bool, payload: str, outbox: Out
         # групповой забег ведущего — только по его ссылке
         status, _enr = await join_cohort(s, user)
         outbox.add(_reply(user, texts.COHORT_JOIN[status]))
+    elif payload.startswith("c_"):
+        from services.clubs import join_club
+
+        status, club = await join_club(s, user, payload[2:], outbox)
+        if status == "ok" and club is not None:
+            enr = await current_enrollment(s, user.id)
+            book = await s.get(Book, enr.book_id)
+            outbox.add(OutMsg(user.tg_id, texts.club_joined(club.title, book.title, enr.plan_days or 0, _meet(club.meet_date)),
+                              buttons=[[{"text": "Клуб", "webapp": "club"}]]))
+        else:
+            outbox.add(_reply(user, texts.CLUB_JOIN.get(status, texts.CLUB_JOIN["not_found"])))
     elif payload.startswith(("p_", "t_")):
         together = payload.startswith("t_")
         status, inviter = await join_pair_by_code(s, user, payload[2:], outbox, together=together)
@@ -114,6 +125,10 @@ async def _apply_payload(s, user: User, created: bool, payload: str, outbox: Out
         elif status == "already_paired":
             outbox.add(_reply(user, "У тебя уже есть напарник в этом забеге."))
     return inviter_name
+
+
+def _meet(d) -> str | None:
+    return f"{d.day} {texts.MONTHS[d.month - 1]}" if d else None
 
 
 def _reply(user: User, text: str):
@@ -422,6 +437,12 @@ async def after_onboarding(bot: Bot, chat_id: int, user_id: int, inviter_name: s
     async with session_scope() as s:
         user = await s.get(User, user_id)
         sprint_ok = not await sprint_block(s, user.id) and (bool(user.invited_by_id) or s_.sprint_for_everyone)
+        enr = await current_enrollment(s, user.id)
+        has_book = bool(enr and enr.book_id and enr.plan_confirmed_at)
+    if has_book:
+        # книга уже есть — по ссылке клуба или «читаем вместе»: сразу к плану и доступу
+        await send_status(bot, chat_id, user_id)
+        return
     await send_book_prompt(bot, chat_id)
     if sprint_ok:
         await bot.send_message(chat_id, texts.sprint_offer(inviter_name),

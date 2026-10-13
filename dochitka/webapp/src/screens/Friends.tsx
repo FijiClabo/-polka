@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { api, type FriendStatus, type PairData } from "../api";
-import { IFlameSolid, IHand, IPlus } from "../components/Icons";
+import { api, type ClubState, type FriendStatus, type PairData } from "../api";
+import { IChevron, IFlameSolid, IHand, IPeople, IPlus } from "../components/Icons";
 import { BookStackIll } from "../components/Illustrations";
 import { Avatar, Empty, ErrorState, ScreenSkeleton, Skeleton, toast } from "../components/ui";
 import { firstName, nudgeToast, STATUS_TEXT } from "../format";
@@ -17,6 +17,7 @@ export default function Friends() {
   const nav = useNav();
   const friends = useApi<FriendsData>("/friends");
   const pair = useApi<PairData>("/pair");
+  const club = useApi<ClubState>("/club");
 
   const invite = async () => {
     haptic("light");
@@ -42,6 +43,8 @@ export default function Friends() {
       </div>
 
       <div className="mt-16">{pair.data ? <PairBlock data={pair.data} reload={pair.reload} /> : <Skeleton h={190} />}</div>
+
+      {club.data && <ClubBlock state={club.data} />}
 
       <div className="section-title">
         <span>Сегодня</span>
@@ -183,6 +186,22 @@ function PairBlock({ data, reload }: { data: PairData; reload: () => void }) {
           <IHand size={18} /> Напомнить напарнику
         </button>
       )}
+      {data.partner_is_friend === false && (
+        <button
+          className="btn ghost block mt-8"
+          disabled={busy}
+          onClick={async () => {
+            try {
+              const r = await api.post<{ result: string }>("/friends/request", { user_id: p.id });
+              toast(r.result === "already" ? "Вы уже друзья" : `${firstName(p.name)} получит приглашение в друзья в боте`);
+            } catch (e) {
+              toast((e as Error).message);
+            }
+          }}
+        >
+          Позвать {firstName(p.name)} в друзья
+        </button>
+      )}
       <button
         className="link block tiny mt-12"
         disabled={busy}
@@ -214,5 +233,36 @@ function ProgressRow({ who, pct }: { who: string; pct: number }) {
       <div className="hbar-track grow"><i style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} /></div>
       <b className="tp-pct">{pct}%</b>
     </div>
+  );
+}
+
+function ClubBlock({ state }: { state: ClubState }) {
+  const nav = useNav();
+  const c = state.club;
+  if (c) {
+    const top = c.members.slice(0, 4);
+    return (
+      <button className="card club-card mt-12" onClick={() => nav.push({ name: "club" })}>
+        <div className="row between">
+          <div className="eyebrow">Клуб</div>
+          <IChevron size={16} />
+        </div>
+        <b style={{ fontSize: 18 }}>{c.title}</b>
+        <div className="small muted">«{c.book_title}» · {c.count} {c.count % 10 === 1 && c.count % 100 !== 11 ? "участник" : "участников"} · сегодня сдали {c.done_today}</div>
+        <div className="avatars-stack mt-8">
+          {top.map((m) => <Avatar key={m.id} name={m.name} url={m.photo_url} size={30} seed={m.id} />)}
+        </div>
+      </button>
+    );
+  }
+  return (
+    <button className="card row club-card mt-12" style={{ textAlign: "left" }} onClick={() => nav.push({ name: "club" })}>
+      <IPeople size={24} />
+      <div className="grow">
+        <b>Ведёшь книжный клуб?</b>
+        <div className="small muted">Вся группа читает одну книгу к встрече, а ты видишь, кто идёт по плану.</div>
+      </div>
+      <IChevron size={16} />
+    </button>
   );
 }

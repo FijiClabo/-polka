@@ -159,3 +159,46 @@ async def send_finish(bot: Bot, chat_id: int, user_id: int) -> None:
     if not subscribed:
         rows.append([{"text": "Тарифы", "webapp": "pay"}])
     await bot.send_message(chat_id, upsell, reply_markup=kb(rows))
+
+
+@router.callback_query(F.data.startswith("fr:"))
+async def cb_friend_request(call: CallbackQuery, bot: Bot) -> None:
+    """Ответ на приглашение в друзья от участника клуба или напарника."""
+    from services.social import accept_friend
+
+    await call.answer()
+    await call.message.edit_reply_markup(reply_markup=None)
+    parts = call.data.split(":")
+    if parts[1] != "ok" or len(parts) < 3 or not parts[2].isdigit():
+        await call.message.answer("Хорошо. Если передумаешь, попроси прислать приглашение ещё раз.")
+        return
+    out = Outbox()
+    async with session_scope() as s:
+        user, _ = await load_user(s, call.from_user)
+        res = await accept_friend(s, user, int(parts[2]), out)
+    await flush(bot, out)
+    await call.message.answer(texts.FRIEND_REQUEST_RESULT.get(res, texts.FRIEND_REQUEST_RESULT["expired"]),
+                              reply_markup=app_kb("Друзья", "friends") if res == "ok" else None)
+
+
+@router.message(Command("club"))
+async def cmd_club(message: Message) -> None:
+    """Книжный клуб: кто как идёт — коротко в чате, подробно в мини-приложении."""
+    from services.clubs import club_of, members
+
+    async with session_scope() as s:
+        user, _ = await load_user(s, message.from_user)
+        club = await club_of(s, await current_enrollment(s, user.id))
+        if club is None:
+            await message.answer(
+                "Ты пока не в клубе. Чтобы создать клуб для своей книги, открой «Друзья» → «Ведёшь книжный клуб?». "
+                "Чтобы вступить — перейди по ссылке ведущего.",
+                reply_markup=app_kb("Клубы", "club"),
+            )
+            return
+        rows = await members(s, club)
+        lines = [f"<b>{texts.e(club.title)}</b> · {len(rows)} уч. · сегодня сдали {sum(1 for m in rows if m.today == 'done')}"]
+        for m in rows[:15]:
+            mark = "сдано" if m.today == "done" else STATUS_WORD.get(m.today, "")
+            lines.append(f"{texts.e(m.name)} — {round(m.progress * 100)}% · {mark}")
+    await message.answer("\n".join(lines), reply_markup=app_kb("Клуб", "club"))

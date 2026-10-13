@@ -5,6 +5,7 @@ import { ErrorState, ScreenSkeleton, TabBar, ToastHost, type Tab } from "./compo
 import { NavContext, TABS, type Nav, type Route } from "./nav";
 import AddBook from "./screens/AddBook";
 import Admin from "./screens/Admin";
+import Club from "./screens/Club";
 import Consent from "./screens/Consent";
 import Finish from "./screens/Finish";
 import FriendCard from "./screens/FriendCard";
@@ -22,7 +23,7 @@ import { inTelegram, initTelegram, onThemeChange, paintChrome, setBackButton, se
 function initialRoute(): Route {
   const p = startParams();
   const s = p.get("s") || "today";
-  const known = ["today", "run", "friends", "shelf", "read", "retell", "profile", "book", "finish", "pay", "admin"];
+  const known = ["today", "run", "friends", "shelf", "read", "retell", "profile", "book", "finish", "pay", "admin", "club"];
   if (!known.includes(s)) return { name: "today" };
   const params: Record<string, string> = {};
   p.forEach((v, k) => {
@@ -139,11 +140,12 @@ export default function App() {
     case "read": screen = <Read day={Number(route.params?.d || route.params?.day || 0)} />; break;
     case "retell": screen = <Retell />; break;
     case "profile": screen = <Profile />; break;
-    case "book": screen = <AddBook />; break;
+    case "book": screen = <AddBook prefill={route.params?.title ? { title: String(route.params.title), author: String(route.params.author || "") } : undefined} />; break;
     case "friend": screen = <FriendCard id={Number(route.params?.id)} />; break;
     case "finish": screen = <Finish />; break;
     case "pay": screen = <Pay />; break;
     case "admin": screen = me.user.is_admin ? <Admin /> : <Today />; break;
+    case "club": screen = <Club />; break;
     default: screen = <Today />;
   }
 

@@ -11,12 +11,14 @@ interface Card {
   status: FriendStatus;
   achievements: Achievement[];
   shelf: ShelfData;
+  can_join_book: boolean;
 }
 
 export default function FriendCard({ id }: { id: number }) {
   const nav = useNav();
   const { data, error, loading, reload } = useApi<Card>(`/friends/${id}`);
   const [sent, setSent] = useState(false);
+  const [joining, setJoining] = useState(false);
   if (error && !data) return <ErrorState message={error} onRetry={reload} />;
   if (loading || !data) return <ScreenSkeleton />;
   const s = data.status;
@@ -55,6 +57,34 @@ export default function FriendCard({ id }: { id: number }) {
           </div>
         </div>
       )}
+      {data.can_join_book && s.book_title && (
+        <div className="card mt-12 together-card">
+          <b>Читать «{s.book_title}» вместе с {firstName(s.name)}</b>
+          <p className="small muted" style={{ margin: "6px 0 0" }}>
+            Получишь тот же план: те же главы в те же дни. Читаешь по своему экземпляру — бумажному, в любом приложении или файлом.
+          </p>
+          <button
+            className="btn primary block mt-12"
+            disabled={joining}
+            onClick={async () => {
+              setJoining(true);
+              try {
+                const r = await api.post<{ awaiting_payment: boolean }>(`/friends/${id}/same-book`);
+                haptic("success");
+                invalidate();
+                toast(`Готово: «${s.book_title}» в твоём плане`);
+                nav.replace(r.awaiting_payment ? { name: "pay" } : { name: "today" });
+              } catch (e) {
+                toast((e as Error).message);
+              } finally {
+                setJoining(false);
+              }
+            }}
+          >
+            Читаем вместе
+          </button>
+        </div>
+      )}
       {(s.today === "reading" || s.today === "burned") && !sent && (
         <button
           className="btn secondary block mt-12"
@@ -74,6 +104,25 @@ export default function FriendCard({ id }: { id: number }) {
           <div className="card">
             <Shelf items={spines} slot={false} height={150} />
           </div>
+          {data.shelf.finished.length > 0 && (
+            <div className="list mt-12">
+              {data.shelf.finished.map((b) => (
+                <div key={b.book_id} className="list-item">
+                  <span className="spine-dot" style={{ background: b.spine_color }} />
+                  <div className="grow" style={{ minWidth: 0 }}>
+                    <b className="ellipsis">{b.title}</b>
+                    {b.author && <div className="sub ellipsis">{b.author}</div>}
+                  </div>
+                  <button
+                    className="chip-link"
+                    onClick={() => nav.push({ name: "book", params: { title: b.title, author: b.author || "" } })}
+                  >
+                    Хочу прочитать
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </>
       )}
       <div className="section-title">Значки</div>

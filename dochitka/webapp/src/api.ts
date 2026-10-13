@@ -252,6 +252,7 @@ export interface PairData {
   book_title?: string | null;
   /** Читаете одну книгу: прогресс обоих в процентах. */
   together?: { title: string; me: number; partner: number } | null;
+  partner_is_friend?: boolean;
 }
 
 export interface ShelfItem {
@@ -397,4 +398,54 @@ export interface AdminOverview {
   prices: Record<Product, number>;
   payments_enabled: boolean;
   sprint_for_everyone: boolean;
+}
+
+export interface ClubMember extends UserBrief {
+  progress: number;
+  today: string;
+  plan_day: number | null;
+  plan_days: number | null;
+  streak: number;
+  is_host: boolean;
+  is_me: boolean;
+  is_friend: boolean;
+}
+
+export interface ClubData {
+  id: number;
+  title: string;
+  book_title: string | null;
+  book_author: string | null;
+  spine_color: string | null;
+  meet_date: string | null;
+  plan_days: number;
+  is_host: boolean;
+  host_name: string | null;
+  link: string;
+  invite_text: string;
+  share_url: string;
+  members: ClubMember[];
+  done_today: number;
+  count: number;
+}
+
+export interface ClubState {
+  club: ClubData | null;
+  can_create: boolean;
+  book_title?: string | null;
+}
+
+export interface AdminClub {
+  id: number;
+  title: string;
+  active: boolean;
+  host: string | null;
+  book: string | null;
+  meet_date: string | null;
+  members: number;
+  done_today: number;
+  finished: number;
+  avg_progress: number;
+  promo_code: string | null;
+  link: string;
 }

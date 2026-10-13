@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from api.admin import router as admin_router
+from api.clubs import router as clubs_router
 from api.pages import router as pages_router
 from api.routes import public_router, set_bot
 from api.routes import router as api_router
@@ -99,6 +100,7 @@ app = FastAPI(title="Dochitka", lifespan=lifespan, docs_url=None, redoc_url=None
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.include_router(api_router)
 app.include_router(admin_router)
+app.include_router(clubs_router)
 app.include_router(public_router)
 app.include_router(pages_router)
 

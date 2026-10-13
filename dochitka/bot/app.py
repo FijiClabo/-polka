@@ -34,7 +34,8 @@ log = logging.getLogger(__name__)
 USER_COMMANDS = [
     BotCommand(command="today", description="Отрезок на сегодня"),
     BotCommand(command="book", description="Моя книга"),
-    BotCommand(command="pair", description="Напарник"),
+    BotCommand(command="pair", description="Напарник и «читаем вместе»"),
+    BotCommand(command="club", description="Книжный клуб"),
     BotCommand(command="friends", description="Друзья и личная ссылка"),
     BotCommand(command="settings", description="Время и часовой пояс"),
     BotCommand(command="buy", description="Тарифы и оплата"),

@@ -10,7 +10,7 @@ import { closeApp, confirmDialog, haptic } from "../tg";
 
 const COLORS = ["#C9644F", "#7E9C7A", "#4F6F9F", "#E2B84F", "#8A6A85", "#4E6B57", "#B98B6E", "#3D4B66", "#D49A8C"];
 
-export default function AddBook() {
+export default function AddBook({ prefill }: { prefill?: { title: string; author: string } }) {
   const nav = useNav();
   const st = useApi<BookState>("/book");
   const [mode, setMode] = useState<"choose" | "paper">("choose");
@@ -90,6 +90,15 @@ export default function AddBook() {
         {mode === "choose" ? (
           <>
             {data.together && <TogetherCard offer={data.together} onDone={() => { invalidate(); st.reload(); }} />}
+            {prefill && !data.together && (
+              <div className="card mt-16">
+                <div className="eyebrow">С полки друга</div>
+                <div className="seg-title" style={{ fontSize: 20, margin: "6px 0" }}>«{prefill.title}»</div>
+                <p className="small muted" style={{ margin: 0 }}>
+                  Загрузи файл этой книги, если он у тебя есть, — проверка будет полной. Или читай без файла: название уже подставим.
+                </p>
+              </div>
+            )}
             <div className="drop mt-16" onClick={() => fileRef.current?.click()}>
               <IUpload size={30} />
               <div style={{ fontWeight: 700, marginTop: 8 }}>Есть файл epub или fb2</div>
@@ -111,7 +120,7 @@ export default function AddBook() {
             <button className="btn ghost block mt-12" onClick={closeApp}>Отправить файл в чат</button>
           </>
         ) : (
-          <PaperForm onDone={() => { invalidate(); st.reload(); setMode("choose"); }} onCancel={() => setMode("choose")} />
+          <PaperForm prefill={prefill} onDone={() => { invalidate(); st.reload(); setMode("choose"); }} onCancel={() => setMode("choose")} />
         )}
       </div>
     );
@@ -317,9 +326,9 @@ function TogetherCard({ offer, onDone }: { offer: NonNullable<BookState["togethe
   );
 }
 
-function PaperForm({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
-  const [title, setTitle] = useState("");
-  const [author, setAuthor] = useState("");
+function PaperForm({ prefill, onDone, onCancel }: { prefill?: { title: string; author: string }; onDone: () => void; onCancel: () => void }) {
+  const [title, setTitle] = useState(prefill?.title ?? "");
+  const [author, setAuthor] = useState(prefill?.author ?? "");
   const [pg, setPg] = useState("");
   const [busy, setBusy] = useState(false);
   const n = Number(pg);

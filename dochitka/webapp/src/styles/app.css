@@ -2187,3 +2187,99 @@ img {
   font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
+
+/* ---------------------------------------------------------------- клуб */
+
+.steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+
+.steps li {
+  position: relative;
+  padding: 0 0 12px 40px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text-2);
+  counter-increment: step;
+}
+
+.steps li b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.steps li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: -2px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.club-summary {
+  display: flex;
+  gap: 18px;
+  font-size: 14px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.club-summary b {
+  color: var(--text);
+  font-size: 17px;
+}
+
+.club-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+}
+
+.club-card.row {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+}
+
+.list-item.member {
+  align-items: flex-start;
+}
+
+.list-item.member .hbar-track {
+  height: 5px;
+}
+
+.chip-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--chip);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.spine-dot {
+  flex: none;
+  width: 10px;
+  height: 34px;
+  border-radius: 3px;
+}

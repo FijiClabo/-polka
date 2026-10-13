@@ -193,6 +193,7 @@ class Enrollment(Base):
     freezes_week_start: Mapped[int] = mapped_column(Integer, default=0)  # индекс недели плана
     freezes_per_week: Mapped[int] = mapped_column(Integer, default=1)  # 2 — по абонементу
     access: Mapped[str | None] = mapped_column(String(16))  # как открыт доступ: purchase | credit | subscription | free | manual
+    club_id: Mapped[int | None] = mapped_column(ForeignKey("clubs.id", ondelete="SET NULL"), index=True)
     purchase_id: Mapped[int | None] = mapped_column(ForeignKey("purchases.id", ondelete="SET NULL"))
     last_closed_day: Mapped[date | None] = mapped_column(Date)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -201,6 +202,22 @@ class Enrollment(Base):
 
     run: Mapped[Run] = relationship(lazy="joined")
     book: Mapped[Book | None] = relationship(lazy="joined")
+
+
+class Club(Base):
+    """Книжный клуб: ведущий делится планом своей книги, участники идут по нему со своими экземплярами."""
+
+    __tablename__ = "clubs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(16), unique=True, index=True)
+    title: Mapped[str] = mapped_column(String(120))
+    host_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    book_id: Mapped[int | None] = mapped_column(ForeignKey("books.id", ondelete="SET NULL"))  # книга ведущего, с неё копируется план
+    meet_date: Mapped[date | None] = mapped_column(Date)  # встреча клуба, к которой дочитываем
+    promo_code: Mapped[str | None] = mapped_column(String(32))  # промокод для участников (выдаёт админ)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = _now_col()
 
 
 class Pair(Base):

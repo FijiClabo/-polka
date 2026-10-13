@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, type AdminOverview, type Product, type PromoRow } from "../api";
+import { api, type AdminClub, type AdminOverview, type Product, type PromoRow } from "../api";
 import { IRefresh } from "../components/Icons";
 import { ErrorState, ScreenSkeleton, toast } from "../components/ui";
 import { dayMonth, plural } from "../format";
@@ -16,7 +16,7 @@ const KIND_TITLE: Record<string, string> = {
   voice: "распознавание голоса",
 };
 
-type Tab = "stats" | "promos" | "access";
+type Tab = "stats" | "promos" | "clubs" | "access";
 
 export default function Admin() {
   const { data, error, loading, reload } = useApi<AdminOverview>("/admin/overview");
@@ -38,11 +38,13 @@ export default function Admin() {
       <div className="seg-switch admin-tabs">
         <button className={tab === "stats" ? "on" : ""} onClick={() => setTab("stats")}>Аналитика</button>
         <button className={tab === "promos" ? "on" : ""} onClick={() => setTab("promos")}>Промокоды</button>
+        <button className={tab === "clubs" ? "on" : ""} onClick={() => setTab("clubs")}>Клубы</button>
         <button className={tab === "access" ? "on" : ""} onClick={() => setTab("access")}>Доступ</button>
       </div>
 
       {tab === "stats" && <Stats d={data} />}
       {tab === "promos" && <Promos d={data} reload={reload} />}
+      {tab === "clubs" && <Clubs promos={data.promos} />}
       {tab === "access" && <Access />}
     </div>
   );
@@ -404,5 +406,66 @@ function Access() {
         </p>
       </div>
     </>
+  );
+}
+
+// ------------------------------------------------------------------ клубы
+
+function Clubs({ promos }: { promos: PromoRow[] }) {
+  const { data, error, reload } = useApi<{ clubs: AdminClub[] }>("/admin/clubs");
+  if (error && !data) return <ErrorState message={error} onRetry={reload} />;
+  if (!data) return <ScreenSkeleton />;
+  return (
+    <>
+      <div className="section-title">Клубы</div>
+      <p className="small muted" style={{ marginTop: -4 }}>
+        Клуб создаёт ведущий в мини-приложении: «Друзья» → «Ведёшь книжный клуб?». Здесь видно, как идут клубы, и можно
+        привязать промокод — участники получат его при вступлении по ссылке клуба.
+      </p>
+      {data.clubs.length === 0 && <p className="small muted">Пока ни одного клуба.</p>}
+      {data.clubs.map((c) => <ClubCard key={c.id} c={c} promos={promos} reload={reload} />)}
+    </>
+  );
+}
+
+function ClubCard({ c, promos, reload }: { c: AdminClub; promos: PromoRow[]; reload: () => void }) {
+  const [code, setCode] = useState(c.promo_code || "");
+  const save = async (body: { promo_code?: string; active?: boolean }) => {
+    try {
+      await api.post(`/admin/clubs/${c.id}`, body);
+      haptic("success");
+      reload();
+    } catch (e) {
+      toast((e as Error).message);
+    }
+  };
+  return (
+    <div className={`card promo-card${c.active ? "" : " off"}`}>
+      <div className="row between">
+        <b>{c.title}</b>
+        <span className={`badge ${c.active ? "ok" : ""}`}>{c.active ? "идёт" : "закрыт"}</span>
+      </div>
+      <div className="small muted mt-8">
+        «{c.book}» · ведёт {c.host || "—"}{c.meet_date ? ` · встреча ${dayMonth(c.meet_date)}` : ""}
+      </div>
+      <div className="small mt-8">
+        Участников {c.members} · сдали сегодня {c.done_today} · дочитали {c.finished} · в среднем прочитано {c.avg_progress}%
+      </div>
+      <div className="tiny muted mt-8 ellipsis">{c.link}</div>
+      <div className="field mt-12">
+        <label>Промокод для участников</label>
+        <div className="row" style={{ gap: 8 }}>
+          <select className="input grow" value={code} onChange={(e) => setCode(e.target.value)}>
+            <option value="">без промокода</option>
+            {promos.filter((p) => p.active).map((p) => <option key={p.code} value={p.code}>{p.code}</option>)}
+          </select>
+          <button className="btn secondary" onClick={() => save({ promo_code: code })}>Сохранить</button>
+        </div>
+      </div>
+      <div className="btn-row mt-12">
+        <button className="btn secondary" onClick={() => openTgLink(`https://t.me/share/url?url=${encodeURIComponent(c.link)}`)}>Поделиться</button>
+        <button className="btn ghost" onClick={() => save({ active: !c.active })}>{c.active ? "Закрыть" : "Открыть"}</button>
+      </div>
+    </div>
   );
 }

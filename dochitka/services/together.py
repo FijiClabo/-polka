@@ -83,11 +83,19 @@ async def join_same_book(session: AsyncSession, user: User) -> tuple[Book, Enrol
         raise TogetherError("Сейчас взять книгу напарника нельзя: у тебя уже идёт свой план или напарник ещё не выбрал срок.")
     enr = await ensure_enrollment(session, user)
     src = await session.get(Book, offer.book_id)
+    book = await copy_plan(session, user, enr, src)
+    await log_event(session, "together_joined", user.id, enr.run_id, source_book=src.id, days=enr.plan_days)
+    return book, enr, offer
+
+
+async def copy_plan(session: AsyncSession, user: User, enr: Enrollment, src: Book) -> Book:
+    """Копия плана книги без текста: дни, главы, доли книги, метки начала и конца. Срок подтверждается сразу."""
     src_segs = list(await session.scalars(select(Segment).where(Segment.book_id == src.id).order_by(Segment.day_number)))
+    root_id = src.shared_from_id if (src.source == "shared" and src.shared_from_id) else src.id  # краткие содержания — у оригинала
     book = Book(
         owner_user_id=user.id, source="shared", title=src.title, author=src.author, title_norm=src.title_norm,
         author_norm=src.author_norm, total_pages=src.total_pages, total_words=src.total_words,
-        chapters_count=src.chapters_count, spine_color=src.spine_color, parse_status="ok", shared_from_id=src.id,
+        chapters_count=src.chapters_count, spine_color=src.spine_color, parse_status="ok", shared_from_id=root_id,
     )
     session.add(book)
     await session.flush()
@@ -113,6 +121,4 @@ async def join_same_book(session: AsyncSession, user: User) -> tuple[Book, Enrol
     if enr.pair_code is None:
         enr.pair_code = random_code(10)
     await session.flush()
-    await log_event(session, "together_joined", user.id, enr.run_id, source_book=src.id, days=enr.plan_days)
-    return book, enr, offer
-
+    return book

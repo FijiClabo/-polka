@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
+from datetime import timedelta
 
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
@@ -19,6 +20,7 @@ from db.models import (
     Book,
     DayResult,
     Enrollment,
+    Event,
     FriendNudge,
     Friendship,
     Pair,
@@ -26,7 +28,7 @@ from db.models import (
     Run,
     User,
 )
-from services.common import Outbox, OutMsg, allow_social, log_event, random_code, today_for
+from services.common import Outbox, OutMsg, allow_social, log_event, now, random_code, today_for
 from services.progress import load_view
 from services.runs import (
     OPEN_STATUSES,
@@ -80,6 +82,64 @@ async def add_friend_by_code(
         outbox.add(OutMsg(inviter.tg_id, texts.friend_joined(user.display_name), kind="friend",
                           buttons=[[{"text": "Друзья", "webapp": "friends"}]]))
     return inviter
+
+
+async def _same_club(session: AsyncSession, a: int, b: int) -> bool:
+    ea, eb = await current_enrollment(session, a), await current_enrollment(session, b)
+    return bool(ea and eb and ea.club_id and ea.club_id == eb.club_id)
+
+
+async def _requested(session: AsyncSession, sender_id: int, target_id: int, days: int) -> bool:
+    since = now() - timedelta(days=days)
+    for p in await session.scalars(
+        select(Event.payload).where(Event.type == "friend_request", Event.user_id == sender_id, Event.created_at >= since)
+    ):
+        if (p or {}).get("to") == target_id:
+            return True
+    return False
+
+
+async def request_friend(session: AsyncSession, sender: User, target: User, outbox: Outbox) -> str:
+    """Позвать в друзья участника своего клуба или напарника. Дружба — только после «Принять» у второй стороны.
+
+    ok | already | requested | not_allowed | self
+    """
+    if sender.id == target.id:
+        return "self"
+    if await are_friends(session, sender.id, target.id):
+        return "already"
+    if not (await is_partner(session, sender.id, target.id) or await _same_club(session, sender.id, target.id)):
+        return "not_allowed"
+    if await _requested(session, sender.id, target.id, 1):
+        return "requested"
+    if not target.bot_blocked:
+        outbox.add(OutMsg(target.tg_id, texts.friend_request(sender.display_name), kind="friend",
+                          buttons=[[{"text": "Принять", "callback": f"fr:ok:{sender.id}"}],
+                                   [{"text": "Не сейчас", "callback": "fr:no"}]]))
+    await log_event(session, "friend_request", sender.id, to=target.id)
+    return "ok"
+
+
+async def accept_friend(session: AsyncSession, user: User, sender_id: int, outbox: Outbox) -> str:
+    """Принять запрос в друзья: ok | already | expired."""
+    sender = await session.get(User, sender_id)
+    if sender is None or sender.id == user.id:
+        return "expired"
+    if await are_friends(session, sender.id, user.id):
+        return "already"
+    if not await _requested(session, sender.id, user.id, 14):
+        return "expired"
+    low, high = rules.friendship_key(sender.id, user.id)
+    try:
+        async with session.begin_nested():
+            session.add(Friendship(user_low_id=low, user_high_id=high, invited_by_id=sender.id))
+    except IntegrityError:
+        return "already"
+    await log_event(session, "friend_added", user.id, kind="request", inviter_id=sender.id)
+    if not sender.bot_blocked:
+        outbox.add(OutMsg(sender.tg_id, texts.friend_joined(user.display_name), kind="friend",
+                          buttons=[[{"text": "Друзья", "webapp": "friends"}]]))
+    return "ok"
 
 
 # --------------------------------------------------------------------------- публичный статус
@@ -148,6 +208,10 @@ async def nudge(session: AsyncSession, sender: User, target: User, outbox: Outbo
         _, partner, _ = await get_pair_for(session, await current_enrollment(session, sender.id))
         if partner is None or partner.id != target.id:
             return "not_friends"  # напоминать можно только нынешнему напарнику
+    elif kind == "club":
+        ea, eb = await current_enrollment(session, sender.id), await current_enrollment(session, target.id)
+        if not (ea and eb and ea.club_id and ea.club_id == eb.club_id):
+            return "not_friends"  # напоминать можно только участникам своего клуба
     elif not await are_friends(session, sender.id, target.id):
         return "not_friends"
     day = today_for(sender)
@@ -172,7 +236,7 @@ async def nudge(session: AsyncSession, sender: User, target: User, outbox: Outbo
         outbox.add(OutMsg(target.tg_id, texts.nudge_received(sender.display_name), kind="nudge",
                           buttons=[[{"text": "Открыть отрезок", "webapp": "today"}]]))
     await log_event(session, "friend_nudge_sent" if kind == "friend" else "nudge_sent", sender.id, to=target.id,
-                    delivered=delivered)
+                    delivered=delivered, kind=kind)
     return "ok"
 
 

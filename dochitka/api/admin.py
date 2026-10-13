@@ -103,3 +103,52 @@ async def post_grant(body: GrantBody, admin: User = Depends(admin_user), s: Asyn
     until = target.subscription_until.date().isoformat() if target.subscription_until else None
     return {"ok": True, "name": target.display_name, "product": body.product, "until": until,
             "credits": target.run_credits}
+
+
+@router.get("/clubs")
+async def get_clubs(_: User = Depends(admin_user), s: AsyncSession = Depends(get_session)):
+    """Клубы: кто ведёт, какая книга, сколько участников, кто идёт по плану, промокод для участников."""
+    from sqlalchemy import select
+
+    from api.clubs import club_link
+    from db.models import Book, Club
+    from services.clubs import members
+
+    out = []
+    for c in await s.scalars(select(Club).order_by(Club.created_at.desc()).limit(200)):
+        rows = await members(s, c)
+        host = await s.get(User, c.host_user_id) if c.host_user_id else None
+        book = await s.get(Book, c.book_id) if c.book_id else None
+        out.append({
+            "id": c.id, "title": c.title, "active": c.active, "host": host.display_name if host else None,
+            "book": book.title if book else None, "meet_date": c.meet_date.isoformat() if c.meet_date else None,
+            "members": len(rows), "done_today": sum(1 for m in rows if m.today == "done"),
+            "finished": sum(1 for m in rows if m.today == "finished"),
+            "avg_progress": round(sum(m.progress for m in rows) / len(rows) * 100) if rows else 0,
+            "promo_code": c.promo_code, "link": club_link(c),
+        })
+    return {"clubs": out}
+
+
+class ClubPatch(BaseModel):
+    promo_code: str | None = Field(default=None, max_length=32)
+    active: bool | None = None
+
+
+@router.post("/clubs/{club_id}")
+async def patch_club(club_id: int, body: ClubPatch, admin: User = Depends(admin_user), s: AsyncSession = Depends(get_session)):
+    """Промокод для участников клуба (подставится при вступлении) или закрыть клуб."""
+    from db.models import Club
+
+    club = await s.get(Club, club_id)
+    if club is None:
+        raise HTTPException(404, "Клуб не найден")
+    if body.promo_code is not None:
+        code = billing.normalize_code(body.promo_code) if body.promo_code.strip() else None
+        if code and await s.get(PromoCode, code) is None:
+            raise HTTPException(400, "Сначала создай такой промокод на вкладке «Промокоды»")
+        club.promo_code = code
+    if body.active is not None:
+        club.active = body.active
+    await log_event(s, "club_admin_update", admin.id, club=club.id, promo=club.promo_code, active=club.active)
+    return {"ok": True, "promo_code": club.promo_code, "active": club.active}
