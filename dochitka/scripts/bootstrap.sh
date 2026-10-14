@@ -326,19 +326,28 @@ fi
 tg_check() {  # $1 — адрес Bot API; печатает username бота или ничего
   curl -fsS --max-time 12 "$1/bot$BOT_TOKEN/getMe" 2>/dev/null | jq -r 'select(.ok==true) | .result.username' 2>/dev/null || true
 }
+use_relay() {  # $1 — домен релея; записывает его в .env, если через него бот на связи
+  local d=${1#https://}; d=${d%%/*}
+  bot_name=$(tg_check "https://$d")
+  if [ -n "$bot_name" ]; then env_set TELEGRAM_API_BASE "https://$d"; ok "Telegram подключён через релей $d"
+  else warn "через релей $d бот не отвечает — проверь, что релей настроен на IP этого сервера ($ip) и что tg-домен смотрит на релей"; fi
+}
 api_base=$(env_get TELEGRAM_API_BASE)
-bot_name=$(tg_check "${api_base:-https://api.telegram.org}")
-if [ -z "$bot_name" ] && [ -z "$api_base" ]; then
-  warn "Сервер не достаёт до api.telegram.org — нужен релей за рубежом (шаг 6 в PILOT.md, 15 минут)"
-  ask RELAY_DOMAIN "Домен релея, если он уже настроен (например tg.dochitka.ru), или Enter — пропустить" ""
-  if [ -n "${RELAY_DOMAIN:-}" ]; then
-    RELAY_DOMAIN=${RELAY_DOMAIN#https://}; RELAY_DOMAIN=${RELAY_DOMAIN%%/*}
-    bot_name=$(tg_check "https://$RELAY_DOMAIN")
-    if [ -n "$bot_name" ]; then env_set TELEGRAM_API_BASE "https://$RELAY_DOMAIN"; ok "Telegram доступен через релей"
-    else warn "через релей тоже не вышло — проверь, что на релее указан IP этого сервера: $ip"; fi
+bot_name=""
+if [ -z "$api_base" ]; then
+  # с февраля 2026 Telegram в России замедляют (сильнее всего — голосовые и файлы), поэтому релей стоит
+  # подключить сразу, даже если напрямую сервер Telegram видит
+  ask RELAY_DOMAIN "Домен релея к Telegram, если он настроен (например tg.dochitka.ru), или Enter — напрямую" ""
+  [ -n "${RELAY_DOMAIN:-}" ] && use_relay "$RELAY_DOMAIN"
+fi
+if [ -z "$bot_name" ]; then
+  api_base=$(env_get TELEGRAM_API_BASE)
+  bot_name=$(tg_check "${api_base:-https://api.telegram.org}")
+  if [ -z "$bot_name" ] && [ -z "$api_base" ]; then
+    warn "Сервер не достаёт до api.telegram.org — нужен релей за рубежом (шаг 6 в PILOT.md, 15 минут), потом запусти скрипт ещё раз"
+  elif [ -z "$bot_name" ]; then
+    warn "релей ${api_base} не отвечает или токен неверный — проверь релей и BOT_TOKEN"
   fi
-elif [ -z "$bot_name" ]; then
-  warn "релей ${api_base} не отвечает или токен неверный — проверь relay и BOT_TOKEN"
 fi
 [ -n "$bot_name" ] && ok "бот @$bot_name на связи" || warn "бот пока не на связи — сайт запущу, а бот заработает, как только появится связь с Telegram"
 
