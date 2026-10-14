@@ -13,6 +13,7 @@ from db.models import (
     Consent,
     Enrollment,
     Event,
+    Feedback,
     FriendNudge,
     Friendship,
     Notification,
@@ -180,6 +181,8 @@ async def delete_user_data(session: AsyncSession, user: User) -> None:
     await session.execute(delete(FriendNudge).where((FriendNudge.from_user_id == user.id) | (FriendNudge.to_user_id == user.id)))
     await session.execute(delete(Notification).where(Notification.user_id == user.id))
     await session.execute(delete(UserAchievement).where(UserAchievement.user_id == user.id))
+    # оценки из опросов остаются обезличенными, свободный текст удаляется
+    await session.execute(update(Feedback).where(Feedback.user_id == user.id).values(user_id=None, text=None))
     await session.execute(update(Event).where(Event.user_id == user.id).values(user_id=None))
     # записи об оплатах храним по закону, но обезличенно: без пользователя, e-mail и метки источника
     await session.execute(update(Purchase).where(Purchase.user_id == user.id).values(user_id=None, email=None, source=None))

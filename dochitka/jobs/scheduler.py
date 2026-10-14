@@ -11,7 +11,7 @@ import logging
 from datetime import timedelta
 
 from aiogram import Bot
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 
 import texts
 from ai.checker import summarize_segment
@@ -119,6 +119,16 @@ async def _morning_evening(s, enr: Enrollment, user: User, outbox: Outbox) -> No
     view = await load_view(s, user, enr)
     if view.state not in ("to_read", "clarify", "checking", "done_today"):
         return
+
+    if _due(user, user.morning_time) and view.behind >= 4 and not view.done_today:
+        # чтение встало: три дня подряд без пересказа — спросим, что помешало (один раз за забег)
+        last_accept = await s.scalar(
+            select(func.max(Retelling.user_day)).where(Retelling.enrollment_id == enr.id, Retelling.verdict == "accepted")
+        )
+        if last_accept is None or (today - last_accept).days >= 3:
+            from services.feedback import offer
+
+            await offer(s, user, "drop", f"survey:drop:{enr.id}", outbox)
 
     if _due(user, user.morning_time) and view.state in ("to_read", "clarify") and view.segment:
         if view.extra == "more":

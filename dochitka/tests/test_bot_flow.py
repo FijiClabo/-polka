@@ -186,6 +186,17 @@ async def test_full_flow(env):
     await press(bot, dp, U, "pace:m:30")
     assert "Готово: ≈" in session.texts()[-1] and "Сданное и стрик на месте" in session.texts()[-1]
 
+    # отзыв и ответ на опрос кнопкой — свободный текст не считается пересказом
+    await send_text(bot, dp, U, "/feedback")
+    assert "Напиши, что думаешь" in session.texts()[-1]
+    await send_text(bot, dp, U, "Хочу, чтобы вечернее напоминание приходило попозже, часов в одиннадцать")
+    assert any("Ответ записан" in t for t in session.texts()[-2:])
+    assert any("Отзыв · отзыв" in t for t in session.texts())  # ведущему пришла копия
+    await press(bot, dp, U, "fb:day3:4")
+    assert "Что мешает" in session.texts()[-1]
+    await press(bot, dp, U, "fb:skip")
+    assert "/feedback" in session.texts()[-1]
+
     # социальное
     await send_text(bot, dp, U, "/friends")
     assert any("личная ссылка" in t for t in session.texts())

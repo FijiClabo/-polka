@@ -52,11 +52,42 @@ export default function Admin() {
 
 // ------------------------------------------------------------------ аналитика
 
+function ReportCard() {
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="card mt-16">
+      <b>Отчёт для разбора</b>
+      <p className="small muted" style={{ margin: "6px 0 0" }}>
+        Архив придёт в чат с ботом: воронка, удержание, темп, опросы и путь каждого участника — без имён и Telegram ID.
+        Его можно прислать Claude и попросить разобрать. В боте — команда /report.
+      </p>
+      <button
+        className="btn secondary block mt-12"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await api.post("/admin/report");
+            toast("Отчёт в чате с ботом");
+          } catch (e) {
+            toast((e as Error).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        Прислать отчёт в чат
+      </button>
+    </div>
+  );
+}
+
 function Stats({ d }: { d: AdminOverview }) {
   const first = d.funnel[0]?.n || 0;
   const s = d.sales;
   return (
     <>
+      <ReportCard />
       <div className="kpi-grid mt-16">
         <Kpi label="Пользователей" value={num(d.users.total)} note={`+${d.users.new_7d} за 7 дней`} />
         <Kpi label="Сдавали дни за 7 дней" value={num(d.users.active_7d)} note={`за сутки: ${d.users.active_today}`} />

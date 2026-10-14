@@ -1145,13 +1145,42 @@ async def public_share_img(token: str, s: AsyncSession = Depends(get_session)):
 
 
 class EventBody(BaseModel):
-    type: str = Field(pattern=r"^(webapp_open|share_clicked|onboarding_seen)$")
-    screen: str | None = Field(default=None, max_length=32)
+    type: str = Field(pattern=r"^(webapp_open|share_clicked|onboarding_seen|screen|tap)$")
+    screen: str | None = Field(default=None, max_length=32, pattern=r"^[a-z_]+$")
+    target: str | None = Field(default=None, max_length=40, pattern=r"^[a-z0-9_:\-]+$")
+
+
+class FeedbackBody(BaseModel):
+    text: str = Field(min_length=2, max_length=2000)
+
+
+@router.post("/feedback")
+async def post_feedback(body: FeedbackBody, user: User = Depends(need_consent), s: AsyncSession = Depends(get_session)):
+    """Отзыв из мини-приложения: сохраняется и сразу приходит ведущему в бота."""
+    from services.feedback import add_text
+
+    out = Outbox()
+    await add_text(s, user, "free", body.text, None, out)
+    await s.commit()
+    await _flush(out)
+    return {"ok": True}
+
+
+_EVENT_TIMES: dict[int, list[float]] = {}
+MAX_UI_EVENTS_PER_MINUTE = 60
 
 
 @router.post("/events")
 async def post_event(body: EventBody, user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
-    await log_event(s, body.type, user.id, screen=body.screen)
+    """Экраны и нажатия в мини-приложении — для разбора, чем пользуются. Без текстов и личных данных."""
+    now_t = _time.monotonic()
+    times = [t for t in _EVENT_TIMES.get(user.id, []) if now_t - t < 60]
+    if len(times) >= MAX_UI_EVENTS_PER_MINUTE:
+        return {"ok": True}  # лишнее молча отбрасываем
+    times.append(now_t)
+    _EVENT_TIMES[user.id] = times
+    payload = {k: v for k, v in (("screen", body.screen), ("target", body.target)) if v}
+    await log_event(s, body.type, user.id, **payload)
     return {"ok": True}
 
 

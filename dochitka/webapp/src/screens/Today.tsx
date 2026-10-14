@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type Today as TodayData } from "../api";
+import { api, tap, type Today as TodayData } from "../api";
 import { IArrow, ICheck, IFlameSolid, IHand, ISnow } from "../components/Icons";
 import { OpenBookIll } from "../components/Illustrations";
 import { Avatar, Cover, ErrorState, ScreenSkeleton, toast } from "../components/ui";
@@ -279,10 +279,10 @@ function MainCard({ data }: { data: TodayData }) {
       {(data.can_split || data.behind > 1) && (
         <div className="row mt-12" style={{ justifyContent: "center", gap: 18 }}>
           {data.can_split && (
-            <button className="link tiny" onClick={() => nav.push({ name: "pace", params: { focus: "partial" } })}>Прочитано не всё?</button>
+            <button className="link tiny" onClick={() => { tap("today", "partial_link"); nav.push({ name: "pace", params: { focus: "partial" } }); }}>Прочитано не всё?</button>
           )}
           {data.behind > 1 && (
-            <button className="link tiny" onClick={() => nav.push({ name: "pace" })}>Свой темп</button>
+            <button className="link tiny" onClick={() => { tap("today", "pace_link"); nav.push({ name: "pace" }); }}>Свой темп</button>
           )}
         </div>
       )}
@@ -479,7 +479,7 @@ function PartnerCard({ data, reload }: { data: TodayData; reload: () => void }) 
     // позвать напарника можно, пока забег идёт; после финиша приглашения нет
     if (!data.run || ["no_run", "finished", "expired", "refunded"].includes(data.state)) return null;
     return (
-      <button className="card row" style={{ width: "100%", textAlign: "left" }} onClick={() => nav.tab("friends")}>
+      <button className="card row" style={{ width: "100%", textAlign: "left" }} onClick={() => { tap("today", "partner_invite"); nav.tab("friends"); }}>
         <div className="avatars-stack">
           <Avatar name={me.name} url={me.photo_url} size={40} seed={me.id} />
           <span className="avatar" style={{ width: 40, height: 40, background: "var(--surface-3)", color: "var(--muted)" }}>+</span>

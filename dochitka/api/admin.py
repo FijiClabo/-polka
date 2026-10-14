@@ -152,3 +152,18 @@ async def patch_club(club_id: int, body: ClubPatch, admin: User = Depends(admin_
         club.active = body.active
     await log_event(s, "club_admin_update", admin.id, club=club.id, promo=club.promo_code, active=club.active)
     return {"ok": True, "promo_code": club.promo_code, "active": club.active}
+
+
+@router.post("/report")
+async def post_report(days: int | None = None, admin: User = Depends(admin_user), s: AsyncSession = Depends(get_session)):
+    """Отчёт для разбора приходит файлом в чат с ботом: из мини-приложения файл не скачать."""
+    from aiogram.types import BufferedInputFile
+
+    from api.routes import _bot
+    from services.report import build_report, report_filename
+
+    if _bot is None:
+        raise HTTPException(503, "Бот не запущен — отчёт можно получить командой /report")
+    data, caption = await build_report(s, days if days and days > 0 else None)
+    await _bot.send_document(admin.tg_id, BufferedInputFile(data, report_filename(days)), caption=caption)
+    return {"ok": True}

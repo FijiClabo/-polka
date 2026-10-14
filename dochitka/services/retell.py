@@ -366,6 +366,9 @@ async def on_accepted(session: AsyncSession, enr: Enrollment, user: User, r: Ret
         info["behind"], info["ahead"] = view.behind, view.ahead
         nxt = view.segment if view.state == "to_read" else view.next_segment
         info["next_title"] = nxt.title if nxt else None
+    from services.feedback import after_accept
+
+    await after_accept(session, user, enr, outbox, first_today=first_today, finished=info["finished"])
     return info
 
 

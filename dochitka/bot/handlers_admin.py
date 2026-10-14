@@ -57,6 +57,7 @@ ADMIN_HELP = """<b>Команды ведущего</b>
 /broadcast текст — сообщение всем, кто дал согласие (/broadcast group текст — только групповому забегу)
 /run_close — закрыть набор в групповой забег
 /export — CSV для анализа теста
+/report [дней] — отчёт для разбора: поведение, темп, опросы, пути участников (обезличенно)
 /takedown название — найти книги по жалобе правообладателя; /takedown ID — удалить текст книги (забег продолжится без файла)"""
 
 
@@ -529,6 +530,20 @@ async def cmd_export(message: Message) -> None:
         data = await export_zip(s, run)
     await message.answer_document(BufferedInputFile(data, f"dochitka_run{run.id}_{date.today()}.zip"),
                                   caption="Участники, пересказы (без текстов), дни, события — CSV и сводка metrics.txt")
+
+
+@router.message(Command("report"))
+async def cmd_report(message: Message, command: CommandObject) -> None:
+    """Отчёт для разбора: поведение, темп, опросы и пути участников — обезличенно. /report 14 — за 14 дней."""
+    if not await _guard(message):
+        return
+    from services.report import build_report, report_filename
+
+    arg = (command.args or "").strip()
+    days = int(arg) if arg.isdigit() and 0 < int(arg) <= 3650 else None
+    async with session_scope() as s:
+        data, caption = await build_report(s, days)
+    await message.answer_document(BufferedInputFile(data, report_filename(days)), caption=caption)
 
 
 @router.message(Command("takedown"))

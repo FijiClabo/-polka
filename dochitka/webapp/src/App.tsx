@@ -91,7 +91,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (me && TABS.has(route.name)) track("webapp_open", route.name);
+    if (me) track(TABS.has(route.name) ? "webapp_open" : "screen", route.name);
   }, [route.name, me]);
 
   if (!inTelegram && !import.meta.env.VITE_DEV_TG_ID) {

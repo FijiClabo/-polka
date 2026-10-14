@@ -370,6 +370,20 @@ class Event(Base):
     created_at: Mapped[datetime] = _now_col()
 
 
+class Feedback(Base):
+    """Ответы на короткие опросы в боте и отзывы: чтобы понять, что мешает и что ценят."""
+
+    __tablename__ = "feedback"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    kind: Mapped[str] = mapped_column(String(16), index=True)  # day3 | pmf | finish | drop | free
+    score: Mapped[int | None] = mapped_column(Integer)  # оценка 1–5 или 0–10
+    choice: Mapped[str | None] = mapped_column(String(32))  # вариант ответа
+    text: Mapped[str | None] = mapped_column(Text)  # свободный ответ
+    created_at: Mapped[datetime] = _now_col()
+
+
 class AppState(Base):
     """Небольшое хранилище ключ-значение (якорь ускоренного времени и т.п.)."""
 

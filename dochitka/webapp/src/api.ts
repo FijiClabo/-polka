@@ -57,9 +57,12 @@ export const api = {
   blob: (p: string) => request<Blob>("GET", p),
 };
 
-export function track(type: "webapp_open" | "share_clicked" | "onboarding_seen", screen?: string): void {
-  api.post("/events", { type, screen }).catch(() => {});
+export function track(type: "webapp_open" | "share_clicked" | "onboarding_seen" | "screen" | "tap", screen?: string, target?: string): void {
+  api.post("/events", { type, screen, target }).catch(() => {});
 }
+
+/** Нажатие, которое важно для разбора: что люди пробуют, а что не находят. */
+export const tap = (screen: string, target: string) => track("tap", screen, target);
 
 // ------------------------------------------------------------------ типы ответов
 

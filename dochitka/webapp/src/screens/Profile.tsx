@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type Achievement, type Billing, type Me } from "../api";
+import { api, tap, type Achievement, type Billing, type Me } from "../api";
 import { AchIcon, IBook, IChevron, IEnvelope, ISettings } from "../components/Icons";
 import { Avatar, Skeleton, Switch, toast } from "../components/ui";
 import { useApi } from "../hooks";
@@ -169,7 +169,7 @@ export default function Profile() {
       <div className="section-title">Как это работает</div>
       <div className="card" style={{ padding: "4px 16px" }}>
         {FAQ.map(([q, a], i) => (
-          <div key={q} className="settings-row" style={{ flexDirection: "column", alignItems: "stretch" }} onClick={() => setOpenFaq(openFaq === i ? null : i)}>
+          <div key={q} className="settings-row" style={{ flexDirection: "column", alignItems: "stretch" }} onClick={() => { if (openFaq !== i) tap("profile", `faq:${i}`); setOpenFaq(openFaq === i ? null : i); }}>
             <div className="row between">
               <span>{q}</span>
               <IChevron size={16} style={{ transform: openFaq === i ? "rotate(90deg)" : undefined, transition: "transform .2s" }} />
@@ -178,6 +178,8 @@ export default function Profile() {
           </div>
         ))}
       </div>
+
+      <FeedbackCard />
 
       <p className="tiny muted center mt-24">
         Удалить все данные: команда /delete_me в чате с ботом.{" "}
@@ -319,6 +321,48 @@ function Visibility({ me, onChange, save }: { me: Me; onChange: (m: Me) => void;
         <p className="tiny muted" style={{ margin: "8px 0 0" }}>
           Видят только друзья, напарник и участники твоего клуба. Пересказы и тексты книг не видит никто.
         </p>
+      </div>
+    </>
+  );
+}
+
+// ------------------------------------------------------------------ отзыв
+
+function FeedbackCard() {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  return (
+    <>
+      <div className="section-title">Написать нам</div>
+      <div className="card">
+        {sent ? (
+          <p className="small" style={{ margin: 0 }}>Спасибо! Отзыв уже у команды. Можно написать ещё — в любой момент.</p>
+        ) : (
+          <>
+            <p className="small muted" style={{ margin: "0 0 10px" }}>Что неудобно, чего не хватает, что нравится. Читаем всё.</p>
+            <textarea className="input" rows={4} maxLength={2000} value={text} onChange={(e) => setText(e.target.value)} placeholder="Например: хочу напоминание попозже" />
+            <button
+              className="btn secondary block mt-12"
+              disabled={busy || text.trim().length < 2}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  await api.post("/feedback", { text: text.trim() });
+                  haptic("success");
+                  setSent(true);
+                  setText("");
+                } catch (e) {
+                  toast((e as Error).message);
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              Отправить
+            </button>
+          </>
+        )}
       </div>
     </>
   );
