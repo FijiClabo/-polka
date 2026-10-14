@@ -1,0 +1,89 @@
+# Дочитка: проверка каждого изменения и выкладка на сервер.
+# Тесты, линтер и сборка мини-приложения — на каждый пуш. Если тесты прошли и в настройках репозитория есть
+# секреты DEPLOY_HOST, DEPLOY_SSH_KEY и DEPLOY_KNOWN_HOSTS (их выдаёт scripts/bootstrap.sh) — новая версия
+# сама уезжает на сервер. Нет секретов — выкладка просто пропускается.
+name: Дочитка — проверка и выкладка
+
+on:
+  push:
+    branches: [claude/telegram-book-app-ip11fm]
+    paths: ["dochitka/**", ".github/workflows/dochitka.yml"]
+  pull_request:
+    paths: ["dochitka/**", ".github/workflows/dochitka.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dochitka-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Тесты и сборка
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: dochitka
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: dochitka/requirements*.txt
+
+      - name: Зависимости
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null
+          python -m pip install -q -r requirements-dev.txt
+
+      - name: Линтер
+        run: ruff check .
+
+      - name: Тесты
+        run: python -m pytest -q -p no:cacheprovider
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: dochitka/webapp/package-lock.json
+
+      - name: Мини-приложение
+        working-directory: dochitka/webapp
+        run: npm ci --no-audit --no-fund && npm run build
+
+  deploy:
+    name: Выкладка на сервер
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Обновить сервер
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          if [ -z "$HOST" ] || [ -z "$KEY" ]; then
+            echo "::notice::Сервер ещё не подключён (нет секретов DEPLOY_HOST и DEPLOY_SSH_KEY) — выкладка пропущена"
+            exit 0
+          fi
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [ -n "$KNOWN" ]; then
+            printf '%s\n' "$KNOWN" > ~/.ssh/known_hosts
+          else
+            echo "::warning::Нет секрета DEPLOY_KNOWN_HOSTS — ключ сервера принят без проверки"
+            ssh-keyscan -p "${PORT:-22}" -t ed25519 "$HOST" > ~/.ssh/known_hosts 2>/dev/null
+          fi
+          ssh -i ~/.ssh/deploy_key -p "${PORT:-22}" \
+            -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 -o ConnectTimeout=20 \
+            "root@$HOST" deploy
