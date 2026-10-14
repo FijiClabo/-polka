@@ -149,7 +149,7 @@ client_ip=${SSH_CLIENT%% *}
 login_method=""
 if [ -n "$client_ip" ]; then
   login_method=$( (journalctl -u ssh -u sshd --since "-6h" --no-pager 2>/dev/null; cat /var/log/auth.log 2>/dev/null) \
-    | grep "Accepted .* for root from $client_ip " | tail -n1 | awk '{for(i=1;i<=NF;i++) if($i=="Accepted") print $(i+1)}')
+    | grep "Accepted .* for root from $client_ip " | tail -n1 | awk '{for(i=1;i<=NF;i++) if($i=="Accepted") print $(i+1)}' || true)
 fi
 if [ "$login_method" = publickey ]; then
   if yes_no "Ты вошёл по SSH-ключу. Выключить вход по паролю (рекомендую)?" y; then
@@ -373,7 +373,9 @@ mkdir -p "$APP/data" "$APP/backups"
 
 say "7/8 Ежедневный бэкап базы"
 chmod 700 "$APP/backups"
-( crontab -l 2>/dev/null | grep -v 'scripts/backup.sh' ; echo "30 3 * * * cd $APP && bash scripts/backup.sh >> $APP/backups/cron.log 2>&1" ) | crontab -
+# на новом сервере crontab пустой: crontab -l и grep -v возвращают ошибку — это не повод останавливать установку
+cron_line="30 3 * * * cd $APP && bash scripts/backup.sh >> $APP/backups/cron.log 2>&1"
+{ crontab -l 2>/dev/null | grep -v 'scripts/backup.sh' || true; echo "$cron_line"; } | crontab -
 ok "каждую ночь в 03:30, хранятся 14 последних (папка $APP/backups)"
 
 # --------------------------------------------------------------------------- 8. автообновление из GitHub
