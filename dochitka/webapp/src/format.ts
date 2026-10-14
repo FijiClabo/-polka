@@ -60,6 +60,8 @@ export const STATUS_TEXT: Record<string, string> = {
   done: "сдано",
   reading: "ещё читает",
   burned: "стрик сгорел",
+  rest: "день отдыха",
+  paused: "на паузе",
   idle: "не в забеге",
   finished: "книга дочитана",
   waiting: "ждёт старта",

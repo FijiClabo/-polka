@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.auth import current_user, get_session
 from api.routes import need_consent, seg_brief
 from db.models import Book, User
-from services.pace import PaceError, ask_more, pace_info, partial_options, pause, replan, split_today
+from services.pace import PaceError, ask_more, pace_info, partial_options, pause, replan, resume, split_today
 from services.progress import load_view
 from services.runs import current_enrollment
 
@@ -73,6 +73,17 @@ async def post_pause(body: PauseBody, user: User = Depends(need_consent), s: Asy
     enr = await _enr(s, user)
     try:
         await pause(s, user, enr, body.days)
+    except PaceError as e:
+        raise HTTPException(400, str(e)) from e
+    return await _pace_json(s, user)
+
+
+@router.post("/pace/resume")
+async def post_resume(user: User = Depends(need_consent), s: AsyncSession = Depends(get_session)):
+    """Закончить паузу раньше."""
+    enr = await _enr(s, user)
+    try:
+        await resume(s, user, enr)
     except PaceError as e:
         raise HTTPException(400, str(e)) from e
     return await _pace_json(s, user)

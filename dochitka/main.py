@@ -45,12 +45,51 @@ def _spawn(coro) -> asyncio.Task:
     return t
 
 
+async def _connect_bot(bot, dp) -> None:
+    s = get_settings()
+    delay = 5
+    while True:
+        try:
+            await setup_bot(bot)
+            if s.bot_mode == "webhook":
+                await bot.set_webhook(
+                    f"{s.public_url}{s.webhook_path}", secret_token=s.webhook_secret,
+                    allowed_updates=dp.resolve_used_update_types(), drop_pending_updates=False,
+                )
+                log.info("webhook set: %s%s", s.public_url, s.webhook_path)
+            else:
+                await bot.delete_webhook(drop_pending_updates=False)
+            break
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.error("Telegram недоступен (%s: %s) — повтор через %s с. Проверь TELEGRAM_API_BASE и сеть",
+                      e.__class__.__name__, e, delay)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 300)
+    if s.bot_mode != "webhook":
+        log.info("polling started")
+        await dp.start_polling(bot, handle_signals=False, allowed_updates=dp.resolve_used_update_types())
+
+
+def check_startup(s) -> None:
+    """Настройки, с которыми на сервере запускаться нельзя: лучше упасть сразу, чем работать без защиты."""
+    on_server = s.public_url.startswith("https://") or s.bot_mode == "webhook"
+    if s.dev_auth_bypass and on_server:
+        raise RuntimeError("DEV_AUTH_BYPASS=true на сервере: вход в приложение без проверки Telegram. Поставь false в .env")
+    if on_server and not s.bot_token:
+        raise RuntimeError("BOT_TOKEN не задан: без него приложение не может проверить, кто вошёл")
+    if s.allow_timewarp and on_server:
+        log.warning("ALLOW_TIMEWARP=true на сервере — администратор может сдвигать часы бота")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     s = get_settings()
     logging.basicConfig(level=s.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logging.getLogger("aiogram.event").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    check_startup(s)
     init_engine()
     await init_clock(s.fast_day_minutes)
     s.data_dir.mkdir(parents=True, exist_ok=True)
@@ -62,22 +101,14 @@ async def lifespan(app: FastAPI):
         dp = create_dispatcher()
         app.state.bot, app.state.dp = bot, dp
         set_bot(bot)
-        await setup_bot(bot)
         if s.bot_mode == "webhook":
             if not s.public_url.startswith("https://"):
                 raise RuntimeError("Для BOT_MODE=webhook нужен PUBLIC_URL с https://")
             if not s.webhook_secret_ok:
                 # без секрета любой может прислать «оплату» на адрес вебхука
                 raise RuntimeError("Для BOT_MODE=webhook нужен WEBHOOK_SECRET: 32+ случайных символа (deploy.sh создаёт сам)")
-            await bot.set_webhook(
-                f"{s.public_url}{s.webhook_path}", secret_token=s.webhook_secret or None,
-                allowed_updates=dp.resolve_used_update_types(), drop_pending_updates=False,
-            )
-            log.info("webhook set: %s%s", s.public_url, s.webhook_path)
-        else:
-            await bot.delete_webhook(drop_pending_updates=False)
-            _spawn(dp.start_polling(bot, handle_signals=False, allowed_updates=dp.resolve_used_update_types()))
-            log.info("polling started")
+        # Telegram может быть недоступен (сервер в РФ, сбой сети): сайт и API работают, бот подключается в фоне
+        _spawn(_connect_bot(bot, dp))
         _spawn(run_scheduler(bot, stop))
     else:
         log.warning("BOT_TOKEN не задан — работает только API")
@@ -110,9 +141,13 @@ app.include_router(pages_router)
 @app.post(get_settings().webhook_path)
 async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: str | None = Header(default=None)):
     s = get_settings()
-    if not s.webhook_secret or not hmac.compare_digest(x_telegram_bot_api_secret_token or "", s.webhook_secret):
+    bot = getattr(request.app.state, "bot", None)
+    if s.bot_mode != "webhook" or bot is None or not s.webhook_secret_ok:
+        # в режиме polling адрес вебхука не существует: иначе поддельное «сообщение от админа» прошло бы сюда
+        raise HTTPException(status_code=404)
+    if not hmac.compare_digest(x_telegram_bot_api_secret_token or "", s.webhook_secret):
         raise HTTPException(status_code=403)
-    bot, dp = request.app.state.bot, request.app.state.dp
+    dp = request.app.state.dp
     update = Update.model_validate(await request.json(), context={"bot": bot})
     # отвечаем Telegram сразу, обработка (в т.ч. проверка ИИ) идёт в фоне
     _spawn(dp.feed_update(bot, update))

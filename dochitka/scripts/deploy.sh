@@ -21,6 +21,8 @@ if [ -d ../.git ] || [ -d .git ]; then
 fi
 
 mkdir -p data backups
+# приложение в контейнере работает от пользователя app (uid 10001) — ему нужна запись в data/
+chown -R 10001:10001 data 2>/dev/null || true
 if docker compose ps --status running 2>/dev/null | grep -q db; then
   echo "==> Бэкап базы перед обновлением"
   bash scripts/backup.sh || true

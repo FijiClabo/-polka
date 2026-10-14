@@ -29,8 +29,8 @@ from books.plan import (
 from books.types import PAPER_MINUTES_PER_PAGE, WORDS_PER_MINUTE, ParsedChapter, count_words
 from core.days import deadline_day
 from db.models import Book, Chapter, Club, Enrollment, Segment, User
-from services.common import log_event, today_for
-from services.progress import DayView, accepted_by_day, load_view
+from services.common import RateLimit, log_event, today_for
+from services.progress import DayView, accepted_by_day, close_pending_days, load_view, paused_on
 
 PAUSE_CHOICES = (1, 3, 7)
 MAX_PAUSE_DAYS = 14
@@ -39,6 +39,23 @@ QUARTERS = {1: "четверть", 2: "половина", 3: "три четве�
 
 class PaceError(ValueError):
     pass
+
+
+# менять темп, ставить паузу и делить отрезок — до 8 раз в сутки: хватит на любые сомнения,
+# но не даст перебором пересборок собрать «начни со слов / дочитай до» по всей книге
+PACE_CHANGES = RateLimit(8, 24 * 3600)
+
+
+def _count_change(user: User) -> None:
+    if not PACE_CHANGES.hit(user.id):
+        raise PaceError("Темп сегодня уже меняли много раз — давай завтра")
+
+
+async def lock_plan(session: AsyncSession, enr: Enrollment) -> None:
+    """Одна пересборка плана за раз: двойное нажатие ждёт первое и видит уже новый план (Postgres)."""
+    if session.bind.dialect.name == "postgresql":
+        await session.execute(select(Enrollment.id).where(Enrollment.id == enr.id).with_for_update())
+        await session.refresh(enr)
 
 
 # --------------------------------------------------------------------------- что осталось
@@ -52,6 +69,7 @@ class Rest:
     first_day: date  # с какого дня пойдёт остаток
     minutes: int  # минут чтения в остатке
     segments: list[Segment] = field(default_factory=list)  # оставшиеся отрезки
+    earliest: date | None = None  # с какого дня можно начать паузу или новый темп
 
     @property
     def paper(self) -> bool:
@@ -69,7 +87,24 @@ def _minutes_of(segs: list[Segment], paper: bool, book: Book) -> int:
     words = sum(s.word_count or 0 for s in segs)
     if not words and book.total_words and segs:  # копия плана без числа слов: по доле книги
         words = round(book.total_words * (segs[-1].pos_to - segs[0].pos_from))
+    if not words:  # копия плана бумажной книги: слов нет, считаем по страницам
+        pages = sum(s.page_to - s.page_from + 1 for s in segs)
+        return max(1, round(pages * PAPER_MINUTES_PER_PAGE))
     return max(1, round(words / WORDS_PER_MINUTE))
+
+
+def by_pages(book: Book) -> bool:
+    """Темп считается по страницам: бумажная книга или копия её плана (слов там нет)."""
+    return book.source == "paper" or (book.source == "shared" and not book.total_words)
+
+
+SPRINT_LOCKED = ("Бесплатный спринт идёт ровно неделю, поэтому темп и паузу в нём не меняют. "
+                 "Свой темп, паузы и «глава в день» — в личном забеге.")
+
+
+def _no_sprint(enr: Enrollment) -> None:
+    if enr.run.kind == "sprint":
+        raise PaceError(SPRINT_LOCKED)
 
 
 async def rest_of(session: AsyncSession, user: User, enr: Enrollment) -> Rest:
@@ -87,12 +122,14 @@ async def rest_of(session: AsyncSession, user: User, enr: Enrollment) -> Rest:
         done += 1
     segs = [s for s in await _segments(session, book.id) if s.day_number > done]
     today = today_for(user)
-    started = enr.plan_start_date is not None and today >= enr.plan_start_date
-    if not started:
-        first = enr.plan_start_date or today
-    else:
-        first = today + timedelta(days=1) if view.accepted_today else today
-    return Rest(view, book, done, first, _minutes_of(segs, book.source == "paper", book), segs)
+    # ближайший день, с которого можно что-то менять: сегодня, а если сегодня уже сдано — завтра; в паузе — после неё
+    earliest = today + timedelta(days=1) if view.accepted_today else today
+    if paused_on(enr, earliest):  # пауза идёт или начнётся завтра
+        earliest = enr.paused_until
+    # первый оставшийся отрезок — в свой день по плану (кто впереди, тот впереди), но не раньше earliest
+    # (кто отстал, начинает с сегодняшнего дня — без долгов)
+    first = earliest if enr.plan_start_date is None else max(earliest, enr.plan_start_date + timedelta(days=done))
+    return Rest(view, book, done, first, _minutes_of(segs, book.source == "paper", book), segs, earliest)
 
 
 def _finish(first_day: date, days: int) -> date:
@@ -133,19 +170,23 @@ async def pace_info(session: AsyncSession, user: User, enr: Enrollment) -> dict:
         "deadline": deadline_day(enr.plan_start_date, enr.plan_days, enr.run.grace_days).isoformat()
         if enr.plan_start_date else None,
         "behind": v.behind, "ahead": v.ahead, "started": bool(enr.plan_start_date and today_for(user) >= enr.plan_start_date),
-        "can_pause": enr.plan_start_date is not None,
+        "can_pause": enr.plan_start_date is not None and enr.run.kind != "sprint",
+        "paused_until": v.paused_until.isoformat() if v.paused_until else None,
+        "locked": SPRINT_LOCKED if enr.run.kind == "sprint" else None,
         "minute_options": [], "pause_options": [], "chapters": None, "pair": None, "club": None,
     }
-    if not left:
+    if not left or enr.run.kind == "sprint":
         return info
     for m in MINUTE_CHOICES:
         days = days_for_minutes(r.minutes, m)
-        if days > MAX_PLAN_DAYS or (r.paper and days > sum(s.page_to - s.page_from + 1 for s in r.segments)):
+        if days > MAX_PLAN_DAYS or (by_pages(r.book) and days > sum(s.page_to - s.page_from + 1 for s in r.segments)):
             continue
         info["minute_options"].append({"minutes": m, "days": days, "finish": _finish(r.first_day, days).isoformat()})
     if enr.plan_start_date is not None:
         cur_finish = _finish(r.first_day, left)
-        info["pause_options"] = [{"days": d, "finish": (cur_finish + timedelta(days=d)).isoformat()} for d in PAUSE_CHOICES]
+        used = (enr.paused_until - enr.paused_from).days if enr.paused_until and enr.paused_until > today_for(user) else 0
+        info["pause_options"] = [{"days": d, "finish": (cur_finish + timedelta(days=d)).isoformat()}
+                                 for d in PAUSE_CHOICES if used + d <= MAX_PAUSE_DAYS]
     if not r.paper and await _has_chapters(session, r.book):
         chapters = await _book_chapters(session, r.book)
         if chapters:
@@ -202,18 +243,27 @@ def _even_rest(segs: list[Segment], days: int, first: int) -> list[PlannedSegmen
 
 
 async def _move_start(enr: Enrollment, user: User, r: Rest) -> None:
-    """Сдвинуть старт так, чтобы первый оставшийся отрезок пришёлся на r.first_day."""
-    if enr.plan_start_date is None or today_for(user) < enr.plan_start_date:
+    """Сдвинуть старт так, чтобы первый оставшийся отрезок пришёлся на r.first_day (догоняющему — без долгов).
+
+    Раньше прежнего старт не переносим: прошедшие дни до старта стали бы днями плана — с ложной заморозкой
+    или пропуском в календаре. Кто впереди плана, так и остаётся впереди.
+    """
+    if enr.plan_start_date is None:
+        return
+    if today_for(user) < enr.plan_start_date and r.view.state != "paused":
         return  # план ещё не начался — старт прежний
-    enr.plan_start_date = r.first_day - timedelta(days=r.done)
+    enr.plan_start_date = max(enr.plan_start_date, r.first_day - timedelta(days=r.done))
 
 
 async def replan(session: AsyncSession, user: User, enr: Enrollment, *, minutes: int | None = None,
                  finish: date | None = None, by_chapter: bool = False) -> Rest:
     """Пересобрать оставшиеся отрезки: другое время в день, дочитать к дате или глава в день."""
+    await lock_plan(session, enr)
+    _no_sprint(enr)
     r = await rest_of(session, user, enr)
     if not r.segments:
         raise PaceError("Все отрезки уже сданы")
+    _count_change(user)
     if by_chapter:
         days = None
     elif minutes is not None:
@@ -261,18 +311,52 @@ async def replan(session: AsyncSession, user: User, enr: Enrollment, *, minutes:
 
 
 async def pause(session: AsyncSession, user: User, enr: Enrollment, days: int) -> date:
-    """Пауза: план сдвигается на days дней. Эти дни считаются сданными заранее — стрик и заморозки целы."""
+    """Пауза на days дней с ближайшего несданного дня. Дни паузы не сгорают, план сдвигается на их число.
+
+    Возвращает новый финиш — тот же, что показан на кнопке паузы.
+    """
     if not 1 <= days <= MAX_PAUSE_DAYS:
         raise PaceError(f"Пауза — от 1 до {MAX_PAUSE_DAYS} дней")
-    r = await rest_of(session, user, enr)
+    _no_sprint(enr)
+    await lock_plan(session, enr)
     if enr.plan_start_date is None:
         raise PaceError("План ещё не начался — пауза не нужна")
+    await close_pending_days(session, enr, user)  # прошедшие дни закрываются по прежнему плану
+    r = await rest_of(session, user, enr)
     if not r.segments:
         raise PaceError("Все отрезки уже сданы")
+    if enr.paused_until and enr.paused_until > today_for(user):  # пауза идёт или назначена с завтра — продлеваем
+        if (enr.paused_until - enr.paused_from).days + days > MAX_PAUSE_DAYS:
+            raise PaceError(f"Пауза — не больше {MAX_PAUSE_DAYS} дней подряд")
+        enr.paused_until += timedelta(days=days)
+    else:
+        start = max(r.earliest, enr.plan_start_date)  # план ещё не начался — пауза со дня старта
+        enr.paused_from, enr.paused_until = start, start + timedelta(days=days)
+    _count_change(user)
     enr.plan_start_date += timedelta(days=days)
     await log_event(session, "pace_pause", user.id, enr.run_id, days=days, behind=r.view.behind)
     await session.flush()
-    return enr.plan_start_date + timedelta(days=enr.plan_days - 1)
+    after = await rest_of(session, user, enr)
+    return _finish(after.first_day, len(after.segments))
+
+
+async def resume(session: AsyncSession, user: User, enr: Enrollment) -> date:
+    """Закончить паузу раньше: план возвращается на оставшиеся дни паузы. Прошедшие дни паузы остаются паузой."""
+    await lock_plan(session, enr)
+    today = today_for(user)
+    if not (enr.paused_until and enr.paused_from and enr.paused_until > today):
+        raise PaceError("Паузы сейчас нет")
+    start = max(today, enr.paused_from)
+    shift = (enr.paused_until - start).days
+    enr.plan_start_date -= timedelta(days=shift)
+    if start <= enr.paused_from:
+        enr.paused_from = enr.paused_until = None
+    else:
+        enr.paused_until = start
+    await log_event(session, "pace_resume", user.id, enr.run_id, days_back=shift)
+    await session.flush()
+    r = await rest_of(session, user, enr)
+    return _finish(r.first_day, len(r.segments))
 
 
 # --------------------------------------------------------------------------- прочитано не всё
@@ -304,19 +388,25 @@ async def split_today(session: AsyncSession, user: User, enr: Enrollment, *, qua
         raise PaceError("Остаток — завтра или отдельным днём")
     if page is None and quarter not in QUARTERS:
         raise PaceError("Сколько прочитано: четверть, половина или три четверти")
+    await lock_plan(session, enr)
     view = await load_view(session, user, enr)
     if view.state != "to_read" or view.extra or view.segment is None:
         raise PaceError("Делить можно отрезок, который ждёт пересказа сегодня")
     seg = view.segment
     book = view.book
+    if await _split_today_already(session, user, enr, seg.day_number):
+        raise PaceError("Сегодняшний отрезок уже поделён — перескажи прочитанное")
+    _count_change(user)
     share = (quarter or 2) / 4
     nxt = await session.scalar(select(Segment).where(Segment.book_id == book.id, Segment.day_number == seg.day_number + 1))
     if nxt is None:
         rest = "day"  # последний отрезок — остаток только отдельным днём
+    elif enr.run.kind == "sprint":
+        rest = "tomorrow"  # спринт ровно на неделю: остаток — к следующему отрезку
 
     head_text = tail_text = None
     head_anchor = tail_anchor = None
-    if book.source == "paper":
+    if by_pages(book):
         cut_page = _page_cut(seg, share, page)
         real = (cut_page - seg.page_from + 1) / (seg.page_to - seg.page_from + 1)
         head_words = tail_words = 0
@@ -387,10 +477,19 @@ async def split_today(session: AsyncSession, user: User, enr: Enrollment, *, qua
         session.add(tail)
         enr.plan_days += 1
     await log_event(session, "pace_partial", user.id, enr.run_id, quarter=quarter, page=page is not None, rest=rest,
-                    day=seg.day_number)
+                    day=seg.day_number, on=today_for(user).isoformat())
     await session.flush()
     await session.refresh(seg)
     return Partial(seg, rest, enr.plan_days)
+
+
+async def _split_today_already(session: AsyncSession, user: User, enr: Enrollment, day_number: int) -> bool:
+    """Отрезок дня делим один раз: повторное нажатие (или второй запрос) не режет его ещё раз."""
+    from db.models import Event
+
+    rows = await session.scalars(select(Event.payload).where(
+        Event.user_id == user.id, Event.type == "pace_partial", Event.run_id == enr.run_id).order_by(Event.id.desc()).limit(10))
+    return any((p or {}).get("day") == day_number and (p or {}).get("on") == today_for(user).isoformat() for p in rows)
 
 
 def partial_options(seg: Segment, paper: bool) -> list[dict]:

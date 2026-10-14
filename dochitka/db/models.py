@@ -191,6 +191,11 @@ class Enrollment(Base):
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     pair_id: Mapped[int | None] = mapped_column(ForeignKey("pairs.id", ondelete="SET NULL"))
     pair_code: Mapped[str | None] = mapped_column(String(16), unique=True)
+    # отдельный код ссылки «читать вместе»: из обычной ссылки в напарники (p_) его не получить
+    together_code: Mapped[str | None] = mapped_column(String(16), unique=True)
+    # пауза: дни [paused_from, paused_until) не сгорают, план сдвинут на их число
+    paused_from: Mapped[date | None] = mapped_column(Date)
+    paused_until: Mapped[date | None] = mapped_column(Date)
     streak: Mapped[int] = mapped_column(Integer, default=0)
     best_streak: Mapped[int] = mapped_column(Integer, default=0)
     freezes_left: Mapped[int] = mapped_column(Integer, default=1)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import secrets
 import string
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 
@@ -166,3 +167,38 @@ async def save_clock_offset() -> None:
             s.add(AppState(key="clock_offset", value=str(clock.offset_seconds())))
         else:
             row.value = str(clock.offset_seconds())
+
+
+class RateLimit:
+    """Ограничение частоты в памяти процесса: не больше `limit` действий за `window` секунд на ключ.
+
+    Процесс один (бот + API), поэтому памяти хватает; после перезапуска счётчики обнуляются — это допустимо.
+    """
+
+    all: list[RateLimit] = []
+
+    def __init__(self, limit: int, window: float) -> None:
+        self.limit, self.window = limit, window
+        self._hits: dict[object, list[float]] = {}
+        RateLimit.all.append(self)
+
+    def hit(self, key: object) -> bool:
+        """Учесть действие. False — лимит исчерпан, действие делать не нужно."""
+        t = time.monotonic()
+        recent = [x for x in self._hits.get(key, ()) if t - x < self.window]
+        if len(recent) >= self.limit:
+            self._hits[key] = recent
+            return False
+        recent.append(t)
+        self._hits[key] = recent
+        if len(self._hits) > 50_000:  # не копим ключи бесконечно
+            self._hits = {k: v for k, v in self._hits.items() if v and t - v[-1] < self.window}
+        return True
+
+    def reset(self) -> None:
+        self._hits.clear()
+
+    @classmethod
+    def reset_all(cls) -> None:
+        for r in cls.all:
+            r.reset()

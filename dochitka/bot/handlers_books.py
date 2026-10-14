@@ -66,6 +66,11 @@ async def msg_document(message: Message, bot: Bot, state: FSMContext) -> None:
         return
     async with session_scope() as s:
         user, _ = await load_user(s, message.from_user)
+        from services.books import BOOK_UPLOADS, BOOK_UPLOADS_TOO_MANY
+
+        if not BOOK_UPLOADS.hit(user.id):
+            await message.answer(BOOK_UPLOADS_TOO_MANY)
+            return
         enr = await _enrollment_for_book(s, user)
         progress = await has_progress(s, enr)
         cur_title = (await s.get(Book, enr.book_id)).title if enr.book_id else ""
@@ -198,39 +203,39 @@ async def cb_plan(call: CallbackQuery, bot: Bot) -> None:
         return
     kind, value = call.data.split(":")
     outbox = Outbox()
-    async with session_scope() as s:
-        user, _ = await load_user(s, call.from_user)
-        enr = await current_enrollment(s, user.id)
-        if enr is None or enr.book_id is None:
-            await call.message.answer("Сначала добавь книгу.")
-            return
-        try:
+    invite = title = None
+    try:
+        async with session_scope() as s:
+            user, _ = await load_user(s, call.from_user)
+            enr = await current_enrollment(s, user.id)
+            if enr is None or enr.book_id is None:
+                await call.message.answer("Сначала добавь книгу.")
+                return
             if kind == "pm":
                 await confirm_plan(s, user, enr, minutes=int(value))
             elif value == "ch":
                 await confirm_plan(s, user, enr, by_chapter=True)
             else:
                 await confirm_plan(s, user, enr, int(value))
-        except PlanError as e:
-            await call.message.edit_reply_markup(reply_markup=None)
-            await call.message.answer(f"Не получилось: {texts.e(str(e))}")
-            return
-        book = await s.get(Book, enr.book_id)
-        days = enr.plan_days
-        paper = book.source == "paper"
-        total = total_minutes(book.total_pages, book.total_words, paper)
-        text = texts.plan_ready(book.title, days, enr.plan_start_date, round(book.total_pages / days, 1),
-                                max(1, round(total / days)), run_start=enr.run.start_date,
-                                awaiting_payment=enr.status == "invited", by_chapter=value == "ch")
-        uid = user.id
-        invite = None
-        if enr.pair_id is None and enr.club_id is None:
-            from bot.ui import deep_link, share_link
-            from services.social import ensure_pair_code
+            book = await s.get(Book, enr.book_id)
+            days = enr.plan_days
+            paper = book.source == "paper"
+            total = total_minutes(book.total_pages, book.total_words, paper)
+            text = texts.plan_ready(book.title, days, enr.plan_start_date, round(book.total_pages / days, 1),
+                                    max(1, round(total / days)), run_start=enr.run.start_date,
+                                    awaiting_payment=enr.status == "invited", by_chapter=value == "ch")
+            uid = user.id
+            if enr.pair_id is None and enr.club_id is None:
+                from bot.ui import deep_link, share_link
+                from services.social import ensure_together_code
 
-            link = deep_link(f"t_{await ensure_pair_code(s, enr)}")
-            invite = share_link(link, texts.together_invite_text(user.display_name, book.title, days))
-            title = book.title
+                link = deep_link(f"t_{await ensure_together_code(s, enr)}")
+                invite = share_link(link, texts.together_invite_text(user.display_name, book.title, days))
+                title = book.title
+    except PlanError as e:  # ошибка — откат: прежний план остаётся как был
+        await call.message.edit_reply_markup(reply_markup=None)
+        await call.message.answer(f"Не получилось: {texts.e(str(e))}")
+        return
     await call.message.edit_reply_markup(reply_markup=None)
     await call.message.answer(text)
     if invite:

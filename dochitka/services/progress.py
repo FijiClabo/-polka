@@ -44,6 +44,7 @@ class DayView:
     extra: str = ""
     behind: int = 0  # сколько отрезков по плану не сдано, включая сегодняшний
     ahead: int = 0  # на сколько отрезков впереди плана
+    paused_until: date | None = None  # пауза: первый день после неё
 
     @property
     def can_read_more(self) -> bool:
@@ -53,6 +54,11 @@ class DayView:
     @property
     def done_today(self) -> bool:
         return self.accepted_today > 0
+
+
+def paused_on(enr: Enrollment, d: date) -> bool:
+    """День d — внутри паузы."""
+    return bool(enr.paused_from and enr.paused_until and enr.paused_from <= d < enr.paused_until)
 
 
 async def accepted_by_day(session: AsyncSession, enr: Enrollment) -> dict[int, Retelling]:
@@ -135,7 +141,14 @@ async def load_view(session: AsyncSession, user: User, enr: Enrollment | None) -
     plan_day = plan_day_number(enr.plan_start_date, v.today)
     v.plan_day = plan_day
     v.freezes_left = effective_freezes(enr, plan_day)
-    if plan_day < 1:
+    if paused_on(enr, v.today):
+        # пауза: ничего не ждём и не напоминаем; продолжить раньше можно на экране «Темп»
+        v.state = "paused"
+        v.paused_until = enr.paused_until
+        v.next_segment = await segment_by_day(session, book.id, rules.first_open_day(set(v.accepted), enr.plan_days) or 1)
+        return v
+    if plan_day < 1 and not v.accepted:
+        # (с прогрессом старт «в будущем» бывает только после паузы, начатой со следующего дня, — это не «не начался»)
         v.state = "not_started"
         v.segment = await segment_by_day(session, book.id, 1)
         return v
@@ -205,7 +218,9 @@ async def close_pending_days(session: AsyncSession, enr: Enrollment, user: User,
         return results
     today = today_for(user)
     deadline = deadline_day(enr.plan_start_date, enr.plan_days, enr.run.grace_days)
-    start = enr.plan_start_date if enr.last_closed_day is None else max(enr.last_closed_day + timedelta(days=1), enr.plan_start_date)
+    # дни паузы закрываются тоже, даже если пауза сдвинула старт плана дальше них
+    lower = min(enr.plan_start_date, enr.paused_from) if enr.paused_from else enr.plan_start_date
+    start = lower if enr.last_closed_day is None else max(enr.last_closed_day + timedelta(days=1), lower)
     d = start
     when_accepted: dict[int, date] | None = None
     while d < today:
@@ -228,9 +243,10 @@ async def close_pending_days(session: AsyncSession, enr: Enrollment, user: User,
                 await force_accept_pending(session, r, enr, user, outbox)
             when_accepted = None
         plan_day = plan_day_number(enr.plan_start_date, d)
-        enr.freezes_left, enr.freezes_week_start = rules.refresh_freezes(
-            enr.freezes_left, enr.freezes_week_start, plan_day, enr.freezes_per_week or 1
-        )
+        if plan_day >= 1:
+            enr.freezes_left, enr.freezes_week_start = rules.refresh_freezes(
+                enr.freezes_left, enr.freezes_week_start, plan_day, enr.freezes_per_week or 1
+            )
         existing = await _day_result(session, enr.id, d)
         had_done = existing is not None and existing.result == rules.DONE
         banked = False
@@ -239,7 +255,7 @@ async def close_pending_days(session: AsyncSession, enr: Enrollment, user: User,
                 when_accepted = {n: r.user_day for n, r in (await accepted_by_day(session, enr)).items()}
             due = range(1, min(plan_day, enr.plan_days) + 1)
             banked = all(n in when_accepted and when_accepted[n] < d for n in due)  # всё к этому дню сдано заранее
-        res = rules.close_day(had_done, enr.streak, enr.freezes_left, banked)
+        res = rules.close_day(had_done, enr.streak, enr.freezes_left, banked, paused=paused_on(enr, d))
         if existing is None:
             session.add(DayResult(enrollment_id=enr.id, user_day=d, result=res.result))
         enr.streak = res.streak
@@ -250,6 +266,8 @@ async def close_pending_days(session: AsyncSession, enr: Enrollment, user: User,
             await log_event(session, "day_frozen", user.id, enr.run_id, day=d.isoformat())
         elif res.result == rules.AHEAD:
             await log_event(session, "day_ahead", user.id, enr.run_id, day=d.isoformat())
+        elif res.result == rules.PAUSED:
+            await log_event(session, "day_paused", user.id, enr.run_id, day=d.isoformat())
         elif res.result == rules.MISSED:
             await log_event(session, "day_missed", user.id, enr.run_id, day=d.isoformat())
             if res.streak_lost:

@@ -21,6 +21,9 @@ MSK = timezone(timedelta(hours=3))
 
 
 async def setup_db(tmp_path) -> None:
+    from services.common import RateLimit
+
+    RateLimit.reset_all()  # счётчики частоты живут в памяти процесса — между тестами обнуляем
     url = os.environ.get("TEST_DATABASE_URL") or f"sqlite+aiosqlite:///{tmp_path}/test.db"
     engine = dbs.init_engine(url)
     async with engine.begin() as conn:

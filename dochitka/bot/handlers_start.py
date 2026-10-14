@@ -59,6 +59,11 @@ async def cmd_start(message: Message, command: CommandObject, state: FSMContext,
         if pending:
             await ask_consent(message)
             return
+        if payload in ("buy_run", "buy_year"):  # кнопка «Оплатить» на сайте — сразу тарифы
+            from bot.handlers_pay import send_paywall
+
+            await send_paywall(bot, message.chat.id, uid)
+            return
         await send_status(bot, message.chat.id, uid)
         return
     await send_welcome(message, 0)
@@ -80,12 +85,17 @@ async def _apply_payload(s, user: User, created: bool, payload: str, outbox: Out
                 user.source = "friend"
             if not created and user.onboarding_step == "done":
                 outbox.add(_reply(user, texts.friends_now(who(inviter))))
+    elif payload in ("buy_run", "buy_year"):
+        # пришли с кнопки «Оплатить» на сайте: новичок сначала знакомится, тарифы бот покажет на шаге доступа
+        await log_event(s, "buy_intent", user.id, product=payload[4:], new=created)
+        if not user.source:
+            user.source = "landing"
     elif payload.startswith("promo_") or payload.startswith("src_"):
         # метка источника (реклама, блогер) и промокод из ссылки: t.me/<бот>?start=promo_READ20
         from services.billing import normalize_code, valid_promo
 
         if payload.startswith("promo_"):
-            promo = await valid_promo(s, payload[6:])
+            promo = await valid_promo(s, payload[6:], user.id)
             if promo is not None:
                 user.promo_code = promo.code
                 outbox.add(_reply(user, texts.promo_applied(promo.code, promo.discount_percent)))

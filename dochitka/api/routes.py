@@ -43,16 +43,17 @@ from services.books import (
     store_upload,
     update_book_meta,
 )
-from services.common import Outbox, OutMsg, log_event, today_for
+from services.common import Outbox, OutMsg, RateLimit, log_event, today_for
 from services.consent import give_consent, has_consent
 from services.flow import submit_retelling
-from services.progress import DayView, accepted_by_day, effective_freezes, load_view
+from services.progress import DayView, accepted_by_day, effective_freezes, load_view, paused_on
 from services.retell import RetellOutcome
 from services.runs import current_enrollment, ensure_enrollment, sprint_block, sprint_used, start_sprint
 from services.shelf import achievements_of, shelf
 from services.social import (
     are_friends,
     ensure_pair_code,
+    ensure_together_code,
     friend_ids,
     get_pair_for,
     leave_pair,
@@ -113,7 +114,9 @@ def book_brief(b: Book | None) -> dict | None:
     }
 
 
-def seg_brief(seg: Segment | None, book: Book | None, day: int | None = None) -> dict | None:
+def seg_brief(seg: Segment | None, book: Book | None, anchors: bool = True) -> dict | None:
+    """Отрезок для экрана. anchors=False — без «начни со слов / дочитай до»: их показываем только для отрезков,
+    которые уже можно читать, иначе по будущим дням можно было бы собрать куски текста чужой книги."""
     if seg is None:
         return None
     paper = book is not None and book.source == "paper"
@@ -123,7 +126,7 @@ def seg_brief(seg: Segment | None, book: Book | None, day: int | None = None) ->
         "pages": pages, "minutes": segment_minutes(seg.word_count, pages, paper),
         "retell_prompt": seg.retell_prompt, "can_read": bool(book and book.has_text and seg.text),
         "pos_to": seg.pos_to, "place": segment_place(seg.page_from, seg.page_to, seg.pos_from, seg.pos_to, paper),
-        "anchors": None if paper else anchors_of(seg.text, seg.start_words, seg.end_words),
+        "anchors": None if paper or not anchors else anchors_of(seg.text, seg.start_words, seg.end_words),
     }
 
 
@@ -227,10 +230,15 @@ async def need_consent(user: User = Depends(current_user), s: AsyncSession = Dep
     return user
 
 
+AVATAR_UPLOADS = RateLimit(20, 24 * 3600)
+
+
 @router.post("/me/avatar")
 async def post_avatar(photo: UploadFile = File(...), user: User = Depends(need_consent),
                       s: AsyncSession = Depends(get_session)):
     """Своё фото вместо фото из Telegram: квадрат 320×320 без метаданных."""
+    if not AVATAR_UPLOADS.hit(user.id):
+        raise HTTPException(429, "Фото сегодня меняли много раз — попробуй завтра")
     data = await photo.read(MAX_AVATAR_BYTES + 1)
     try:
         await asyncio.to_thread(save_avatar, user, data)
@@ -336,7 +344,7 @@ async def get_today(user: User = Depends(current_user), s: AsyncSession = Depend
         "book": book_brief(v.book),
         "plan_day": v.plan_day, "plan_days": v.plan_days,
         "segment": seg_brief(seg, v.book),
-        "next_segment": seg_brief(v.next_segment, v.book),
+        "next_segment": seg_brief(v.next_segment, v.book, anchors=False),
         "streak": enr.streak if enr else 0, "best_streak": enr.best_streak if enr else 0,
         "freezes_left": v.freezes_left if enr else 0,
         "progress": round(v.progress, 3),
@@ -350,6 +358,7 @@ async def get_today(user: User = Depends(current_user), s: AsyncSession = Depend
         } if v.open_retelling else None,
         "starts_on": v.starts_on.isoformat() if v.starts_on else None,
         "deadline": v.deadline.isoformat() if v.deadline else None,
+        "paused_until": v.paused_until.isoformat() if v.paused_until else None,
         "run": run_brief(enr),
         "partner": await _partner_block(s, enr),
         "week": await _week(s, user, enr, v.today or today_for(user)),
@@ -407,6 +416,8 @@ async def get_run(user: User = Depends(current_user), s: AsyncSession = Depends(
             pd = plan_day_number(enr.plan_start_date, d)
             if r is not None:
                 st = r.result
+            elif paused_on(enr, d):
+                st = "paused"
             elif d > today:
                 st = "future"
             elif d == today:
@@ -449,7 +460,7 @@ async def get_run_day(n: int, user: User = Depends(current_user), s: AsyncSessio
         seg = await s.scalar(select(Segment).where(Segment.book_id == book.id, Segment.day_number == min(pd, enr.plan_days)))
     return {
         "n": n, "date": d.isoformat(), "state": dr.result if dr else None, "plan_day": pd if pd >= 1 else None,
-        "segment": seg_brief(seg, book), "segments_today": len(accepted),
+        "segment": seg_brief(seg, book, anchors=d <= today_for(user)), "segments_today": len(accepted),
         # текст пересказа не хранится — только результат
         "retelling": {"verdict": shown.verdict, "verified": shown.verified, "source": shown.source,
                       "question": shown.ai_question if shown.verdict == "clarify" else None} if shown else None,
@@ -488,12 +499,11 @@ async def _invite(s: AsyncSession, user: User, enr: Enrollment) -> tuple[str, st
     from bot.ui import deep_link
     from services.together import shareable_book
 
-    code = await ensure_pair_code(s, enr)
     book = await shareable_book(s, enr)
     if book is not None:
-        return (deep_link(f"t_{code}"), "together", book.title,
+        return (deep_link(f"t_{await ensure_together_code(s, enr)}"), "together", book.title,
                 texts.together_invite_text(user.display_name, book.title, enr.plan_days or 0))
-    return deep_link(f"p_{code}"), "pair", None, texts.pair_invite_text(user.display_name)
+    return deep_link(f"p_{await ensure_pair_code(s, enr)}"), "pair", None, texts.pair_invite_text(user.display_name)
 
 
 @router.post("/pair/leave")
@@ -736,7 +746,9 @@ class PromoBody(BaseModel):
 
 @router.post("/billing/promo")
 async def post_promo(body: PromoBody, user: User = Depends(need_consent), s: AsyncSession = Depends(get_session)):
-    promo = await billing.valid_promo(s, body.code)
+    if not billing.PROMO_TRIES.hit(user.id):
+        raise HTTPException(429, billing.PROMO_TOO_MANY)
+    promo = await billing.valid_promo(s, body.code, user.id)
     if promo is None:
         raise HTTPException(404, "Такого промокода нет или он закончился")
     user.promo_code = promo.code
@@ -748,6 +760,24 @@ async def post_promo(body: PromoBody, user: User = Depends(need_consent), s: Asy
 
 class FreeBody(BaseModel):
     product: str = Field(default="run", pattern=r"^(run|month|year)$")
+
+
+class ManualBody(BaseModel):
+    product: str = Field(default="run", pattern=r"^(run|month|year)$")
+
+
+@router.post("/billing/manual")
+async def post_manual(body: ManualBody, user: User = Depends(need_consent), s: AsyncSession = Depends(get_session)):
+    """Оплатить, пока ЮKassa не подключена: как заплатить переводом; ведущему — заявка с командой выдачи доступа."""
+    if get_settings().payments_enabled:
+        raise HTTPException(409, "Оплата картой уже работает — обнови экран")
+    out = Outbox()
+    amount, _ = await billing.request_manual(s, user, body.product, out, via="webapp")
+    await s.commit()
+    await _flush(out)
+    st = get_settings()
+    return {"amount": amount, "info": st.payment_info, "contact": st.support_contact or st.seller_email or None,
+            "contact_url": billing.support_url()}
 
 
 @router.post("/billing/free")
@@ -767,6 +797,10 @@ async def post_upload(
     if detect_format(name) is None:
         msg = "Пока умею только epub и fb2." if is_other_book_format(name) else "Это не похоже на книгу epub/fb2."
         raise HTTPException(415, msg)
+    from services.books import BOOK_UPLOADS, BOOK_UPLOADS_TOO_MANY
+
+    if not BOOK_UPLOADS.hit(user.id):
+        raise HTTPException(429, BOOK_UPLOADS_TOO_MANY)
     max_bytes = get_settings().max_book_mb * 1024 * 1024
     data = await file.read(max_bytes + 1)
     if len(data) > max_bytes:
@@ -912,7 +946,7 @@ async def get_friends(user: User = Depends(current_user), s: AsyncSession = Depe
         items.append({**st.__dict__, "is_me": False, "can_nudge": st.today in ("reading", "burned") and fid not in nudged,
                       "nudged": fid in nudged})
     items.append({**me.__dict__, "is_me": True, "can_nudge": False, "nudged": False})
-    order = {"done": 0, "reading": 1, "burned": 2, "waiting": 3, "finished": 4, "idle": 5}
+    order = {"done": 0, "reading": 1, "burned": 2, "rest": 3, "paused": 3, "waiting": 3, "finished": 4, "idle": 5}
     items.sort(key=lambda x: (order.get(x["today"], 9), -x["streak"]))
     enr = await current_enrollment(s, user.id)
     return {"items": items, "pair": await _partner_block(s, enr), "count": len(items) - 1}
@@ -1157,28 +1191,26 @@ class FeedbackBody(BaseModel):
 @router.post("/feedback")
 async def post_feedback(body: FeedbackBody, user: User = Depends(need_consent), s: AsyncSession = Depends(get_session)):
     """Отзыв из мини-приложения: сохраняется и сразу приходит ведущему в бота."""
-    from services.feedback import add_text
+    from services.feedback import TooManyFeedback, add_text
 
     out = Outbox()
-    await add_text(s, user, "free", body.text, None, out)
+    try:
+        await add_text(s, user, "free", body.text, None, out)
+    except TooManyFeedback as e:
+        raise HTTPException(429, texts.FEEDBACK_TOO_MANY) from e
     await s.commit()
     await _flush(out)
     return {"ok": True}
 
 
-_EVENT_TIMES: dict[int, list[float]] = {}
-MAX_UI_EVENTS_PER_MINUTE = 60
+UI_EVENTS = RateLimit(60, 60)  # экраны и нажатия: не больше 60 в минуту на человека
 
 
 @router.post("/events")
 async def post_event(body: EventBody, user: User = Depends(current_user), s: AsyncSession = Depends(get_session)):
     """Экраны и нажатия в мини-приложении — для разбора, чем пользуются. Без текстов и личных данных."""
-    now_t = _time.monotonic()
-    times = [t for t in _EVENT_TIMES.get(user.id, []) if now_t - t < 60]
-    if len(times) >= MAX_UI_EVENTS_PER_MINUTE:
+    if not UI_EVENTS.hit(user.id):
         return {"ok": True}  # лишнее молча отбрасываем
-    times.append(now_t)
-    _EVENT_TIMES[user.id] = times
     payload = {k: v for k, v in (("screen", body.screen), ("target", body.target)) if v}
     await log_event(s, body.type, user.id, **payload)
     return {"ok": True}

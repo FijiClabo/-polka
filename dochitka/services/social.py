@@ -155,7 +155,7 @@ class PublicStatus:
     book_author: str | None
     spine_color: str | None
     streak: int
-    today: str  # done | reading | burned | idle | finished | waiting
+    today: str  # done | reading | burned | rest | paused | idle | finished | waiting
     plan_day: int | None
     plan_days: int | None
     done_at: str | None = None
@@ -179,6 +179,10 @@ async def public_status(session: AsyncSession, user: User) -> PublicStatus:
     st.plan_day, st.plan_days, st.progress = view.plan_day, enr.plan_days, view.progress
     if view.state == "finished":
         st.today = "finished"
+    elif view.state == "paused":
+        st.today = "paused"
+    elif view.state == "to_read" and view.extra == "ahead":
+        st.today = "rest"  # по плану сегодня ничего не нужно — всё сдано заранее; толкать не за что
     elif view.state in ("to_read", "clarify", "checking"):
         today = today_for(user)
         yesterday = await session.scalar(
@@ -309,7 +313,9 @@ async def join_pair_by_code(
     session: AsyncSession, user: User, code: str, outbox: Outbox, *, together: bool = False
 ) -> tuple[str, User | None]:
     """Вступить в пару по ссылке. together — ссылка «читать вместе»: напарник видит книгу и может взять тот же план."""
-    inviter_enr = await session.scalar(select(Enrollment).where(Enrollment.pair_code == code))
+    # у ссылок в напарники и «читать вместе» разные коды: поменять p_ на t_ в своей ссылке ничего не даст
+    field = Enrollment.together_code if together else Enrollment.pair_code
+    inviter_enr = await session.scalar(select(Enrollment).where(field == code)) if code else None
     if inviter_enr is None:
         return "not_found", None
     inviter = await session.get(User, inviter_enr.user_id)
@@ -387,6 +393,14 @@ async def ensure_pair_code(session: AsyncSession, enr: Enrollment) -> str:
         enr.pair_code = random_code(10)
         await session.flush()
     return enr.pair_code
+
+
+async def ensure_together_code(session: AsyncSession, enr: Enrollment) -> str:
+    """Код ссылки «читать вместе» (t_): даёт напарнику видеть книгу и взять тот же план."""
+    if not enr.together_code:
+        enr.together_code = random_code(10)
+        await session.flush()
+    return enr.together_code
 
 
 async def remove_friend(session: AsyncSession, user: User, friend_id: int) -> bool:

@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import texts
 from db.models import DayResult, Enrollment, Feedback, User
-from services.common import Outbox, OutMsg, allow_once, log_event
+from services.common import Outbox, OutMsg, RateLimit, allow_once, log_event
 from settings import get_settings
 
 
@@ -117,9 +117,20 @@ async def answer(session: AsyncSession, user: User, kind: str, value: str) -> Fe
     return fb
 
 
+# отзывы: сохраняем до 30 в сутки от человека, ведущему пересылаем до 5 в час — спамом бота не завалить
+FEEDBACK_SAVE = RateLimit(30, 24 * 3600)
+FEEDBACK_FORWARD = RateLimit(5, 3600)
+
+
+class TooManyFeedback(Exception):
+    pass
+
+
 async def add_text(session: AsyncSession, user: User, kind: str, text: str, feedback_id: int | None,
                    outbox: Outbox | None) -> Feedback:
     """Свободный ответ: дописывается к ответу кнопкой или становится отдельным отзывом. Уходит ведущему."""
+    if not FEEDBACK_SAVE.hit(user.id):
+        raise TooManyFeedback
     text = text.strip()[:2000]
     fb = await session.get(Feedback, feedback_id) if feedback_id else None
     if fb is None or fb.user_id != user.id:
@@ -129,7 +140,7 @@ async def add_text(session: AsyncSession, user: User, kind: str, text: str, feed
     await session.flush()
     await log_event(session, "feedback", user.id, kind=fb.kind, score=fb.score, choice=fb.choice, text=True,
                     length=len(text))
-    if outbox is not None:
+    if outbox is not None and FEEDBACK_FORWARD.hit(user.id):
         from services.users import who
 
         for admin in get_settings().admin_ids:

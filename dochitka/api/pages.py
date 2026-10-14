@@ -54,6 +54,14 @@ def page_values(src: str | None = None) -> dict[str, str]:
         "BOT_USERNAME": f"@{bot}" if bot else "—",
         "BOT_NAME": bot or "",
         "BOT_LINK": f"https://t.me/{bot}" if bot else "#",
+        # кнопки «Оплатить» на сайте: бот сразу покажет тарифы и оплату (ЮKassa или перевод, пока её нет)
+        "BUY_RUN_URL": f"https://t.me/{bot}?start=buy_run" if bot else "#",
+        "BUY_YEAR_URL": f"https://t.me/{bot}?start=buy_year" if bot else "#",
+        "PAY_NOTE": ("Оплата&nbsp;— внутри бота: выбираешь тариф, нажимаешь «Оплатить», и&nbsp;открывается платёжная "
+                     "страница ЮKassa&nbsp;— банковская карта, СБП и&nbsp;другие способы." if s.payments_enabled else
+                     "Оплата&nbsp;— внутри бота: выбираешь тариф, нажимаешь «Оплатить», и&nbsp;бот показывает, как "
+                     "оплатить переводом; доступ открывается, как только оплата придёт.")
+                    + " Оплата разовая, без автопродления.",
         "PRICE_RUN": texts.rub(s.price_run_rub),
         "PRICE_MONTH": texts.rub(s.price_month_rub),
         "PRICE_YEAR": texts.rub(s.price_year_rub),

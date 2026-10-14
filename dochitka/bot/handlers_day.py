@@ -37,6 +37,8 @@ def seg_text(seg, book) -> str:
 
 
 def today_text(v: DayView) -> str:
+    if v.state == "paused" and v.paused_until:
+        return texts.paused_today(v.paused_until)
     seg = v.segment if v.state in ("to_read", "clarify", "checking") else v.next_segment
     if v.state == "done_today":
         text = texts.state_message("done_today", next_title=seg.title if seg else None)
@@ -70,6 +72,8 @@ def today_text(v: DayView) -> str:
 def today_kb(v: DayView):
     seg = v.segment
     rows = []
+    if v.state == "paused":
+        rows.append([{"text": "Закончить паузу и читать", "callback": "pace:resume"}])
     if seg is not None and v.book is not None and v.book.has_text and v.state in ("to_read", "clarify"):
         rows.append([{"text": "Читать отрезок", "webapp": f"read?d={seg.day_number}"}])
     if v.state == "to_read" and not v.extra and seg is not None:

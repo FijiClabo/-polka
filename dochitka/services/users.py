@@ -129,12 +129,13 @@ def save_avatar(u: User, data: bytes) -> str:
     if len(data) > MAX_AVATAR_BYTES:
         raise ValueError("Фото больше 8 МБ — выбери поменьше")
     try:
-        img = Image.open(io.BytesIO(data))
+        # размер читаем из заголовка до распаковки: «фото-бомба» 50000×50000 не успеет занять память
+        img = Image.open(io.BytesIO(data), formats=["JPEG", "PNG", "WEBP"])
+        if img.width * img.height > 40_000_000:
+            raise ValueError("Слишком большое фото")
         img.load()
-    except (UnidentifiedImageError, OSError) as e:
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as e:
         raise ValueError("Это не похоже на фото: нужен JPEG, PNG или WebP") from e
-    if img.width * img.height > 40_000_000:
-        raise ValueError("Слишком большое фото")
     img = ImageOps.exif_transpose(img).convert("RGB")
     img = ImageOps.fit(img, (AVATAR_SIZE, AVATAR_SIZE), Image.Resampling.LANCZOS)
     d = avatars_dir()

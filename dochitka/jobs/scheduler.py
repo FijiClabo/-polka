@@ -130,42 +130,45 @@ async def _morning_evening(s, enr: Enrollment, user: User, outbox: Outbox) -> No
 
             await offer(s, user, "drop", f"survey:drop:{enr.id}", outbox)
 
-    if _due(user, user.morning_time) and view.state in ("to_read", "clarify") and view.segment:
-        if view.extra == "more":
-            return  # день уже сдан, человек сам открыл следующий — утром не беспокоим
-        if await allow_initiative(s, user, "morning"):
-            seg = view.segment
-            book = view.book
-            paper = book.source == "paper"
-            if view.extra == "ahead":
-                from bot.handlers_day import seg_text
+    if view.extra == "more":
+        return  # день уже сдан, человек сам открыл следующий — не беспокоим ни утром, ни вечером
+    # утреннее — один раз; когда оно уже ушло, дальше проверяем вечернее (раньше return здесь глушил вечер навсегда)
+    if _due(user, user.morning_time) and view.state in ("to_read", "clarify") and view.segment \
+            and await allow_initiative(s, user, "morning"):
+        if _due(user, user.evening_time):
+            await allow_initiative(s, user, "evening")  # утреннее ушло уже вечером — второе следом не шлём
+        seg = view.segment
+        book = view.book
+        paper = book.source == "paper"
+        if view.extra == "ahead":
+            from bot.handlers_day import seg_text
 
-                rows = [[{"text": "Читать дальше", "webapp": f"read?d={seg.day_number}"}]] if book.has_text else []
-                rows.append([{"text": "Открыть приложение", "webapp": "today"}])
-                outbox.add(OutMsg(user.tg_id, texts.morning_ahead(view.plan_day, enr.plan_days, seg_text(seg, book),
-                                                                   view.ahead, paper), buttons=rows, kind="morning"))
-                await log_event(s, "segment_sent", user.id, enr.run_id, day=seg.day_number, ahead=True)
-                return
-            minutes = segment_minutes(seg.word_count, seg.page_to - seg.page_from + 1, paper)
-            yesterday = await s.scalar(
-                select(DayResult.result).where(DayResult.enrollment_id == enr.id, DayResult.user_day == today - timedelta(days=1))
-            )
-            _, partner, _ = await get_pair_for(s, enr)
-            text = texts.morning(
-                user.display_name, view.plan_day, enr.plan_days, seg.title,
-                segment_place(seg.page_from, seg.page_to, seg.pos_from, seg.pos_to, paper), minutes,
-                catching_up=view.catching_up, yesterday=yesterday if yesterday in ("frozen", "missed") else None,
-                streak=enr.streak, partner=partner.display_name if partner else None, run_started=view.plan_day == 1,
-                anchors=None if paper else anchors_of(seg.text, seg.start_words, seg.end_words), paper=paper,
-            )
-            if view.behind > 1:
-                text += "\n\n" + texts.behind_line(view.behind)
-            rows = []
-            if book.has_text:
-                rows.append([{"text": "Читать отрезок", "webapp": f"read?d={seg.day_number}"}])
+            rows = [[{"text": "Читать дальше", "webapp": f"read?d={seg.day_number}"}]] if book.has_text else []
             rows.append([{"text": "Открыть приложение", "webapp": "today"}])
-            outbox.add(OutMsg(user.tg_id, text, buttons=rows, kind="morning"))
-            await log_event(s, "segment_sent", user.id, enr.run_id, day=seg.day_number)
+            outbox.add(OutMsg(user.tg_id, texts.morning_ahead(view.plan_day, enr.plan_days, seg_text(seg, book),
+                                                               view.ahead, paper), buttons=rows, kind="morning"))
+            await log_event(s, "segment_sent", user.id, enr.run_id, day=seg.day_number, ahead=True)
+            return
+        minutes = segment_minutes(seg.word_count, seg.page_to - seg.page_from + 1, paper)
+        yesterday = await s.scalar(
+            select(DayResult.result).where(DayResult.enrollment_id == enr.id, DayResult.user_day == today - timedelta(days=1))
+        )
+        _, partner, _ = await get_pair_for(s, enr)
+        text = texts.morning(
+            user.display_name, view.plan_day, enr.plan_days, seg.title,
+            segment_place(seg.page_from, seg.page_to, seg.pos_from, seg.pos_to, paper), minutes,
+            catching_up=view.catching_up, yesterday=yesterday if yesterday in ("frozen", "missed") else None,
+            streak=enr.streak, partner=partner.display_name if partner else None, run_started=view.plan_day == 1,
+            anchors=None if paper else anchors_of(seg.text, seg.start_words, seg.end_words), paper=paper,
+        )
+        if view.behind > 1:
+            text += "\n\n" + texts.behind_line(view.behind)
+        rows = []
+        if book.has_text:
+            rows.append([{"text": "Читать отрезок", "webapp": f"read?d={seg.day_number}"}])
+        rows.append([{"text": "Открыть приложение", "webapp": "today"}])
+        outbox.add(OutMsg(user.tg_id, text, buttons=rows, kind="morning"))
+        await log_event(s, "segment_sent", user.id, enr.run_id, day=seg.day_number)
         return
 
     if _due(user, user.evening_time) and view.state in ("to_read", "clarify") and not view.done_today \

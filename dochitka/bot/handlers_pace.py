@@ -14,7 +14,7 @@ from bot.common import load_user
 from bot.handlers_day import seg_text
 from bot.ui import kb
 from db.session import session_scope
-from services.pace import PaceError, ask_more, pace_info, partial_options, pause, replan, split_today
+from services.pace import PaceError, ask_more, pace_info, partial_options, pause, replan, resume, split_today
 from services.progress import load_view
 from services.runs import current_enrollment
 
@@ -35,6 +35,8 @@ def pace_kb(info: dict) -> object:
     pauses = info.get("pause_options", [])
     if pauses:
         rows.append([{"text": f"Пауза {texts.days_word(o['days'])}", "callback": f"pace:p:{o['days']}"} for o in pauses])
+    if info.get("paused_until"):
+        rows.append([{"text": "Закончить паузу и читать", "callback": "pace:resume"}])
     rows.append([{"text": "Настроить в приложении", "webapp": "pace"}])
     return kb(rows)
 
@@ -70,10 +72,10 @@ async def cb_pace_set(call: CallbackQuery) -> None:
     if not await consent_gate(call.message, call.from_user):
         return
     parts = call.data.split(":")
-    async with session_scope() as s:
-        user, _ = await load_user(s, call.from_user)
-        enr = await current_enrollment(s, user.id)
-        try:
+    try:
+        async with session_scope() as s:
+            user, _ = await load_user(s, call.from_user)
+            enr = await current_enrollment(s, user.id)
             if parts[1] == "p":
                 days = int(parts[2])
                 finish = await pause(s, user, enr, days)
@@ -81,11 +83,28 @@ async def cb_pace_set(call: CallbackQuery) -> None:
             else:
                 await replan(s, user, enr, minutes=int(parts[2]) if parts[1] == "m" else None, by_chapter=parts[1] == "ch")
                 text = texts.pace_changed(await pace_info(s, user, enr))
-        except PaceError as e:
-            await call.message.answer(f"Не получилось: {texts.e(str(e))}")
-            return
+    except PaceError as e:  # откат: план остаётся прежним
+        await call.message.answer(f"Не получилось: {texts.e(str(e))}")
+        return
     await call.message.edit_reply_markup(reply_markup=None)
     await call.message.answer(text, reply_markup=kb([[{"text": "Отрезок на сегодня", "callback": "day:show"}]]))
+
+
+@router.callback_query(F.data == "pace:resume")
+async def cb_pace_resume(call: CallbackQuery) -> None:
+    await call.answer()
+    try:
+        async with session_scope() as s:
+            user, _ = await load_user(s, call.from_user)
+            finish = await resume(s, user, await current_enrollment(s, user.id))
+    except PaceError as e:
+        await call.message.answer(texts.e(str(e)))
+        return
+    try:
+        await call.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await call.message.answer(texts.resumed(finish), reply_markup=kb([[{"text": "Отрезок на сегодня", "callback": "day:show"}]]))
 
 
 @router.callback_query(F.data == "day:show")
@@ -150,22 +169,22 @@ async def cb_partial_apply(call: CallbackQuery) -> None:
     if not await consent_gate(call.message, call.from_user):
         return
     _, q, r = call.data.split(":")
-    async with session_scope() as s:
-        user, _ = await load_user(s, call.from_user)
-        enr = await current_enrollment(s, user.id)
-        try:
+    try:
+        async with session_scope() as s:
+            user, _ = await load_user(s, call.from_user)
+            enr = await current_enrollment(s, user.id)
             p = await split_today(s, user, enr, quarter=int(q), rest="tomorrow" if r == "t" else "day")
-        except PaceError as e:
-            await call.message.answer(f"Не получилось: {texts.e(str(e))}")
-            return
-        v = await load_view(s, user, enr)
-        paper = v.book.source == "paper"
-        finish = enr.plan_start_date + timedelta(days=enr.plan_days - 1) if enr.plan_start_date else None
-        text = texts.partial_done(seg_text(p.segment, v.book), p.rest, finish, paper)
-        rows = []
-        if v.book.has_text and p.segment.text:
-            rows.append([{"text": "Читать отрезок", "webapp": f"read?d={p.segment.day_number}"}])
-        rows.append([{"text": "Открыть приложение", "webapp": "today"}])
+            v = await load_view(s, user, enr)
+            paper = v.book.source == "paper"
+            finish = enr.plan_start_date + timedelta(days=enr.plan_days - 1) if enr.plan_start_date else None
+            text = texts.partial_done(seg_text(p.segment, v.book), p.rest, finish, paper)
+            rows = []
+            if v.book.has_text and p.segment.text:
+                rows.append([{"text": "Читать отрезок", "webapp": f"read?d={p.segment.day_number}"}])
+            rows.append([{"text": "Открыть приложение", "webapp": "today"}])
+    except PaceError as e:
+        await call.message.answer(f"Не получилось: {texts.e(str(e))}")
+        return
     await call.message.edit_reply_markup(reply_markup=None)
     await call.message.answer(text, reply_markup=kb(rows))
 

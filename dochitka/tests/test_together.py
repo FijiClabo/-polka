@@ -8,7 +8,7 @@ from db.session import session_scope
 from services.books import attach_book, confirm_plan, save_parsed
 from services.common import Outbox
 from services.runs import ensure_enrollment
-from services.social import ensure_pair_code, join_pair_by_code
+from services.social import ensure_pair_code, ensure_together_code, join_pair_by_code
 from services.users import get_or_create_user
 from tests.helpers import set_now
 from tests.test_api import H, client  # noqa: F401 — фикстура клиента API
@@ -30,7 +30,7 @@ async def _reader_with_plan() -> tuple[int, str]:
         await save_parsed(s, book, parse_book("b.epub", sample_set()["01_clean_with_toc.epub"]), "h1")
         await attach_book(s, enr, book)
         await confirm_plan(s, a, enr, 21)
-        return a.id, await ensure_pair_code(s, enr)
+        return a.id, await ensure_together_code(s, enr)
 
 
 async def test_read_together_flow(client):  # noqa: F811
@@ -47,8 +47,13 @@ async def test_read_together_flow(client):  # noqa: F811
 
     # обычная ссылка p_ книгу напарнику не раскрывает и план не предлагает
     async with session_scope() as s:
+        a = await s.get(User, a_id)
+        pair_code = await ensure_pair_code(s, await ensure_enrollment(s, a))
+        assert pair_code != code
         b = await s.scalar(select(User).where(User.tg_id == B_TG))
-        assert (await join_pair_by_code(s, b, code, Outbox()))[0] == "ok"
+        assert (await join_pair_by_code(s, b, pair_code, Outbox()))[0] == "ok"
+        # и превратить её в «читать вместе», поменяв p_ на t_, нельзя: у t_ свой код
+        assert (await join_pair_by_code(s, b, pair_code, Outbox(), together=True))[0] == "not_found"
     assert (await client.get("/api/book", headers=hb)).json()["together"] is None
     # та же пара по ссылке «читать вместе» — теперь можно взять план
     async with session_scope() as s:
@@ -123,7 +128,7 @@ async def test_together_needs_confirmed_plan(client):  # noqa: F811
     async with session_scope() as s:
         a, _ = await get_or_create_user(s, A_TG, first_name="Аня")
         enr = await ensure_enrollment(s, a)
-        code = await ensure_pair_code(s, enr)
+        code = await ensure_together_code(s, enr)
     inv = (await client.get("/api/pair/invite", headers=H(A_TG, "Аня"))).json()
     assert inv["kind"] == "pair" and "?start=p_" in inv["link"]
     hb = H(B_TG, "Боря")

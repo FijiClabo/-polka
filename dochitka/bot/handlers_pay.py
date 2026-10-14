@@ -10,11 +10,11 @@ from aiogram.types import CallbackQuery, Message
 
 import texts
 from bot.common import load_user
-from bot.ui import kb
+from bot.ui import flush, kb
 from db.models import Book, User
 from db.session import session_scope
 from services import billing, payments
-from services.common import log_event
+from services.common import Outbox, log_event
 from services.progress import load_view
 from services.runs import current_enrollment, ensure_enrollment
 from settings import get_settings
@@ -38,13 +38,10 @@ async def send_paywall(bot: Bot, chat_id: int, user_id: int) -> None:
         await log_event(ses, "paywall_shown", user.id, via="bot")
         plan_days = enr.plan_days if enr else None
         need_email = payments.needs_email(user)
-    free = [p for p in prices.values() if p.free and p.promo]
-    if not s.payments_enabled and not free:
-        await bot.send_message(chat_id, texts.paywall(book.title if book else None, plan_days, prices) + "\n\n"
-                               + texts.e(s.payment_info))
-        return
+    # кнопка «Оплатить» есть всегда: без ЮKassa она показывает, как оплатить переводом, и зовёт ведущего
+    in_chat = not need_email or not s.payments_enabled
     await bot.send_message(chat_id, texts.paywall(book.title if book else None, plan_days, prices),
-                           reply_markup=kb(texts.paywall_buttons(prices, in_chat=not need_email)))
+                           reply_markup=kb(texts.paywall_buttons(prices, in_chat=in_chat)))
 
 
 @router.message(Command("buy", "tariffs", "pay"))
@@ -75,6 +72,17 @@ async def cb_pay(call: CallbackQuery, bot: Bot) -> None:
         await after_payment_message(bot, call.message.chat.id, uid, p.product, bool(getattr(p, "activated_now", None)))
         return
     product = parts[1] if len(parts) > 1 else "run"
+    if product not in ("run", "month", "year"):
+        return
+    if not get_settings().payments_enabled:
+        outbox = Outbox()
+        async with session_scope() as s:
+            user, _ = await load_user(s, call.from_user)
+            _, text = await billing.request_manual(s, user, product, outbox)
+        url = billing.support_url()
+        await call.message.answer(text, reply_markup=kb([[{"text": "Написать", "url": url}]]) if url else None)
+        await flush(bot, outbox)
+        return
     try:
         async with session_scope() as s:
             user, _ = await load_user(s, call.from_user)
@@ -153,7 +161,10 @@ async def cmd_promo(message: Message, command: CommandObject, bot: Bot) -> None:
         return
     async with session_scope() as s:
         user, _ = await load_user(s, message.from_user)
-        promo = await billing.valid_promo(s, code)
+        if not billing.PROMO_TRIES.hit(user.id):
+            await message.answer(billing.PROMO_TOO_MANY)
+            return
+        promo = await billing.valid_promo(s, code, user.id)
         if promo is None:
             await message.answer(texts.PROMO_BAD)
             return

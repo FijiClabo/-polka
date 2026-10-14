@@ -19,6 +19,7 @@ MAX_ATTEMPTS_PER_HOUR = 10
 
 DONE, FROZEN, MISSED = "done", "frozen", "missed"
 AHEAD = "ahead"  # пересказа в этот день не было, но отрезок дня сдан заранее: план не отстаёт, стрик цел
+PAUSED = "paused"  # день паузы: план сдвинут, стрик и заморозки целы
 
 
 # --------------------------------------------------------------------------- отрезки
@@ -80,13 +81,16 @@ def refresh_freezes(
     return freezes_left, freezes_week
 
 
-def close_day(had_accepted: bool, streak: int, freezes_left: int, banked: bool = False) -> DayClose:
+def close_day(had_accepted: bool, streak: int, freezes_left: int, banked: bool = False, paused: bool = False) -> DayClose:
     """Итог дня в 04:00. Стрик за сданный день уже увеличен в момент сдачи.
 
     banked — отрезок этого дня сдан заранее: день не сдан, но и не пропущен — заморозка не тратится, стрик цел.
+    paused — день паузы: так же ничего не сгорает.
     """
     if had_accepted:
         return DayClose(DONE, streak, freezes_left, False)
+    if paused:
+        return DayClose(PAUSED, streak, freezes_left, False)
     if banked:
         return DayClose(AHEAD, streak, freezes_left, False)
     if freezes_left > 0:
@@ -109,8 +113,8 @@ def pair_streak_after_day(result_a: str | None, result_b: str | None, streak: in
     None (у участника в этот день нет обязательств: план ещё не начался) и ahead (отрезок сдан заранее)
     считаются как frozen.
     """
-    a = FROZEN if result_a in (None, AHEAD) else result_a
-    b = FROZEN if result_b in (None, AHEAD) else result_b
+    a = FROZEN if result_a in (None, AHEAD, PAUSED) else result_a
+    b = FROZEN if result_b in (None, AHEAD, PAUSED) else result_b
     if MISSED in (a, b):
         return 0
     if a == DONE and b == DONE:

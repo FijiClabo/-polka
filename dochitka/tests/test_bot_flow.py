@@ -157,7 +157,11 @@ async def test_full_flow(env):
     await press(bot, dp, U, "plan:21")
     assert any("План готов" in t for t in session.texts())
     assert "Осталось открыть доступ" in session.texts()[-1]  # пейвол
-    assert "Оплата скоро появится" in session.texts()[-1]  # ЮKassa не подключена — текст вместо кнопки
+    # ЮKassa не подключена, но кнопка «Оплатить» есть: показывает, как оплатить, и зовёт ведущего с готовой /grant
+    assert "pay:run" in session.last_markup_callbacks()
+    await press(bot, dp, U, "pay:run")
+    assert "Оплата скоро появится" in session.texts()[-2] or "Оплата скоро появится" in session.texts()[-1]
+    assert any("Хочет оплатить" in t and "/grant 501 run" in t for t in session.texts()[-2:])
 
     # плохой файл
     await send_doc(bot, dp, session, U, "scan.epub", sample_set()["07_scanned_images.epub"])

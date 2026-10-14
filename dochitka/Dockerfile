@@ -17,7 +17,12 @@ COPY requirements.txt ./
 RUN pip install --upgrade pip && pip install -r requirements.txt
 COPY . .
 COPY --from=webapp /webapp/dist ./webapp/dist
-RUN rm -rf webapp/node_modules tests/books/files && mkdir -p /app/data
+# приложение работает не от root: даже при взломе процесса — без прав на систему контейнера
+RUN rm -rf webapp/node_modules tests/books/files && mkdir -p /app/data \
+ && useradd --system --uid 10001 --home-dir /app --shell /usr/sbin/nologin app \
+ && chown -R app:app /app/data
+USER app
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 CMD curl -fsS http://localhost:8000/health || exit 1
-CMD ["sh", "-c", "alembic upgrade head && python main.py"]
+# exec: python становится главным процессом и получает сигнал остановки — бот завершает работу аккуратно
+CMD ["sh", "-c", "alembic upgrade head && exec python main.py"]

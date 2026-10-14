@@ -13,6 +13,7 @@ const STATE_BADGE: Record<string, [string, string]> = {
   frozen: ["frozen", "заморозка"],
   missed: ["missed", "пропущен"],
   ahead: ["ok", "сдан заранее"],
+  paused: ["frozen", "пауза"],
   today: ["accent", "сегодня"],
 };
 
@@ -88,6 +89,7 @@ export default function Run() {
         </div>
         {data.days.some((d) => d.grace) && <p className="tiny muted mt-12">Точки — дни отсрочки: можно догнать, сдавая по несколько отрезков в день.</p>}
         {data.days.some((d) => d.state === "ahead") && <p className="tiny muted mt-8">Светлая галочка — отрезок дня был сдан заранее: день не сгорел.</p>}
+        {data.days.some((d) => d.state === "paused") && <p className="tiny muted mt-8">Голубая рамка — день паузы: не сгорел, план сдвинут.</p>}
       </div>
 
       {data.state !== "finished" && data.state !== "expired" && (

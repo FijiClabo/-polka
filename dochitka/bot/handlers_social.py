@@ -14,12 +14,20 @@ from db.models import Book, Enrollment, Retelling, User
 from db.session import session_scope
 from services.common import Outbox, log_event
 from services.runs import current_enrollment
-from services.social import ensure_pair_code, friend_ids, get_pair_for, nudge, nudged_today, public_status
+from services.social import (
+    ensure_pair_code,
+    ensure_together_code,
+    friend_ids,
+    get_pair_for,
+    nudge,
+    nudged_today,
+    public_status,
+)
 
 router = Router(name="social")
 
 STATUS_WORD = {
-    "done": "сдано", "reading": "ещё читает", "burned": "стрик сгорел", "idle": "не в забеге",
+    "done": "сдано", "reading": "ещё читает", "burned": "стрик сгорел", "rest": "день отдыха", "paused": "на паузе", "idle": "не в забеге",
     "finished": "книга дочитана", "waiting": "ждёт старта",
 }
 
@@ -55,9 +63,10 @@ async def cmd_pair(message: Message) -> None:
         from services.together import shareable_book
 
         mine = await shareable_book(s, enr)
+        tcode = await ensure_together_code(s, enr) if mine is not None else None
         days = enr.plan_days
     if mine is not None:
-        link = deep_link(f"t_{code}")
+        link = deep_link(f"t_{tcode}")
         await message.answer(
             f"Позови друга читать вместе «{texts.e(mine.title)}»: тот же план на {days} дн., одна и та же глава в один день, "
             "общий стрик. Книга у каждого своя — бумажная, в любом приложении или файлом; твой файл другу не передаётся. "

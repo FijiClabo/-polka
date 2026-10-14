@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type Billing, type PriceInfo, type Product } from "../api";
+import { api, tap, type Billing, type PriceInfo, type Product } from "../api";
 import { IArrow, ICheck } from "../components/Icons";
 import { OpenBookIll } from "../components/Illustrations";
 import { Cover, ErrorState, ScreenSkeleton, toast } from "../components/ui";
 import { dayMonth, days, plural } from "../format";
 import { invalidate, useApi } from "../hooks";
 import { useNav } from "../nav";
-import { haptic, openExternal } from "../tg";
+import { haptic, openExternal, openTgLink } from "../tg";
 
 export const rub = (n: number) => `${Math.round(n).toLocaleString("ru-RU")} ₽`;
 
@@ -21,6 +21,7 @@ const INCLUDED = [
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 type Order = { id: string; startedAt: number };
+type Manual = { amount: number; info: string; contact: string | null; contact_url: string | null; product?: Product };
 type OrderState = Billing & { status: "pending" | "paid" | "canceled" | "refunded" };
 
 export default function Pay() {
@@ -29,6 +30,7 @@ export default function Pay() {
   const [picked, setProduct] = useState<Product | null>(null);
   const [busy, setBusy] = useState(false);
   const [order, setOrder] = useState<Order | null>(null);
+  const [manual, setManual] = useState<Manual | null>(null);
   const [email, setEmail] = useState("");
   const [promoOpen, setPromoOpen] = useState(false);
   const [promo, setPromo] = useState("");
@@ -135,6 +137,19 @@ export default function Pay() {
     }
   };
 
+  const payManual = async () => {
+    setBusy(true);
+    try {
+      const r = await api.post<Manual>("/billing/manual", { product });
+      tap("pay", "manual_" + product);
+      setManual({ ...r, product });
+    } catch (e) {
+      toast((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const activateFree = async () => {
     setBusy(true);
     try {
@@ -221,9 +236,25 @@ export default function Pay() {
           {sel.trial_days ? `Начать пробный доступ на ${days(sel.trial_days)}` : "Подключить по промокоду"}
         </button>
       ) : !data.enabled ? (
-        <div className="card mt-16 soon">
-          <p className="small" style={{ whiteSpace: "pre-line", margin: 0 }}>{data.manual_info}</p>
-        </div>
+        manual && manual.product === product ? (
+          <div className="card mt-16 soon">
+            <b>Оплата: {rub(manual.amount)}</b>
+            <p className="small mt-8" style={{ whiteSpace: "pre-line", marginBottom: 0 }}>{manual.info}</p>
+            <p className="small mt-8" style={{ marginBottom: 0 }}>
+              Как только оплата придёт, доступ откроется — бот напишет в чат.{manual.contact ? ` Вопросы — ${manual.contact}.` : ""}
+            </p>
+            {manual.contact_url && (
+              <button className="btn secondary block mt-12" onClick={() => openTgLink(manual.contact_url!)}>Написать</button>
+            )}
+          </div>
+        ) : (
+          <div className="mt-16">
+            <button className="btn primary block" disabled={busy} onClick={payManual}>
+              {`Оплатить ${rub(sel.rub)}`}
+            </button>
+            <p className="tiny muted center mt-8">Оплата разовая, без автопродления.</p>
+          </div>
+        )
       ) : (
         <div className="mt-16">
           {data.needs_email && (

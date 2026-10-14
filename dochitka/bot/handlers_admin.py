@@ -35,7 +35,7 @@ router = Router(name="admin")
 STATUS_RU = {"invited": "ждёт оплаты", "paid": "оплачен", "active": "идёт", "finished": "дочитан",
              "dropped": "выбыл", "refunded": "отменён"}
 VERDICT_RU = {"accepted": "засчитан", "rejected": "не засчитан", "clarify": "уточнение", "pending": "в очереди"}
-TODAY_RU = {"done": "сдано", "reading": "ещё читает", "burned": "стрик сгорел", "idle": "не в забеге",
+TODAY_RU = {"done": "сдано", "reading": "ещё читает", "burned": "стрик сгорел", "rest": "день отдыха", "paused": "на паузе", "idle": "не в забеге",
             "finished": "книга дочитана", "waiting": "ждёт старта"}
 
 ADMIN_HELP = """<b>Команды ведущего</b>

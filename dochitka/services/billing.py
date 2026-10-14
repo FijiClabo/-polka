@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import texts
 from db.models import Enrollment, PromoCode, Purchase, User
-from services.common import Outbox, OutMsg, log_event, now, random_code
+from services.common import Outbox, OutMsg, RateLimit, log_event, now, random_code
 from services.runs import current_enrollment, plan_start_for
 from settings import get_settings
 
@@ -76,6 +76,11 @@ def list_prices() -> dict[str, int]:
     return {"run": s.price_run_rub, "month": s.price_month_rub, "year": s.price_year_rub}
 
 
+# ввод промокода: 10 попыток в час на человека — подобрать чужой код перебором не выйдет
+PROMO_TRIES = RateLimit(10, 3600)
+PROMO_TOO_MANY = "Слишком много попыток ввести промокод. Попробуй через час."
+
+
 def normalize_code(code: str | None) -> str:
     return "".join(ch for ch in (code or "").upper() if ch.isalnum() or ch in "-_")[:32]
 
@@ -84,7 +89,15 @@ def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
-async def valid_promo(session: AsyncSession, code: str | None) -> PromoCode | None:
+async def promo_used_by(session: AsyncSession, user_id: int, code: str) -> bool:
+    """Человек уже воспользовался этим промокодом: оплатил со скидкой или получил бесплатный доступ."""
+    q = select(Purchase.id).where(Purchase.user_id == user_id, Purchase.promo_code == code,
+                                  Purchase.status.in_(("paid", "refunded"))).limit(1)
+    return await session.scalar(q) is not None
+
+
+async def valid_promo(session: AsyncSession, code: str | None, user_id: int | None = None) -> PromoCode | None:
+    """Действующий промокод. С user_id — ещё и не использованный этим человеком: один код — один раз на человека."""
     code = normalize_code(code)
     if not code:
         return None
@@ -95,6 +108,8 @@ async def valid_promo(session: AsyncSession, code: str | None) -> PromoCode | No
         return None
     if p.max_uses is not None and p.used >= p.max_uses:
         return None
+    if user_id is not None and await promo_used_by(session, user_id, p.code):
+        return None
     return p
 
 
@@ -104,8 +119,8 @@ def _discounted(value: int, percent: int) -> int:
     return max(1, round(value * (100 - percent) / 100))
 
 
-async def prices_with_promo(session: AsyncSession, code: str | None) -> dict[str, Price]:
-    promo = await valid_promo(session, code)
+async def prices_with_promo(session: AsyncSession, code: str | None, user_id: int | None = None) -> dict[str, Price]:
+    promo = await valid_promo(session, code, user_id)
     out: dict[str, Price] = {}
     for product, rub in list_prices().items():
         pr = Price(product, rub, rub)
@@ -119,7 +134,7 @@ async def prices_with_promo(session: AsyncSession, code: str | None) -> dict[str
 
 
 async def prices_for(session: AsyncSession, user: User) -> dict[str, Price]:
-    return await prices_with_promo(session, user.promo_code)
+    return await prices_with_promo(session, user.promo_code, user.id)
 
 
 async def promo_take(session: AsyncSession, code: str, *, enforce_limit: bool = True) -> bool:
@@ -232,9 +247,41 @@ async def grant_manual(session: AsyncSession, user: User, product: str, outbox: 
     return p
 
 
+# заявки на ручную оплату: ведущему — не чаще 3 в час от человека
+MANUAL_REQUESTS = RateLimit(3, 3600)
+
+
+def support_url() -> str | None:
+    """Ссылка «Написать» на контакт поддержки, если он — @username Telegram."""
+    c = (get_settings().support_contact or "").strip()
+    name = c[1:] if c.startswith("@") else c.removeprefix("https://t.me/").removeprefix("t.me/")
+    return f"https://t.me/{name}" if name and name.replace("_", "").isalnum() else None
+
+
+async def request_manual(session: AsyncSession, user: User, product: str, outbox: Outbox | None,
+                         via: str = "bot") -> tuple[int, str]:
+    """Кнопка «Оплатить», пока ЮKassa не подключена: как заплатить — человеку, заявка с командой /grant — ведущему.
+
+    Возвращает (сумма, текст для человека).
+    """
+    s = get_settings()
+    price = (await prices_for(session, user))[product]
+    await log_event(session, "manual_payment_requested", user.id, product=product, amount=price.rub,
+                    promo=price.promo, via=via)
+    if outbox is not None and MANUAL_REQUESTS.hit(user.id):
+        from services.users import who
+
+        handle = f"@{user.tg_username}" if user.tg_username else str(user.tg_id)
+        for admin in s.admin_ids:
+            if admin != user.tg_id:
+                outbox.add(OutMsg(admin, texts.manual_request_for_admin(who(user), product, price.rub, handle), kind="admin"))
+    contact = s.support_contact or s.seller_email or ""
+    return price.rub, texts.manual_pay(product, price.rub, s.payment_info, contact)
+
+
 async def apply_free_promo(session: AsyncSession, user: User, product: str = "run") -> Purchase | None:
     """Промокод на 100% — доступ без оплаты."""
-    price = (await prices_with_promo(session, user.promo_code))[product]
+    price = (await prices_for(session, user))[product]
     if not price.free or not price.promo:
         return None
     if not await promo_take(session, price.promo):

@@ -29,7 +29,7 @@ from books.plan import (
 from books.types import WORDS_PER_MINUTE, BookParseError, ParsedBook, ParsedChapter
 from core.rules import normalize_author, normalize_text
 from db.models import Book, Chapter, Enrollment, Retelling, Segment, User
-from services.common import log_event, now, today_for
+from services.common import RateLimit, log_event, now, today_for
 from services.runs import can_start_plan, plan_start_for
 from settings import get_settings
 
@@ -42,6 +42,11 @@ _LEGACY_SPINES = {"#e2553f": "#C9644F", "#3e8e6e": "#7E9C7A", "#e98a6b": "#D49A8
                   "#f2c14e": "#E2B84F", "#8c5bd6": "#8A6A85", "#2f7fb8": "#3D4B66", "#c2410c": "#B98B6E",
                   "#4d7c0f": "#4E6B57"}
 
+
+
+# загрузок книг — до 10 в сутки на человека: разбор файла нагружает сервер
+BOOK_UPLOADS = RateLimit(10, 24 * 3600)
+BOOK_UPLOADS_TOO_MANY = "Сегодня книг загружено уже много. Попробуй завтра — или читай без файла."
 
 def calm_color(color: str | None) -> str:
     return _LEGACY_SPINES.get((color or "").lower(), color or SPINE_COLORS[0])
@@ -244,7 +249,7 @@ async def confirm_plan(session: AsyncSession, user: User, enr: Enrollment, plan_
         raise PlanError("Такой срок для этой книги недоступен")
     if paper and plan_days and plan_days > book.total_pages:
         raise PlanError("Дней получилось больше, чем страниц — выбери больше минут в день")
-    await session.execute(delete(Segment).where(Segment.book_id == book.id))
+    # сначала строим план (может не получиться), и только потом заменяем старые отрезки
     if paper:
         planned = build_paper_plan(book.total_pages, plan_days)
     else:
@@ -254,6 +259,8 @@ async def confirm_plan(session: AsyncSession, user: User, enr: Enrollment, plan_
             plan_days = check_days(len(planned))
         else:
             planned = build_plan(parsed, plan_days, has_chapters=book.chapters_count > 0)
+    await session.execute(delete(Segment).where(Segment.book_id == book.id))
+    await session.flush()
     segs = []
     for p in planned:
         s = Segment(

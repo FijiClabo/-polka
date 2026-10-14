@@ -150,7 +150,7 @@ export interface WeekDay {
   date: string;
   weekday: string;
   day: number;
-  state: "done" | "frozen" | "missed" | "ahead" | "today" | "future" | "none";
+  state: "done" | "frozen" | "missed" | "ahead" | "paused" | "today" | "future" | "none";
   is_today: boolean;
   plan_day: number | null;
 }
@@ -180,6 +180,7 @@ export interface Today {
   open_retelling: { id: number; verdict: string; reply: string | null; question: string | null } | null;
   starts_on: string | null;
   deadline: string | null;
+  paused_until: string | null;
   run: RunBrief | null;
   partner: PartnerBlock | null;
   week: WeekDay[];
@@ -243,7 +244,7 @@ export interface FriendStatus {
   book_author: string | null;
   spine_color: string | null;
   streak: number;
-  today: "done" | "reading" | "burned" | "idle" | "finished" | "waiting";
+  today: "done" | "reading" | "burned" | "rest" | "paused" | "idle" | "finished" | "waiting";
   plan_day: number | null;
   plan_days: number | null;
   done_at: string | null;
@@ -340,6 +341,8 @@ export interface PaceInfo {
   ahead: number;
   started: boolean;
   can_pause: boolean;
+  paused_until: string | null;
+  locked: string | null;
   minute_options: { minutes: number; days: number; finish: string }[];
   pause_options: { days: number; finish: string }[];
   chapters: { days: number; min_minutes: number; max_minutes: number; finish: string } | null;

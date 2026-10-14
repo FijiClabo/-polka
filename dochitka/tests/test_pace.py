@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 
+import pytest
 from sqlalchemy import select
 
 from core import clock
@@ -9,7 +10,7 @@ from db.models import Book, DayResult, Enrollment, Run, Segment, User
 from db.session import session_scope
 from services.books import attach_book, confirm_plan, save_parsed
 from services.common import Outbox
-from services.pace import PaceError, ask_more, pace_info, pause, replan, split_today
+from services.pace import PaceError, ask_more, pace_info, pause, replan, resume, split_today
 from services.progress import close_pending_days, load_view
 from services.runs import ensure_enrollment, grant
 from services.users import get_or_create_user
@@ -225,17 +226,211 @@ async def test_pause_shifts_plan_without_losing_streak(tmp_path):
     async with session_scope() as s:
         u, e = await _ctx(s, uid, eid)
         finish = await pause(s, u, e, 3)
+        # сегодня сдано — пауза с завтра: дни START+1..START+3, отрезок 2 — на START+4, финиш на 3 дня позже
         assert finish == START + timedelta(days=3 + 20)
+        assert (e.paused_from, e.paused_until) == (START + timedelta(days=1), START + timedelta(days=4))
+        assert (await load_view(s, u, e)).state == "done_today"  # а не «план ещё не начался»
+    set_now(START + timedelta(days=1), 10)
+    async with session_scope() as s:
+        u, e = await _ctx(s, uid, eid)
+        v = await load_view(s, u, e)
+        assert v.state == "paused" and v.paused_until == START + timedelta(days=4)
     set_now(START + timedelta(days=4), 10)
     async with session_scope() as s:
         u, e = await _ctx(s, uid, eid)
         await close_pending_days(s, e, u, Outbox())
         rows = await _results(s, eid)
-        # дни паузы до нового старта не закрываются вовсе, первый день нового отсчёта сдан заранее
-        assert START + timedelta(days=1) not in rows and rows[START + timedelta(days=3)] == "ahead"
+        assert rows[START + timedelta(days=3)] == "paused"
+        assert all(rows.get(START + timedelta(days=i)) in (None, "paused") for i in (1, 2))
         assert e.streak == 1 and e.freezes_left == 1
         v = await load_view(s, u, e)
+        assert v.state == "to_read" and v.segment.day_number == 2 and v.behind == 1
+
+
+async def test_pause_while_behind_burns_nothing_and_keeps_the_debt(tmp_path):
+    uid, eid = await _paper(tmp_path)
+    set_now(START, 10)
+    await submit(uid)
+    set_now(START + timedelta(days=2), 10)  # день START+1 пропущен: сгорела заморозка
+    async with session_scope() as s:
+        u, e = await _ctx(s, uid, eid)
+        await pause(s, u, e, 3)
+        assert (await _results(s, eid))[START + timedelta(days=1)] == "frozen"
+        freezes = e.freezes_left
+    set_now(START + timedelta(days=5), 10)
+    async with session_scope() as s:
+        u, e = await _ctx(s, uid, eid)
+        await close_pending_days(s, e, u, Outbox())
+        rows = await _results(s, eid)
+        assert [rows.get(START + timedelta(days=i)) for i in (2, 3, 4)] == ["paused"] * 3
+        assert e.freezes_left == freezes and e.streak == 1
+        v = await load_view(s, u, e)
+        assert v.state == "to_read" and v.segment.day_number == 2 and v.behind == 2  # долг до паузы — на месте
+
+
+async def test_resume_early_brings_the_plan_back(tmp_path):
+    uid, eid = await _paper(tmp_path)
+    set_now(START, 10)
+    await submit(uid)
+    set_now(START + timedelta(days=1), 10)
+    async with session_scope() as s:
+        u, e = await _ctx(s, uid, eid)
+        await pause(s, u, e, 7)
+        assert (await load_view(s, u, e)).state == "paused"
+    set_now(START + timedelta(days=3), 10)
+    async with session_scope() as s:
+        u, e = await _ctx(s, uid, eid)
+        finish = await resume(s, u, e)
+        assert (e.paused_from, e.paused_until) == (START + timedelta(days=1), START + timedelta(days=3))
+        v = await load_view(s, u, e)
         assert v.state == "to_read" and v.segment.day_number == 2
+        assert finish == START + timedelta(days=3 + 19)
+        await close_pending_days(s, e, u, Outbox())
+        rows = await _results(s, eid)
+        assert rows[START + timedelta(days=1)] == "paused" and rows[START + timedelta(days=2)] == "paused"
+        with pytest.raises(PaceError):
+            await resume(s, u, e)
+
+
+async def test_pause_button_finish_matches_the_result(tmp_path):
+    for behind_days in (0, 3):
+        (tmp_path / str(behind_days)).mkdir()
+        uid, eid = await _paper(tmp_path / str(behind_days))
+        set_now(START + timedelta(days=behind_days), 10)
+        if not behind_days:
+            await submit(uid)
+        async with session_scope() as s:
+            u, e = await _ctx(s, uid, eid)
+            info = await pace_info(s, u, e)
+            for opt in info["pause_options"][:1]:
+                finish = await pause(s, u, e, opt["days"])
+                assert finish.isoformat() == opt["finish"]
+                assert (await pace_info(s, u, e))["finish"] == opt["finish"]
+
+
+async def test_pause_is_capped_at_two_weeks_in_a_row(tmp_path):
+    uid, eid = await _paper(tmp_path)
+    set_now(START, 10)
+    async with session_scope() as s:
+        u, e = await _ctx(s, uid, eid)
+        await pause(s, u, e, 7)
+        await pause(s, u, e, 7)
+        with pytest.raises(PaceError):
+            await pause(s, u, e, 1)
+        assert (e.paused_until - e.paused_from).days == 14
+
+
+async def test_ahead_replan_on_first_day_makes_no_phantom_day(tmp_path):
+    uid, eid = await _paper(tmp_path)
+    set_now(START, 10)
+    await submit(uid)
+    async with session_scope() as s:
+        u, e = await _ctx(s, uid, eid)
+        await ask_more(s, u, e)
+    await submit(uid)
+    async with session_scope() as s:
+        u, e = await _ctx(s, uid, eid)
+        await replan(s, u, e, minutes=20)
+        assert e.plan_start_date == START  # не уезжает во вчера
+    set_now(START + timedelta(days=2), 10)
+    async with session_scope() as s:
+        u, e = await _ctx(s, uid, eid)
+        await close_pending_days(s, e, u, Outbox())
+        rows = await _results(s, eid)
+        assert START - timedelta(days=1) not in rows
+        assert rows[START + timedelta(days=1)] == "ahead" and e.freezes_left == 1 and e.streak == 1
+
+
+async def test_free_sprint_pace_cannot_be_stretched(tmp_path):
+    from services.runs import sprint_run
+
+    await setup_db(tmp_path)
+    install_fake_llm()
+    set_now(START, 10)
+    async with session_scope() as s:
+        run = await sprint_run(s)
+        u, e = await make_participant(s, run, 7002, "Лёша", pages=70, days=7)
+        with pytest.raises(PaceError):
+            await replan(s, u, e, minutes=5)
+        with pytest.raises(PaceError):
+            await pause(s, u, e, 7)
+        info = await pace_info(s, u, e)
+        assert info["locked"] and not info["minute_options"] and not info["pause_options"]
+        p = await split_today(s, u, e, quarter=2, rest="day")
+        assert p.rest == "tomorrow" and e.plan_days == 7  # остаток — к следующему отрезку, неделя остаётся неделей
+
+
+async def test_split_twice_on_one_day_is_refused(tmp_path):
+    uid, eid = await _paper(tmp_path)
+    set_now(START, 10)
+    async with session_scope() as s:
+        u, e = await _ctx(s, uid, eid)
+        await split_today(s, u, e, quarter=2, rest="day")
+        with pytest.raises(PaceError):
+            await split_today(s, u, e, quarter=2, rest="day")
+        assert e.plan_days == 22
+
+
+async def test_shared_copy_of_paper_book_replans_by_pages(tmp_path):
+    from services.together import copy_plan
+
+    uid, eid = await _paper(tmp_path, pages=300, days=30)
+    async with session_scope() as s:
+        friend, _ = await get_or_create_user(s, 7003, first_name="Ира")
+        enr = await ensure_enrollment(s, friend)
+        src = await s.get(Book, (await s.get(Enrollment, eid)).book_id)
+        await copy_plan(s, friend, enr, src)
+        await grant(s, friend, enr.run)
+        fid, feid = friend.id, enr.id
+    set_now(START, 10)
+    async with session_scope() as s:
+        f, fe = await _ctx(s, fid, feid)
+        info = await pace_info(s, f, fe)
+        assert info["minutes_per_day"] >= 10  # не «≈0 минут»: по страницам, как у бумажной книги
+        await replan(s, f, fe, minutes=30)
+        assert 8 <= fe.plan_days <= 20  # 300 страниц по ~1,5 мин — около 15 дней, а не один
+        assert all(x.title.startswith("Отрезок") for x in await _segs(s, feid))
+
+
+async def test_evening_reminder_comes_after_the_morning_one(tmp_path):
+    from datetime import time as dtime
+
+    from jobs.scheduler import _daily
+
+    uid, eid = await _paper(tmp_path)
+    async with session_scope() as s:
+        u = await s.get(User, uid)
+        u.morning_time, u.evening_time = dtime(9, 0), dtime(21, 0)
+    set_now(START, 10)
+    out = Outbox()
+    await _daily(out)
+    assert [m.kind for m in out.messages].count("morning") == 1
+    set_now(START, 15)
+    out = Outbox()
+    await _daily(out)
+    assert not [m for m in out.messages if m.kind in ("morning", "evening")]
+    set_now(START, 21, 30)
+    out = Outbox()
+    await _daily(out)
+    assert [m.kind for m in out.messages] .count("evening") == 1
+
+
+async def test_no_reminders_and_no_nudges_during_pause(tmp_path):
+    from jobs.scheduler import _daily
+    from services.social import public_status
+
+    uid, eid = await _paper(tmp_path)
+    set_now(START, 10)
+    async with session_scope() as s:
+        u, e = await _ctx(s, uid, eid)
+        await pause(s, u, e, 3)
+    for hh in (10, 22):
+        set_now(START + timedelta(days=1), hh)
+        out = Outbox()
+        await _daily(out)
+        assert not [m for m in out.messages if m.kind in ("morning", "evening")]
+    async with session_scope() as s:
+        assert (await public_status(s, await s.get(User, uid))).today == "paused"
 
 
 # ------------------------------------------------------------------ API и копия плана «читаем вместе»

@@ -60,6 +60,46 @@ function PaceView({ info, focus, reload }: { info: PaceInfo; focus?: string; rel
     return null;
   })();
 
+  const resumeNow = async () => {
+    setBusy(true);
+    try {
+      await api.post<PaceInfo>("/pace/resume", {});
+      haptic("success");
+      toast("Пауза закончена — читаем дальше");
+      invalidate("/today");
+      invalidate("/run");
+      reload();
+    } catch (e) {
+      toast((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (info.locked) {
+    return (
+      <div className="screen no-tabs pace">
+        <div className="eyebrow mt-8">Свой темп</div>
+        <h1 className="h-title" style={{ marginTop: 4 }}>Темп чтения</h1>
+        <div className="card mt-12">
+          <div className="row between">
+            <div>
+              <div className="pace-big">≈ {info.minutes_per_day} мин</div>
+              <div className="small muted">в день</div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div className="pace-big">{info.finish ? dayMonth(info.finish) : "—"}</div>
+              <div className="small muted">финиш</div>
+            </div>
+          </div>
+          <p className="small mt-12" style={{ marginBottom: 0 }}>{info.locked}</p>
+        </div>
+        {showPartial && <PartialCard info={info} open={focus === "partial"} />}
+        <button className="btn primary block mt-16" onClick={() => nav.push({ name: "pay" })}>Тарифы</button>
+      </div>
+    );
+  }
+
   const meet = info.club?.meet_date;
   const lateForClub = preview && meet && preview.finish > meet;
 
@@ -101,6 +141,12 @@ function PaceView({ info, focus, reload }: { info: PaceInfo; focus?: string; rel
         <div className="small mt-12">
           Сдано {segWord(info.done)} из {info.plan_days}, впереди {segWord(info.left)}.
         </div>
+        {info.paused_until && (
+          <div className="mt-12">
+            <p className="small" style={{ margin: 0 }}>Сейчас пауза — до {dayMonth(info.paused_until)}. Дни паузы не сгорят.</p>
+            <button className="btn secondary block mt-8" disabled={busy} onClick={resumeNow}>Закончить паузу и читать</button>
+          </div>
+        )}
         {info.behind > 1 && (
           <p className="small mt-8" style={{ color: "var(--accent-text)", marginBottom: 0 }}>
             Позади {segWord(info.behind - 1)}. Новый темп начнётся с первого несданного — без долгов.

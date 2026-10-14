@@ -286,6 +286,11 @@ def pace_text(info: dict) -> str:
         return "Все отрезки уже сданы."
     lines = [f"<b>Темп сейчас</b>: ≈ {info['minutes_per_day']} мин в день, осталось {left} "
              f"{plural(left, 'отрезок', 'отрезка', 'отрезков')}, финиш — {d(date.fromisoformat(info['finish']))}."]
+    if info.get("locked"):
+        lines.append(e(info["locked"]))
+        return "\n\n".join(lines)
+    if info.get("paused_until"):
+        lines.append(f"Сейчас пауза — до {d(date.fromisoformat(info['paused_until']))}.")
     if info.get("behind", 0) > 1:
         lines.append(f"Позади {info['behind'] - 1} {plural(info['behind'] - 1, 'отрезок', 'отрезка', 'отрезков')} — "
                      "новый темп начнётся с первого несданного, без долгов.")
@@ -312,7 +317,16 @@ def pace_changed(info: dict) -> str:
 
 def paused(days: int, finish: date) -> str:
     return (f"Пауза на {days_word(days)}: план сдвинут, финиш — {d(finish)}. Эти дни не сгорят, "
-            "стрик и заморозки целы. Если захочется почитать раньше — следующий отрезок открыт.")
+            "стрик и заморозки целы, напоминаний не будет. Захочется читать раньше — /pace, «Закончить паузу».")
+
+
+def resumed(finish: date) -> str:
+    return f"Пауза закончена — читаем дальше. Финиш — {d(finish)}."
+
+
+def paused_today(until: date) -> str:
+    return (f"Сейчас пауза — до {d(until)}. Напоминаний не будет, дни не сгорят. "
+            "Захочется читать раньше — кнопка ниже.")
 
 
 def evening(partner_name: str | None, partner_done: bool) -> str:
@@ -420,6 +434,7 @@ def state_message(state: str, *, next_title: str | None = None, start: date | No
         "plan_needed": "Книга есть, осталось выбрать срок. Нажми «Настроить план».",
         "waiting_start": status_in_list(start),
         "not_started": f"План стартует {d(start)}. Пересказы — с первого дня.",
+        "paused": "Сейчас пауза: пересказы не нужны, дни не сгорают. Захочется читать раньше — /pace, «Закончить паузу».",
         "finished": "Книга дочитана. Она уже на полке.",
         "expired": "Срок забега вышел. Дочитать можно в следующем забеге — с этой же книгой или с другой.",
         "refunded": "Участие отменено. Будем рады видеть снова.",
@@ -622,6 +637,21 @@ def pay_link(product: str) -> str:
             "После оплаты возвращайся сюда: доступ откроется сам." + offer_note())
 
 
+PRODUCT_WHAT = {"run": "одна книга до финиша", "month": "абонемент на месяц", "year": "абонемент на год"}
+
+
+def manual_pay(product: str, amount: int, info: str, contact: str) -> str:
+    """Оплата без ЮKassa: как заплатить и что будет дальше."""
+    tail = f"\n\nКак только оплата придёт, доступ откроется — бот напишет сюда. Вопросы — {e(contact)}." if contact \
+        else "\n\nКак только оплата придёт, доступ откроется — бот напишет сюда."
+    return f"<b>Оплата: {PRODUCT_WHAT[product]} — {rub(amount)}</b>\n\n{e(info)}{tail}" + offer_note()
+
+
+def manual_request_for_admin(who_: str, product: str, amount: int, handle: str) -> str:
+    return (f"Хочет оплатить: {e(who_)} — {PRODUCT_WHAT[product]}, {rub(amount)}.\n"
+            f"Когда деньги придут: <code>/grant {e(handle)} {product}</code> и чек в «Мой налог».")
+
+
 def offer_note() -> str:
     """Ссылка на оферту до оплаты (п. 4.1 оферты): оплата по кнопке — это её принятие."""
     base = get_settings().public_url
@@ -728,6 +758,7 @@ def after_finish(kind: str, has_sub: bool, credits: int = 0) -> str:
 FEEDBACK_ASK = ("Напиши, что думаешь о Дочитке: что неудобно, чего не хватает, что нравится. Одним сообщением — "
                 "можно голосом. Я читаю всё.")
 FEEDBACK_THANKS = "Спасибо! Ответ записан и уже у команды."
+FEEDBACK_TOO_MANY = "Сегодня отзывов уже много — спасибо! Напиши завтра, всё прочитаем."
 FEEDBACK_SKIPPED = "Хорошо. Если захочется что-то сказать — команда /feedback."
 FEEDBACK_DROP_TIME = ("Можно читать меньше в день или поставить паузу — дни паузы не сгорят: /pace")
 FEEDBACK_DROP_RETELL = ("Пересказ может быть совсем коротким: пара предложений о том, что запомнилось. "

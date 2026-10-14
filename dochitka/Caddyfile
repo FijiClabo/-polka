@@ -9,6 +9,9 @@
 		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "strict-origin-when-cross-origin"
+		# встраивать страницы можно только самому сайту и Telegram Web (мини-приложение открывается там во фрейме)
+		Content-Security-Policy "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org"
+		Permissions-Policy "camera=(), geolocation=(), microphone=(self)"
 		-Server
 	}
 

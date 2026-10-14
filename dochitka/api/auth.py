@@ -16,7 +16,10 @@ from db.session import sessionmaker
 from services.users import get_or_create_user
 from settings import get_settings
 
-MAX_AGE_SEC = 7 * 24 * 3600  # мини-приложение может быть открыто долго; данные подписаны Telegram
+# подпись initData живёт сутки: утёкшая строка (скриншот, лог) перестаёт работать на следующий день,
+# а кто держит приложение открытым дольше — просто откроет его заново
+MAX_AGE_SEC = 24 * 3600
+CLOCK_SKEW_SEC = 300
 
 
 class InitDataError(ValueError):
@@ -25,6 +28,8 @@ class InitDataError(ValueError):
 
 def validate_init_data(init_data: str, bot_token: str, max_age: int = MAX_AGE_SEC, now: float | None = None) -> dict:
     """Проверка по документации Telegram: HMAC-SHA256 с ключом HMAC("WebAppData", bot_token)."""
+    if not bot_token:
+        raise InitDataError("no bot token")  # с пустым токеном подпись может подделать кто угодно
     if not init_data:
         raise InitDataError("empty")
     pairs = dict(parse_qsl(init_data, keep_blank_values=True, strict_parsing=False))
@@ -37,14 +42,28 @@ def validate_init_data(init_data: str, bot_token: str, max_age: int = MAX_AGE_SE
     calc = hmac.new(secret, check_string.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(calc, received):
         raise InitDataError("bad hash")
-    auth_date = int(pairs.get("auth_date", "0") or 0)
-    if max_age and (now or time.time()) - auth_date > max_age:
+    try:
+        auth_date = int(pairs.get("auth_date", "0") or 0)
+    except ValueError as e:
+        raise InitDataError("bad auth_date") from e
+    now = now or time.time()
+    if auth_date > now + CLOCK_SKEW_SEC:
+        raise InitDataError("from the future")
+    if max_age and now - auth_date > max_age:
         raise InitDataError("expired")
-    user = json.loads(pairs.get("user", "{}") or "{}")
-    if not user.get("id"):
+    try:
+        user = json.loads(pairs.get("user", "{}") or "{}")
+    except ValueError as e:
+        raise InitDataError("bad user") from e
+    if not isinstance(user, dict) or not isinstance(user.get("id"), int):
         raise InitDataError("no user")
     pairs["user"] = user
     return pairs
+
+
+def dev_bypass_allowed(s) -> bool:
+    """DEV_AUTH_BYPASS работает только на своём компьютере: без HTTPS-адреса и без вебхука."""
+    return not s.public_url.startswith("https://") and s.bot_mode != "webhook"
 
 
 async def get_session():
@@ -62,8 +81,8 @@ async def current_user(
 ) -> User:
     s = get_settings()
     raw = authorization[4:] if authorization.lower().startswith("tma ") else authorization
-    if s.dev_auth_bypass and raw.startswith("dev:"):
-        tg_user = {"id": int(raw[4:] or 1)}  # только локально: профиль не перезаписываем
+    if s.dev_auth_bypass and dev_bypass_allowed(s) and raw.startswith("dev:"):
+        tg_user = {"id": int(raw[4:] or 1) if raw[4:].isdigit() else 1}  # только локально: профиль не перезаписываем
     else:
         try:
             data = validate_init_data(raw, s.bot_token)

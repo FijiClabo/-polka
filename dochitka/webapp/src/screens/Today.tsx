@@ -54,6 +54,50 @@ export default function Today() {
   );
 }
 
+// ------------------------------------------------------------------ пауза
+
+function Paused({ data }: { data: TodayData }) {
+  const nav = useNav();
+  const [busy, setBusy] = useState(false);
+  const book = data.book;
+  return (
+    <div className="card book-card">
+      <div className="top">
+        {book && <Cover title={book.title} author={book.author} color={book.spine_color} />}
+        <div className="grow" style={{ minWidth: 0 }}>
+          <div className="eyebrow">Пауза{data.paused_until ? ` до ${dayMonth(data.paused_until)}` : ""}</div>
+          <div className="seg-title">{book?.title}</div>
+          <div className="meta">Дни паузы не сгорят, стрик и заморозки целы, напоминаний не будет.</div>
+        </div>
+      </div>
+      <div className="btn-row mt-16">
+        <button
+          className="btn primary"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await api.post("/pace/resume", {});
+              haptic("success");
+              toast("Пауза закончена — читаем дальше");
+              invalidate("/today");
+              invalidate("/run");
+              invalidate("/pace");
+            } catch (e) {
+              toast((e as Error).message);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Читать сейчас
+        </button>
+        <button className="btn secondary" onClick={() => nav.push({ name: "pace" })}>Темп</button>
+      </div>
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------ главная карточка
 
 function MainCard({ data }: { data: TodayData }) {
@@ -125,6 +169,7 @@ function MainCard({ data }: { data: TodayData }) {
       </div>
     );
   }
+  if (s === "paused") return <Paused data={data} />;
   if (s === "expired") {
     return (
       <div className="card book-card">

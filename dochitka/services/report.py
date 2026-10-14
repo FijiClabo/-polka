@@ -55,11 +55,33 @@ _MASKS = [
 ]
 
 
-def mask(text: str | None) -> str:
+def mask(text: str | None, people: re.Pattern | None = None) -> str:
+    """Убрать из свободного текста контакты и (если передан people) имена, ники и ID участников."""
     out = text or ""
+    if people is not None:
+        out = people.sub("[имя]", out)
     for rx, repl in _MASKS:
         out = rx.sub(repl, out)
-    return out
+    return re.sub(r"\b\d{6,}\b", "[число]", out)  # Telegram ID и прочие длинные номера
+
+
+def people_pattern(users: list[User]) -> re.Pattern | None:
+    """Имена, фамилии, ники и Telegram ID всех участников — в любом падеже («Нина», «Нину», «Ниной»)."""
+    words: set[str] = set()
+    for u in users:
+        for w in (u.first_name, u.last_name, u.tg_username, str(u.tg_id) if u.tg_id else None):
+            for part in re.split(r"[\s-]+", (w or "").strip()):
+                if len(part) >= 3:
+                    words.add(part)
+    if not words:
+        return None
+    alts = []
+    for w in sorted(words, key=len, reverse=True):
+        if w.isdigit() or not w.isalpha() or len(w) < 4:
+            alts.append(re.escape(w))
+        else:  # основа без последней буквы + окончание: русские имена склоняются; «ё» пишут и как «е»
+            alts.append(re.sub("[её]", "[её]", re.escape(w[:-1]), flags=re.IGNORECASE) + r"\w{0,3}")
+    return re.compile(r"(?<![\w@])(?:" + "|".join(alts) + r")(?!\w)", re.IGNORECASE)
 
 
 class Pseudo:
@@ -136,6 +158,7 @@ async def build_report(s: AsyncSession, days: int | None = None) -> tuple[bytes,
     pid = Pseudo()
 
     users = list(await s.scalars(select(User).order_by(User.id)))
+    people = people_pattern(users)
     q = select(Event).order_by(Event.id)
     if since:
         q = q.where(Event.created_at >= since)
@@ -229,12 +252,17 @@ async def build_report(s: AsyncSession, days: int | None = None) -> tuple[bytes,
     # --- книги
     src_books = Counter(b.source for b in books)
     pages = [b.total_pages for b in books if b.total_pages]
-    titles = Counter(b.title for b in books if b.source != "shared" and b.title)
+    # свою книгу файлом можно назвать как угодно («Дневник …»), поэтому в отчёт идут только названия,
+    # которые читают двое и больше; остальные — числом
+    all_titles = Counter((b.title or "").strip() for b in books if b.source != "shared" and b.title)
+    titles = Counter({t: n for t, n in all_titles.items() if n >= 2})
+    lone_titles = sum(1 for n in all_titles.values() if n < 2)
     md += [
         "## 5. Книги",
         f"Файлом: {src_books.get('epub', 0) + src_books.get('fb2', 0)}, без файла: {src_books.get('paper', 0)}, "
         f"копий плана друга: {src_books.get('shared', 0)}. Медиана объёма: {statistics.median(pages) if pages else '—'} стр.",
-        "Чаще всего читают: " + "; ".join(f"«{t}» ×{n}" for t, n in titles.most_common(15)) if titles else "",
+        ("Чаще всего читают: " + "; ".join(f"«{mask(t, people)}» ×{n}" for t, n in titles.most_common(15)) + ". "
+         if titles else "") + f"Книг, которые читает один человек: {lone_titles} (названия не показываем).",
         "",
     ]
 
@@ -295,7 +323,7 @@ async def build_report(s: AsyncSession, days: int | None = None) -> tuple[bytes,
         if f.text:
             extra = " · ".join(x for x in (
                 str(f.score) if f.score is not None else "", choice_label(f.kind, f.choice) or "") if x)
-            md.append(f"- {pid(f.user_id)} · {f.kind}{' · ' + extra if extra else ''}: {mask(f.text)}")
+            md.append(f"- {pid(f.user_id)} · {f.kind}{' · ' + extra if extra else ''}: {mask(f.text, people)}")
     md.append("")
 
     # --- пути
@@ -368,14 +396,15 @@ async def build_report(s: AsyncSession, days: int | None = None) -> tuple[bytes,
     feedback_csv = csv_bytes(
         ["user", "created_at", "kind", "score", "choice", "text"],
         [[pid(f.user_id), f.created_at.isoformat(timespec="seconds"), f.kind, f.score if f.score is not None else "",
-          choice_label(f.kind, f.choice) or "", mask(f.text)] for f in fb_period])
+          choice_label(f.kind, f.choice) or "", mask(f.text, people)] for f in fb_period])
     readme = (
         "Отчёт «Дочитки» для разбора.\n\n"
         "report.md — сводка: воронка, удержание, темп, книги, «вместе», экраны и кнопки, деньги, опросы, пути.\n"
         "users.csv — по строке на участника, events.csv — все события, feedback.csv — ответы на опросы.\n\n"
         "Участники обезличены: вместо имени и Telegram — код вида u3f9a1c (одинаковый во всех отчётах).\n"
-        "Тексты пересказов не хранятся. В свободных ответах замазаны @username, почта, телефоны и ссылки,\n"
-        "но перед отправкой всё же просмотри feedback.csv: люди иногда пишут о себе.\n\n"
+        "Тексты пересказов не хранятся. В свободных ответах заменены имена, фамилии и ники участников,\n"
+        "Telegram ID, почта, телефоны и ссылки. Названия книг — только те, что читают двое и больше.\n"
+        "Адрес или другое, что человек сам написал о себе, автоматически не найти — пробегись по feedback.csv.\n\n"
         "Как разобрать: пришли архив Claude и напиши «Разбери отчёт Дочитки: где бросают, что мешает, что\n"
         "поменять в продукте в первую очередь».\n"
     )

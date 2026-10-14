@@ -99,7 +99,7 @@ async def join_club(session: AsyncSession, user: User, code: str, outbox: Outbox
     if club.promo_code and not user.promo_code:
         from services.billing import valid_promo
 
-        promo = await valid_promo(session, club.promo_code)
+        promo = await valid_promo(session, club.promo_code, user.id)
         if promo is not None:
             user.promo_code = promo.code
     if not user.source:

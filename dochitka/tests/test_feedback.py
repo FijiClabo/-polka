@@ -11,9 +11,10 @@ from db.models import Event, Feedback, Run, User
 from db.session import session_scope
 from services.common import Outbox
 from services.feedback import add_text, answer
-from services.report import build_report, mask
+from services.report import build_report, mask, people_pattern
 from tests.helpers import install_fake_llm, make_participant, set_now, setup_db, submit
 from tests.test_api import H, client  # noqa: F401 — фикстура клиента API
+from tests.test_bot_flow import env  # noqa: F401 — фикстура бота
 
 START = clock.real_now().date() + timedelta(days=3)
 
@@ -69,6 +70,15 @@ def test_mask_hides_contacts():
     assert "nina" not in t and "999" not in t and "t.me" not in t
 
 
+def test_mask_hides_participant_names_in_any_case():
+    users = [User(tg_id=900111222, first_name="Нина", last_name="Иванова", tg_username="nina_reads"),
+             User(tg_id=900333444, first_name="Пётр")]
+    t = mask("Я Нина Иванова, тг nina_reads, id 900111222. Передайте Ниной Ивановой привет, и Петру тоже", people_pattern(users))
+    for leak in ("Нин", "Иванов", "nina", "900111222", "Петр"):
+        assert leak not in t, t
+    assert "привет" in t and "Передайте" in t
+
+
 async def test_report_is_pseudonymous(tmp_path):
     uid, _ = await _reader(tmp_path)
     for i in range(3):
@@ -108,3 +118,37 @@ async def test_events_feedback_and_report_api(client, monkeypatch):  # noqa: F81
     async with session_scope() as s:
         types = [e.type for e in await s.scalars(select(Event).order_by(Event.id))]
         assert "screen" in types and "tap" in types and "feedback" in types
+
+
+async def test_retelling_after_an_unanswered_survey_is_not_swallowed(env):  # noqa: F811
+    """Опрос остался без ответа, а вечером приходит пересказ — он засчитывается, а не уходит в отзывы."""
+    from db.models import Retelling
+    from services.consent import give_consent
+    from tests.helpers import RETELL_OK
+    from tests.test_bot_flow import press, send_text
+
+    bot, dp, session = env
+    set_now(START - timedelta(days=1))
+    async with session_scope() as s:
+        run = Run(title="Забег", kind="main", start_date=START, status="open", grace_days=3)
+        s.add(run)
+        await s.flush()
+        u, _ = await make_participant(s, run, 701, "Саша", pages=210, days=21)
+        u.onboarding_step = "done"
+        await give_consent(s, u, "bot")
+    set_now(START, 10)
+    await press(bot, dp, 701, "fb:day3:4")
+    set_now(START, 20)
+    await send_text(bot, dp, 701, RETELL_OK)
+    async with session_scope() as s:
+        assert len(list(await s.scalars(select(Retelling)))) == 1
+        assert all(f.text is None for f in await s.scalars(select(Feedback)))
+    # а в первые полчаса ответ — это отзыв
+    await press(bot, dp, 701, "fb:pmf:very")
+    await send_text(bot, dp, 701, "Удобно, что можно голосом")
+    async with session_scope() as s:
+        assert any(f.text == "Удобно, что можно голосом" for f in await s.scalars(select(Feedback)))
+    # команда во время вопроса работает как команда
+    await press(bot, dp, 701, "fb:finish:9")
+    await send_text(bot, dp, 701, "/today")
+    assert "День 1 из 21" in session.texts()[-1] or "сдано" in session.texts()[-1]

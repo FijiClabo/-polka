@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import logging
 
-from aiogram import BaseMiddleware, Bot, Dispatcher, Router
+from aiogram import BaseMiddleware, Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
+from aiogram.enums import ChatType, ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     BotCommand,
@@ -142,6 +142,9 @@ def create_dispatcher() -> Dispatcher:
     for r in routers:
         r._parent_router = None  # повторная сборка (тесты) — отвязываем от прошлого диспетчера
         dp.include_router(r)
+    # бот работает только в личке: в группе команда админа или /report показали бы данные всем участникам
+    dp.message.filter(F.chat.type == ChatType.PRIVATE)
+    dp.callback_query.filter(F.message.chat.type == ChatType.PRIVATE)
     dp.message.middleware(UsageMiddleware())
     dp.callback_query.middleware(UsageMiddleware())
     return dp
