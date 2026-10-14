@@ -380,24 +380,12 @@ ok "каждую ночь в 03:30, хранятся 14 последних (па
 
 # --------------------------------------------------------------------------- 8. автообновление из GitHub
 
-say "8/8 Автообновление: GitHub сам выкладывает новую версию после каждого изменения кода"
-ci_key=/root/.ssh/dochitka_ci
-if grep -q 'dochitka-ci' /root/.ssh/authorized_keys 2>/dev/null; then
-  ok "уже подключено (ключ dochitka-ci в authorized_keys)"
-elif yes_no "Подключить автообновление из GitHub (рекомендую)?" y; then
-  install -d -m 700 /root/.ssh
-  [ -f "$ci_key" ] || ssh-keygen -q -t ed25519 -N "" -C "dochitka-ci" -f "$ci_key"
-  # этот ключ умеет только одно — запустить обновление (scripts/ci_deploy.sh), ни консоли, ни туннелей
-  echo "command=\"bash $APP/scripts/ci_deploy.sh\",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty $(cat "$ci_key.pub")" >>/root/.ssh/authorized_keys
-  chmod 600 /root/.ssh/authorized_keys
-  host_key=$(cut -d' ' -f1,2 /etc/ssh/ssh_host_ed25519_key.pub)
-  tty $'\n  GitHub → репозиторий → Settings → Secrets and variables → Actions → New repository secret.\n  Создай три секрета:\n\n'
-  tty "  DEPLOY_HOST          = $ip"$'\n'
-  tty "  DEPLOY_KNOWN_HOSTS   = $ip $host_key"$'\n'
-  tty "  DEPLOY_SSH_KEY       = всё между строками ----- ниже, включая BEGIN и END:"$'\n\n'
-  if [ -n "$TTY" ]; then cat "$ci_key" >"$TTY"; fi  # закрытый ключ — только на экран, не в журнал
-  tty $'\n  Ключ можно показать снова: cat /root/.ssh/dochitka_ci\n'
-  ok "ключ для GitHub создан: он может только запускать обновление"
+say "8/8 Автообновление: сервер сам забирает новую версию с GitHub, когда тесты там прошли"
+if crontab -l 2>/dev/null | grep -q 'scripts/autoupdate.sh'; then
+  ok "уже включено (проверка раз в 5 минут, журнал: $APP/backups/autoupdate.log)"
+  bash "$APP/scripts/autoupdate.sh" --install >/dev/null 2>&1 || true  # заодно убирает старый ключ dochitka-ci
+elif yes_no "Включить автообновление (рекомендую)?" y; then
+  bash "$APP/scripts/autoupdate.sh" --install | tee -a "$LOG" || warn "автообновление не включилось — запусти: bash $APP/scripts/autoupdate.sh --install"
 fi
 
 # --------------------------------------------------------------------------- итог

@@ -1,8 +1,7 @@
-# Дочитка: проверка каждого изменения и выкладка на сервер.
-# Тесты, линтер и сборка мини-приложения — на каждый пуш. Если тесты прошли и в настройках репозитория есть
-# секреты DEPLOY_HOST, DEPLOY_SSH_KEY и DEPLOY_KNOWN_HOSTS (их выдаёт scripts/bootstrap.sh) — новая версия
-# сама уезжает на сервер. Нет секретов — выкладка просто пропускается.
-name: Дочитка — проверка и выкладка
+# Дочитка: проверка каждого изменения.
+# Тесты, линтер и сборка мини-приложения — на каждый пуш. Сервер сам раз в 5 минут смотрит ветку и забирает
+# новую версию, только если эта проверка («Тесты и сборка») прошла (scripts/autoupdate.sh) — секреты не нужны.
+name: Дочитка — проверка
 
 on:
   push:
@@ -56,34 +55,3 @@ jobs:
       - name: Мини-приложение
         working-directory: dochitka/webapp
         run: npm ci --no-audit --no-fund && npm run build
-
-  deploy:
-    name: Выкладка на сервер
-    needs: test
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - name: Обновить сервер
-        env:
-          HOST: ${{ secrets.DEPLOY_HOST }}
-          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          KNOWN: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-          PORT: ${{ secrets.DEPLOY_PORT }}
-        run: |
-          if [ -z "$HOST" ] || [ -z "$KEY" ]; then
-            echo "::notice::Сервер ещё не подключён (нет секретов DEPLOY_HOST и DEPLOY_SSH_KEY) — выкладка пропущена"
-            exit 0
-          fi
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          if [ -n "$KNOWN" ]; then
-            printf '%s\n' "$KNOWN" > ~/.ssh/known_hosts
-          else
-            echo "::warning::Нет секрета DEPLOY_KNOWN_HOSTS — ключ сервера принят без проверки"
-            ssh-keyscan -p "${PORT:-22}" -t ed25519 "$HOST" > ~/.ssh/known_hosts 2>/dev/null
-          fi
-          ssh -i ~/.ssh/deploy_key -p "${PORT:-22}" \
-            -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 -o ConnectTimeout=20 \
-            "root@$HOST" deploy
