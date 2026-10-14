@@ -273,6 +273,11 @@ env_set YANDEX_FOLDER_ID "$YANDEX_FOLDER_ID"
 # только YandexGPT: Anthropic не обслуживает Россию (anthropic.com/supported-countries), а данные не уходят за рубеж
 env_set LLM_PROVIDERS "yandex"
 env_set STT_PROVIDER yandex
+# модель проверки: lite — примерно в 4 раза дешевле (для теста), pro — точнее вердикты
+cur_model=$(env_get YANDEXGPT_MODEL)
+case "$cur_model" in yandexgpt-lite/*) def_model=lite ;; yandexgpt/*) def_model=pro ;; *) def_model=lite ;; esac
+ask GPT_MODEL "Модель проверки пересказов: lite — дешевле в ~4 раза, pro — точнее (lite/pro)" "$def_model"
+case "${GPT_MODEL,,}" in pro) env_set YANDEXGPT_MODEL "yandexgpt/latest" ;; *) env_set YANDEXGPT_MODEL "yandexgpt-lite/latest" ;; esac
 [ -n "$YANDEX_API_KEY" ] && [ -n "$YANDEX_FOLDER_ID" ] || warn "ключа Yandex Cloud нет — пересказы будут засчитываться без проверки ИИ, пока его не впишешь"
 
 tty $'\nПродавец — для оферты, политики и чеков (самозанятый: ФИО и ИНН из «Мой налог»). Можно заполнить позже.\n'

@@ -44,7 +44,9 @@ def ai_context(user_id: int | None, kind: str) -> Iterator[None]:
 def cost_rub(provider: str, model: str, cheap: bool, tokens_in: int, tokens_out: int) -> float:
     s = get_settings()
     if provider == "yandex":
-        per_1k = s.yandexgpt_cheap_rub_per_1k if cheap else s.yandexgpt_rub_per_1k
+        # цена — по модели: если и для проверки выбрана lite, считаем по цене lite
+        lite = cheap or "lite" in (model or "")
+        per_1k = s.yandexgpt_cheap_rub_per_1k if lite else s.yandexgpt_rub_per_1k
         return (tokens_in + tokens_out) / 1000 * per_1k
     if provider == "anthropic":
         p_in, p_out = next((v for k, v in ANTHROPIC_USD_PER_1M if model.startswith(k)), (4.0, 20.0))
