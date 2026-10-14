@@ -295,6 +295,18 @@ if [ -n "$SUPPORT_CONTACT" ] && { [ -z "$pi" ] || [[ $pi == "Оплата ско
   env_set PAYMENT_INFO "Оплата переводом: напиши ${SUPPORT_CONTACT} — пришлём реквизиты и чек, доступ откроем в течение дня."
 fi
 env_set BOT_MODE polling
+# страна сервера — попадает в политику и согласие: не Россия означает тестовый запуск с трансграничной передачей
+cc=$(curl -fsS --max-time 8 https://ipinfo.io/country 2>/dev/null | tr -d '[:space:]' || true)
+case "$cc" in
+  RU) def_country="Россия" ;; NL) def_country="Нидерланды" ;; DE) def_country="Германия" ;; FI) def_country="Финляндия" ;;
+  KZ) def_country="Казахстан" ;; *) def_country=$(env_get SERVER_COUNTRY) ;;
+esac
+ask SERVER_COUNTRY "Страна, где стоит этот сервер (для политики обработки данных)" "${def_country:-Россия}"
+env_set SERVER_COUNTRY "$SERVER_COUNTRY"
+case "$SERVER_COUNTRY" in
+  Россия|россия|РФ) ;;
+  *) warn "сервер не в России: это допустимо только для теста — политика и согласие честно скажут, где данные. До продаж перенеси базу в РФ (LAUNCH.md)" ;;
+esac
 env_set SPRINT_FOR_EVERYONE "$(env_get SPRINT_FOR_EVERYONE | grep -E '^(true|false)$' || echo true)"
 chmod 600 "$APP/.env"
 ok "настройки записаны в $APP/.env (доступ только у root)"

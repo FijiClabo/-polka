@@ -180,6 +180,9 @@ async def main() -> None:
     if s.bot_mode == "webhook" and not s.webhook_secret_ok:
         say(BAD, "WEBHOOK_SECRET пустой или из примера — можно подделать сообщения от имени Telegram",
             "Удали строку WEBHOOK_SECRET из .env и запусти bash scripts/deploy.sh — он создаст случайный")
+    if not s.data_in_russia:
+        say(WARN, f"Сервер с базой — не в России ({s.server_country})",
+            "Для теста можно: политика и согласие это указывают. До продаж перенеси базу на сервер в РФ (LAUNCH.md)")
     if s.dev_auth_bypass:
         say(BAD, "DEV_AUTH_BYPASS=true — проверка подписи отключена!", "Только для локального просмотра. На сервере — false")
     print()

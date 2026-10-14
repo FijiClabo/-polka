@@ -80,7 +80,7 @@ class Settings(BaseSettings):
     sub_freezes_per_week: int = 2
     offer_version: str = "2026-10-13"  # версия оферты и документов — пишется в платёж и журнал согласий
     # редакция согласия на обработку данных: поменяй, если изменился текст согласия, — бот и приложение спросят его заново
-    consent_version: str = "2026-10-13"
+    consent_version: str = "2026-10-14"
     payment_info: str = "Оплата скоро появится — мы напишем, как только можно будет оплатить."
     sprint_for_everyone: bool = True  # бесплатный 7-дневный спринт для всех новичков, не только по ссылке друга
 
@@ -91,8 +91,11 @@ class Settings(BaseSettings):
     seller_ogrn: str = ""  # для ИП/ООО
     seller_email: str = ""
     seller_phone: str = ""
-    legal_docs_date: date = date(2026, 10, 13)  # дата редакции оферты и политики
+    legal_docs_date: date = date(2026, 10, 14)  # дата редакции оферты и политики
     bot_username: str = ""  # подставляется сам при запуске бота; нужен, только если страницы отдаются без бота
+    # страна, где стоит сервер с базой: попадает в политику и согласие. Не Россия — значит тестовый запуск
+    # с трансграничной передачей, и документы честно об этом говорят (ч. 5 ст. 18 152-ФЗ требует хранить в РФ)
+    server_country: str = "Россия"
 
     # --- Прочее --------------------------------------------------------------
     telegram_api_base: str = ""  # свой адрес Bot API (прокси к api.telegram.org), если сервер в РФ
@@ -125,6 +128,10 @@ class Settings(BaseSettings):
     def webhook_secret_ok(self) -> bool:
         weak = {"change-me-random-string", "change-me", "secret"}
         return len(self.webhook_secret) >= 16 and self.webhook_secret not in weak
+
+    @property
+    def data_in_russia(self) -> bool:
+        return self.server_country.strip().lower() in {"россия", "рф", "russia", "ru", "российская федерация"}
 
     @property
     def payments_enabled(self) -> bool:

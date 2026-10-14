@@ -183,3 +183,26 @@ async def test_manual_payment_request_notifies_admin(client, monkeypatch):  # no
         assert [m.tg_id for m in sent] == [900] and "/grant @olya run" in sent[0].text
     finally:
         get_settings.cache_clear()
+
+
+# ------------------------------------------------------------------ документы говорят правду о том, где данные
+
+
+async def test_documents_say_where_the_data_is(client, monkeypatch):  # noqa: F811
+    from settings import get_settings
+
+    get_settings.cache_clear()
+    ru = (await client.get("/privacy")).text
+    assert "находящихся на территории Российской Федерации" in ru and "тестовый запуск" not in ru
+    monkeypatch.setenv("SERVER_COUNTRY", "Нидерланды")
+    get_settings.cache_clear()
+    try:
+        nl = (await client.get("/privacy")).text
+        assert "находятся на сервере в стране: Нидерланды" in nl
+        assert "находящихся на территории Российской Федерации" not in nl
+        consent = (await client.get("/consent")).text
+        assert consent.count("Нидерланды") >= 2 and "трансграничную передачу" in consent
+        landing = (await client.get("/")).text
+        assert "&amp;nbsp;" not in landing and "Оплатить" in landing
+    finally:
+        get_settings.cache_clear()

@@ -55,11 +55,13 @@ def page_values(src: str | None = None) -> dict[str, str]:
         "BOT_NAME": bot or "",
         "BOT_LINK": f"https://t.me/{bot}" if bot else "#",
         # кнопки «Оплатить» на сайте: бот сразу покажет тарифы и оплату (ЮKassa или перевод, пока её нет)
+        "DATA_IN_RU": "1" if s.data_in_russia else "",
+        "DATA_ABROAD": "" if s.data_in_russia else s.server_country.strip(),
         "BUY_RUN_URL": f"https://t.me/{bot}?start=buy_run" if bot else "#",
         "BUY_YEAR_URL": f"https://t.me/{bot}?start=buy_year" if bot else "#",
-        "PAY_NOTE": ("Оплата&nbsp;— внутри бота: выбираешь тариф, нажимаешь «Оплатить», и&nbsp;открывается платёжная "
-                     "страница ЮKassa&nbsp;— банковская карта, СБП и&nbsp;другие способы." if s.payments_enabled else
-                     "Оплата&nbsp;— внутри бота: выбираешь тариф, нажимаешь «Оплатить», и&nbsp;бот показывает, как "
+        "PAY_NOTE": ("Оплата\u00a0— внутри бота: выбираешь тариф, нажимаешь «Оплатить», и\u00a0открывается платёжная "
+                     "страница ЮKassa\u00a0— банковская карта, СБП и\u00a0другие способы." if s.payments_enabled else
+                     "Оплата\u00a0— внутри бота: выбираешь тариф, нажимаешь «Оплатить», и\u00a0бот показывает, как "
                      "оплатить переводом; доступ открывается, как только оплата придёт.")
                     + " Оплата разовая, без автопродления.",
         "PRICE_RUN": texts.rub(s.price_run_rub),
